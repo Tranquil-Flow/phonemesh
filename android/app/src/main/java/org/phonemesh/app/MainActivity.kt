@@ -33,6 +33,7 @@ import org.phonemesh.core.Readiness
 import org.phonemesh.core.readiness
 import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.DeliveryState
+import org.phonemesh.ble.MeshRadio
 import org.phonemesh.speech.AudioPcm
 import org.phonemesh.speech.LocalSpeech
 import org.phonemesh.speech.SharedEspeakData
@@ -43,7 +44,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-class MainActivity : Activity(), BleMeshTransport.Listener {
+class MainActivity : Activity(), MeshRadio.Listener {
     private val work=Executors.newSingleThreadExecutor()
     private val microphone by lazy { MicrophoneCapture(this) }
     private lateinit var bridge:BleMeshTransport
@@ -475,7 +476,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             bridge.scan()
         } catch(error:Exception) { radioDialog?.dismiss(); Log.w(TAG,"radio choice failed",error); note("Bluetooth indisponible.") }
     }
-    override fun onDevice(address:String,name:String) {
+    override fun onDevice(address:String,name:String,rssi:Int) {
         if(radioAdapter==null || (address !in radioDevices && radioDevices.size>=50)) return
         radioDevices[address]=name
         radioAdapter?.clear()
@@ -606,7 +607,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             outbox.removeView(deliveryRows.remove(oldest))
         }
     }
-    override fun onText(sender:String,text:String,channel:Int) {
+    override fun onText(sender:String,text:String,channel:Int,direct:Boolean) {
         if(!::inbox.isInitialized || channel!=this.channel.text.toString().toIntOrNull()) return
         try {
             val message=MessageCodec.inspectIncoming(text)

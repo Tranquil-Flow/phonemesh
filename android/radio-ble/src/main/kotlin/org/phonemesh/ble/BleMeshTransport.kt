@@ -35,20 +35,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class BleMeshTransport(
     context: Context,
-    private val listener: Listener,
-) : AutoCloseable {
-    interface Listener {
-        fun onState(connected: Boolean, detail: String)
-        fun onText(sender: String, text: String, channel: Int)
-        fun onDevice(address: String, name: String)
-
-        /**
-         * Per-packet delivery progress, correlated by the unsigned packet id returned from [send].
-         * Delivered on the main thread. ACKNOWLEDGED means the destination radio confirmed the packet,
-         * never that it was read or played. Default keeps existing listener implementations source compatible.
-         */
-        fun onDelivery(packetId: Long, state: DeliveryState, detail: String) {}
-    }
+    private val listener: MeshRadio.Listener,
+) : MeshRadio {
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -96,7 +84,7 @@ class BleMeshTransport(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device ?: return
-            postDevice(device.address, safeDeviceName(device, result.scanRecord?.deviceName))
+            postDevice(device.address, safeDeviceName(device, result.scanRecord?.deviceName), result.rssi)
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
@@ -235,7 +223,7 @@ class BleMeshTransport(
         }
     }
 
-    fun scan() {
+    override fun scan() {
         checkOpen()
         val missing = missingScanPermission()
         if (missing != null) {
@@ -267,7 +255,7 @@ class BleMeshTransport(
         }
     }
 
-    fun stopScan() {
+    override fun stopScan() {
         if (!scanning) return
         try {
             val scanner = adapter?.bluetoothLeScanner
@@ -281,7 +269,7 @@ class BleMeshTransport(
         }
     }
 
-    fun connect(address: String) {
+    override fun connect(address: String) {
         checkOpen()
         val normalized = address.trim()
         require(normalized.isNotEmpty()) { "address must not be blank" }
@@ -327,9 +315,9 @@ class BleMeshTransport(
         }
     }
 
-    fun peers(): List<RadioPeer> = synchronized(peersById) { peersById.values.toList() }
+    override fun peers(): List<RadioPeer> = synchronized(peersById) { peersById.values.toList() }
 
-    fun disconnect() {
+    override fun disconnect() {
         checkOpen()
         stopScan()
         workHandler.post { disconnectAndCleanup("Disconnected by user") }
@@ -340,7 +328,7 @@ class BleMeshTransport(
      * [Listener.onDelivery]. Never resends and never infers acknowledgement from frontend behaviour.
      * Callers that ignore the return value remain source compatible.
      */
-    fun send(text: String, destinationId: String, channel: Int): Long {
+    override fun send(text: String, destinationId: String, channel: Int): Long {
         checkOpen()
         val target = gatt
         check(ready && target != null && toRadio != null) { "Meshtastic radio is not ready" }
@@ -597,11 +585,14 @@ class BleMeshTransport(
                     if (event.id !in peersById && peersById.size >= 512) peersById.remove(peersById.keys.first())
                     peersById[event.id] = peer
                 }
+                postPeersChanged()
                 post(status.diagnostic("Node discovered ${event.id} ${event.name}"))
             }
             is RadioEvent.Text -> {
-                val ownId = localNodeNum?.let { MeshtasticProtocol.nodeId(it.toLong()) }
-                if (event.sender != ownId) postText(event.sender, event.text, event.channel)
+                val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
+                val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
+                val direct = MeshtasticProtocol.textAudience(event.to, local)
+                if (event.sender != ownId && direct != null) postText(event.sender, event.text, event.channel, direct)
             }
             is RadioEvent.QueueStatus -> {
                 val ok = event.res == 0
@@ -664,6 +655,7 @@ class BleMeshTransport(
         localNodeNum = null
         configuredHopLimit = null
         synchronized(peersById) { peersById.clear() }
+        postPeersChanged()
         wantedConfigId = null
         drainInProgress = false
         drainAgain = false
@@ -735,12 +727,23 @@ class BleMeshTransport(
         }
     }
 
-    private fun postText(sender: String, text: String, channel: Int) {
-        mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel) }
+    private fun postText(sender: String, text: String, channel: Int, direct: Boolean) {
+        mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel, direct) }
     }
 
-    private fun postDevice(address: String, name: String) {
-        mainHandler.post { if (!closed.get() && scanning) listener.onDevice(address, name) }
+    private fun postDevice(address: String, name: String, rssi: Int) {
+        mainHandler.post { if (!closed.get() && scanning) listener.onDevice(address, name, rssi) }
+    }
+
+    private val peersChangePosted = AtomicBoolean(false)
+
+    /** A radio sends hundreds of node records while configuring; the app hears about them twice a second at most. */
+    private fun postPeersChanged() {
+        if (!peersChangePosted.compareAndSet(false, true)) return
+        mainHandler.postDelayed({
+            peersChangePosted.set(false)
+            if (!closed.get()) listener.onPeersChanged()
+        }, PEERS_COALESCE_MS)
     }
 
     companion object {
@@ -748,5 +751,6 @@ class BleMeshTransport(
         private const val DEFAULT_ATT_MTU = 23
         private const val ATT_HEADER_BYTES = 3
         private const val MAX_DRAIN_READS = 64
+        private const val PEERS_COALESCE_MS = 500L
     }
 }

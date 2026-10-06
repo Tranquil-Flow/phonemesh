@@ -1,0 +1,51 @@
+package org.phonemesh.app
+
+import org.phonemesh.ble.DeliveryState
+import org.phonemesh.ble.MeshRadio
+import org.phonemesh.ble.RadioPeer
+
+/** Test radio: records what the app asks for and lets a test play the radio's side. Main thread only. */
+class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
+    data class Sent(val text: String, val destinationId: String, val channel: Int, val packetId: Long)
+
+    val sent = mutableListOf<Sent>()
+    val connects = mutableListOf<String>()
+    var scans = 0
+        private set
+    var stopScans = 0
+        private set
+    var disconnects = 0
+        private set
+    var closed = false
+        private set
+
+    /** Like BleMeshTransport: send() throws until the radio is connected and configured. */
+    var ready = false
+    var peerList: List<RadioPeer> = emptyList()
+    private var nextPacket = 1000L
+
+    override fun scan() { scans++ }
+    override fun stopScan() { stopScans++ }
+    override fun connect(address: String) { connects += address }
+    override fun disconnect() { disconnects++ }
+    override fun peers(): List<RadioPeer> = peerList
+    override fun send(text: String, destinationId: String, channel: Int): Long {
+        check(ready) { "Meshtastic radio is not ready" }
+        val id = nextPacket++
+        sent += Sent(text, destinationId, channel, id)
+        return id
+    }
+    override fun close() { closed = true }
+
+    fun connected(on: Boolean) {
+        ready = on
+        listener.onState(on, if (on) "ready" else "lost")
+    }
+    fun receive(sender: String, text: String, direct: Boolean, channel: Int = 0) = listener.onText(sender, text, channel, direct)
+    fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")
+    fun found(address: String, name: String, rssi: Int) = listener.onDevice(address, name, rssi)
+    fun setPeers(peers: List<RadioPeer>) {
+        peerList = peers
+        listener.onPeersChanged()
+    }
+}

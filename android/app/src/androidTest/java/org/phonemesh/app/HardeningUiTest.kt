@@ -61,7 +61,7 @@ class HardeningUiTest {
                 activity.onState(true,"Draining fromRadio (coalesced trigger)")
                 assertTrue(banner!!.text.startsWith("Radio : connectée"))
                 assertFalse(banner.text.contains("Draining"))
-                activity.onText("!12345678","\u0000",0)
+                activity.onText("!12345678","\u0000",0,false)
                 assertTrue(operation!!.text.startsWith("Message non pris en charge"))
                 assertTrue(banner.text.startsWith("Radio : connectée"))
                 assertTrue((views.first { it.contentDescription=="Review and send" } as Button).isEnabled)

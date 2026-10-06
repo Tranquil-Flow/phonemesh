@@ -16,6 +16,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.BleMeshTransport
+import org.phonemesh.ble.MeshRadio
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -81,12 +82,12 @@ class AppBoundaryTest {
         assertEquals(PackageManager.PERMISSION_DENIED,context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN))
         val latch=CountDownLatch(1)
         var reason=""
-        val transport=BleMeshTransport(context,object:BleMeshTransport.Listener {
+        val transport=BleMeshTransport(context,object:MeshRadio.Listener {
             override fun onState(connected:Boolean,detail:String) {
                 assertFalse(connected); reason=detail; latch.countDown()
             }
-            override fun onText(sender:String,text:String,channel:Int) { fail("Unexpected radio message") }
-            override fun onDevice(address:String,name:String) { fail("Scan ran without permission") }
+            override fun onText(sender:String,text:String,channel:Int,direct:Boolean) { fail("Unexpected radio message") }
+            override fun onDevice(address:String,name:String,rssi:Int) { fail("Scan ran without permission") }
         })
         try {
             transport.scan()

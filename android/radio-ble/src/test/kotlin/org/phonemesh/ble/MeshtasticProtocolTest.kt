@@ -66,6 +66,32 @@ class MeshtasticProtocolTest {
         assertEquals("!89abcdef", event.sender)
         assertEquals("hello", event.text)
         assertEquals(3, event.channel)
+        assertEquals(0xffffffffL, event.to)
+    }
+
+    @Test
+    fun fromRadioTextKeepsItsDestination() {
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+            .setPayload(ByteString.copyFromUtf8("salut"))
+            .build()
+        val packet = MeshProtos.MeshPacket.newBuilder()
+            .setFrom(0x0a0b0c0d)
+            .setTo(0x1234abcd)
+            .setChannel(0)
+            .setDecoded(data)
+            .build()
+        val event = MeshtasticProtocol.parseFromRadio(MeshProtos.FromRadio.newBuilder().setPacket(packet).build()) as RadioEvent.Text
+        assertEquals(0x1234abcdL, event.to)
+    }
+
+    @Test
+    fun textAudienceSeparatesDirectBroadcastAndOthers() {
+        assertEquals(false, MeshtasticProtocol.textAudience(0xffffffffL, 0x1234abcdL))
+        assertEquals(true, MeshtasticProtocol.textAudience(0x1234abcdL, 0x1234abcdL))
+        assertNull(MeshtasticProtocol.textAudience(0x0badf00dL, 0x1234abcdL))
+        assertNull(MeshtasticProtocol.textAudience(0x1234abcdL, null))
+        assertEquals(false, MeshtasticProtocol.textAudience(0xffffffffL, null))
     }
 
     @Test

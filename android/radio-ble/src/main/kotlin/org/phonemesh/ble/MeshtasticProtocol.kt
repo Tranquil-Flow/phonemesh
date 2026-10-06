@@ -96,6 +96,16 @@ internal object MeshtasticProtocol {
 
     fun nodeId(num: Long): String = "!%08x".format(num and BROADCAST_NUM)
 
+    /**
+     * Who a text was for: true = addressed to this radio (private), false = broadcast (group),
+     * null = addressed to some other radio, or private before our own number is known (not shown).
+     */
+    fun textAudience(to: Long, local: Long?): Boolean? = when {
+        to == BROADCAST_NUM -> false
+        local != null && to == local -> true
+        else -> null
+    }
+
     /** Total function: a truncated or corrupt BLE read yields null instead of throwing into the radio loop. */
     fun parseFromRadio(bytes: ByteArray): RadioEvent? = try {
         parseFromRadio(MeshProtos.FromRadio.parseFrom(bytes))
@@ -143,7 +153,7 @@ internal object MeshtasticProtocol {
             return null
         }
         val sender = nodeId(packet.`from`.toLong())
-        return RadioEvent.Text(sender, text, packet.channel)
+        return RadioEvent.Text(sender, text, packet.channel, packet.to.toLong() and BROADCAST_NUM)
     }
 
     /**
@@ -186,7 +196,7 @@ internal sealed class RadioEvent {
     data class MyInfo(val nodeNum: Int) : RadioEvent()
     data class HopLimit(val value: Int) : RadioEvent()
     data class NodeDiscovered(val nodeNum: Long, val id: String, val name: String) : RadioEvent()
-    data class Text(val sender: String, val text: String, val channel: Int) : RadioEvent()
+    data class Text(val sender: String, val text: String, val channel: Int, val to: Long) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()
     data class Routing(
         val from: Long,

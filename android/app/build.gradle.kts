@@ -12,6 +12,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testProguardFiles("proguard-rules.pro")
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,8 +20,20 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        create("minifiedDebug") {
+            initWith(getByName("debug"))
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro", "proguard-minified-debug.pro")
+            matchingFallbacks += listOf("debug")
+        }
     }
+    testBuildType = "minifiedDebug"
     packaging {
         jniLibs { useLegacyPackaging = false }
         resources { excludes += setOf("**/*.proto") }

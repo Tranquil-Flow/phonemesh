@@ -2,6 +2,7 @@ package org.phonemesh.core
 
 import org.phonemesh.core.PackRejected.Reason
 import java.io.File
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.StringReader
@@ -21,10 +22,21 @@ import java.util.zip.ZipInputStream
  * anything is written), its `SHA256SUMS` hash matches the built-in [catalog] entry for its id,
  * version and kind (unless [allowUnknown]), every file matches `SHA256SUMS` exactly, and it is not
  * older than the installed pack with the same id. Every failure throws [PackRejected] and leaves
- * nothing behind.
+ * nothing behind. Staging directories left by an install that was killed are removed when a store
+ * opens.
  */
 class PackStore(private val directory: File, private val catalog: List<CatalogEntry>,
     private val allowUnknown: Boolean = false, private val maxBytes: Long = 512L * 1024 * 1024) {
+    /**
+     * The largest archive accepted when only catalog packs are allowed (null: no archive cap): the
+     * largest catalog ZIP plus an eighth. An imported or shared archive was rebuilt on another phone,
+     * so it is not size-matched; a rebuilt Whisper Base pack with ONNX entries deflated at
+     * BEST_SPEED measured 8.2 % over its catalog size. Reading stops as soon as an archive is over.
+     */
+    val maxArchiveBytes: Long? = if (allowUnknown) null else catalog.maxOfOrNull { it.zipBytes }?.let { it + it / 8 }
+
+    init { sweepStaging() }
+
     private val engineFiles = listOf("whisper/encoder.int8.onnx", "whisper/decoder.int8.onnx", "whisper/tokens.txt")
     private val voiceFiles = listOf("tts/model.onnx", "tts/tokens.txt", "tts/espeak-ng-data/phontab",
         "tts/espeak-ng-data/phondata", "tts/espeak-ng-data/phonindex", "tts/espeak-ng-data/intonations")
@@ -42,14 +54,16 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
      * tokens live in the model metadata); every accepted `recognizerModel` is a multilingual Whisper,
      * so such an engine supports every Whisper language.
      */
-    internal fun whisperLanguages(engine: PackInfo): Set<String> =
-        engineLanguages.getOrPut(engine.root.absolutePath) {
-            runCatching {
-                engine.root.resolve("whisper/tokens.txt").useLines { lines ->
-                    lines.mapNotNull { languageToken.matchEntire(it.substringBefore(' '))?.groupValues?.get(1) }.toSet()
-                }.ifEmpty { languages }
-            }.getOrDefault(emptySet())
-        }
+    internal fun whisperLanguages(engine: PackInfo): Set<String> {
+        engineLanguages[engine.root.absolutePath]?.let { return it }
+        // A failed read is not remembered: the next check reads the file again.
+        val read = runCatching {
+            engine.root.resolve("whisper/tokens.txt").useLines { lines ->
+                lines.mapNotNull { languageToken.matchEntire(it.substringBefore(' '))?.groupValues?.get(1) }.toSet()
+            }.ifEmpty { languages }
+        }.getOrNull() ?: return emptySet()
+        return engineLanguages.putIfAbsent(engine.root.absolutePath, read) ?: read
+    }
 
     private fun forget(root: File) { engineLanguages.remove(root.absolutePath) }
 
@@ -208,13 +222,21 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
     private fun Throwable.isNoSpace(): Boolean = generateSequence(this) { it.cause }.take(8)
         .any { e -> e.message?.let { "No space" in it || "ENOSPC" in it } == true }
 
+    /** Removes staging directories that no install in this process is using (left by a killed install). */
+    private fun sweepStaging() {
+        directory.listFiles().orEmpty()
+            .filter { it.name.startsWith(STAGING) && it.absolutePath !in activeStaging }
+            .forEach { it.deleteRecursively() }
+    }
+
     fun install(input: InputStream): PackInfo {
         require(maxBytes > 0)
-        val stage = directory.resolve(".incoming-${UUID.randomUUID()}")
+        val stage = directory.resolve("$STAGING${UUID.randomUUID()}")
+        activeStaging += stage.absolutePath // before the directory exists, so a sweep never sees it unclaimed
         try {
             if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create model directory")
             if (!stage.mkdir()) throw IOException("Cannot create staging directory")
-            val names = extract(input, stage)
+            val names = extract(maxArchiveBytes?.let { CappedInputStream(input, it) } ?: input, stage)
             val info = inspect(stage, names)
             checkPin(stage, info)
             verifyChecksums(stage)
@@ -242,6 +264,8 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
                 error is IllegalArgumentException -> PackRejected(Reason.DAMAGED, "Pack incomplet ou endommagé")
                 else -> error
             }
+        } finally {
+            activeStaging -= stage.absolutePath
         }
     }
 
@@ -258,6 +282,26 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
         matching.forEach { forget(it.root) }
         return matching.isNotEmpty() && matching.map { it.root.deleteRecursively() }.all { it }
     }
+
+    private companion object {
+        const val STAGING = ".incoming-"
+        /** Staging directories of installs running in this process, across every store instance. */
+        val activeStaging: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    }
+}
+
+/** Counts the archive bytes read and rejects the archive as soon as it is larger than [cap]. */
+private class CappedInputStream(input: InputStream, private val cap: Long) : FilterInputStream(input) {
+    private var count = 0L
+    private fun add(n: Long) {
+        if (n <= 0) return
+        count += n
+        if (count > cap) throw PackRejected(Reason.UNSAFE, "Pack trop volumineux")
+    }
+    override fun read(): Int = super.read().also { if (it >= 0) add(1) }
+    override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { add(it.toLong()) }
+    override fun skip(n: Long): Long = super.skip(n).also { add(it) }
+    override fun markSupported() = false
 }
 
 /** Whether the installed packs can run the speech loop for one language, and what is missing if not. */

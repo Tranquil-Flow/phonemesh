@@ -163,4 +163,71 @@ class PackStoreTest {
         assertEquals(listOf(second.root), s.list().map { it.root })
         assertEquals(1, dir.listFiles().orEmpty().count { !it.name.startsWith(".") })
     }
+
+    /** A string of [n] pseudo-random letters: deflate shrinks it only to about 60 %. */
+    private fun noise(n: Int): String { val r = java.util.Random(7); return String(CharArray(n) { 'a' + r.nextInt(26) }) }
+    private class Counting(input: java.io.InputStream) : java.io.FilterInputStream(input) {
+        var count = 0L
+        override fun read(): Int = super.read().also { if (it >= 0) count++ }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) count += it }
+    }
+
+    @Test fun oversizeArchiveIsUnsafeBeforeItIsFullyRead() {
+        // The catalog entries here are 1 MiB ZIPs, so the cap is 1.125 MiB; this archive is about 2.4 MB.
+        val big = voice() + ("tts/model.onnx" to noise(4_000_000))
+        val (s, dir) = store(big to PackKind.VOICE)
+        val bytes = zip(big)
+        assertTrue(bytes.size > 2_000_000)
+        val input = Counting(ByteArrayInputStream(bytes))
+        rejected(PackRejected.Reason.UNSAFE) { s.install(input) }
+        assertTrue("read ${input.count} of ${bytes.size} bytes", input.count < bytes.size / 2)
+        assertTrue(dir.listFiles().orEmpty().isEmpty())
+    }
+    @Test fun archiveCapAppliesOnlyToCatalogPacks() {
+        val big = voice() + ("tts/model.onnx" to noise(4_000_000))
+        val (s, _) = store(big to PackKind.VOICE)
+        assertEquals((1L shl 20) + (1L shl 17), s.maxArchiveBytes)
+        val (open, _) = store(big to PackKind.VOICE, allowUnknown = true)
+        assertNull(open.maxArchiveBytes)
+        assertEquals("voice-fr-siwis", install(open, big).id)
+    }
+    @Test fun staleStagingDirsAreSweptWhenTheStoreOpens() {
+        val (s, dir) = store(voice() to PackKind.VOICE)
+        install(s, voice())
+        val stale = dir.resolve(".incoming-stale").apply { resolve("tts").mkdirs(); resolve("tts/model.onnx").writeText("x") }
+        PackStore(dir, emptyList())
+        assertFalse(stale.exists())
+        assertEquals(listOf("voice-fr-siwis"), s.list().map { it.id })
+    }
+    @Test fun aStagingDirStillInUseIsNotSwept() {
+        val (s, dir) = store(voice() to PackKind.VOICE)
+        val bytes = zip(voice())
+        val gate = java.util.concurrent.CountDownLatch(1)
+        // Hands over the first half of the archive, then waits until the second store has opened.
+        val slow = object : java.io.InputStream() {
+            var pos = 0
+            override fun read(): Int {
+                if (pos == bytes.size / 2) gate.await()
+                return if (pos < bytes.size) bytes[pos++].toInt() and 255 else -1
+            }
+        }
+        var result: Result<PackInfo>? = null
+        val worker = kotlin.concurrent.thread { result = runCatching { s.install(slow) } }
+        val end = System.nanoTime() + 10_000_000_000
+        while (dir.listFiles().orEmpty().none { it.name.startsWith(".incoming-") } && System.nanoTime() < end) Thread.sleep(10)
+        PackStore(dir, emptyList())
+        gate.countDown()
+        worker.join(10_000)
+        assertEquals("voice-fr-siwis", result!!.getOrThrow().id)
+    }
+    @Test fun aFailedTokensReadIsNotCached() {
+        val (s, _) = store(engine() to PackKind.ENGINE, voice() to PackKind.VOICE)
+        val tiny = install(s, engine()); install(s, voice())
+        val tokens = tiny.root.resolve("whisper/tokens.txt")
+        assertTrue(tokens.setReadable(false))
+        try {
+            assertTrue(s.readiness(null, "fr") is Readiness.UnsupportedLanguage)
+        } finally { assertTrue(tokens.setReadable(true)) }
+        assertTrue(s.readiness(null, "fr") is Readiness.Ready)
+    }
 }

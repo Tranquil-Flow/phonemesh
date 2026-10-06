@@ -86,9 +86,74 @@ The Phonemesh emulator was shut down. The phone's instrumentation-only APK and b
 | ARM-only + compressed native libs | 12240298 bytes (armeabi-v7a: 11283062 bytes) | 738108 bytes | `useLegacyPackaging = true`; ABI splits `arm64-v8a` and `armeabi-v7a` only, no universal APK; budget gate `:app:checkApkSize` (12700000 / 11700000 bytes) |
 | installed size (arm64 debug APK, emulator) | n/a | n/a | legacy packaging true: 14909084-byte APK, 45792 KB under `/data/app` (14564 KB `base.apk` + 31220 KB extracted `lib`); legacy packaging false: 33954980-byte APK, 33164 KB under `/data/app`. Compressed native libs cost about 12.6 MB of extra installed storage and save about 20 MB of download. |
 
-armeabi-v7a decode time: unmeasured (no 32-bit device); v7a APK not distributed until measured.
+armeabi-v7a: see the Fairphone 3 measurements below (32-bit process on a 64-bit phone); v7a APK not distributed until measured on a 32-bit phone.
 
 The `minifiedDebug` build keeps only the specific `kotlin.*` stdlib classes the androidx.test runner and the test sources reference (`android/app/proguard-minified-debug.pro`); new test code that uses other stdlib classes needs an entry there.
+
+### Final measurements on HEAD (Task 16, 2026-10-06)
+
+Built from `74ad921` plus the measurement test `DeviceMeasurementTest`. "Before" is commit `e0ea58f`, built in a temporary worktree. The emulator `Phonemesh_API_35` is arm64 (Apple Silicon host), so the arm64-v8a APKs stand in for the plan's x86_64 ones on both sides. Receipts are `.local/receipts/task16-*`; the host-side sampler is `.local/receipts/task16-measure.py`.
+
+| Item | Before (`e0ea58f`) | After (`74ad921`) |
+| --- | --- | --- |
+| arm64-v8a release APK (download) | 34573669 bytes | 12270750 bytes |
+| armeabi-v7a release APK (download) | 24924009 bytes | 11313514 bytes |
+| Installed app on the emulator (`du -sk` of the app's `/data/app` dir) | 34308 KB (debug, libs left in the APK) | 45944 KB (debug), 45284 KB (minifiedDebug; libs extracted, 31220 KB) |
+| English speech download | 85505570 bytes (one combined pack) | 74115322 bytes (engine 60136101 + voice 13979221) |
+| French speech download | 77652402 bytes (one combined pack) | 66470695 bytes (engine 60136101 + voice 6334594) |
+| Second language download | 77652402 or 85505570 bytes (a full combined pack) | 6334594 (fr) or 13979221 (en-US) bytes (the voice only) |
+| First install, arm64 APK + English | 120079239 bytes | 86386072 bytes |
+| First install, arm64 APK + French | 112226071 bytes | 78741445 bytes |
+| Unpacked English speech data | 140988453 bytes | 123841942 bytes (engine 103611006 + voice 20230936) |
+| Emulator cold start, median of 3 (`am start -W` TotalTime) | 545 ms (545, 574, 499; debug) | 597 ms (597, 494, 619; debug); 546 ms (546, 525, 576; minifiedDebug) |
+| Emulator peak RAM during `NativeSpeechTest`, median of 3 runs | 332509 KB (318052, 352857, 332509; debug) | 267382 KB (265527, 267382, 344981; minifiedDebug) |
+
+Pack ZIP sizes: `engine-whisper-tiny-1` 60136101 bytes, `engine-whisper-base-1` 93630372, `voice-en-US-ljspeech-1` 13979221, `voice-fr-siwis-1` 6334594, `voice-en-US-lessac-low-1` 13885501 (`task16-sizes.txt`, with SHA-256). Release APKs were re-measured by `scripts/check.sh` on HEAD (`task16-check.txt`, `APK_SIZE` lines). The release APK is unsigned and cannot be installed, so installed size is measured on the debug and minifiedDebug builds.
+
+How to read the speed and memory rows: cold start on the emulator moved by less than its run-to-run spread (494 to 619 ms), so no change in either direction is claimed. Peak RAM is `dumpsys meminfo` `TOTAL` PSS sampled every 0.5 s while the test ran, so a short peak can fall between samples; one "after" run reached 344981 KB. The test is the same round trip (synthesize then transcribe English, then French) on both sides, but the packs differ (one combined pack per language before; engine plus voice after) and the build types differ: the baseline test APK targets `debug`, the current one targets `minifiedDebug` (`testBuildType`).
+
+#### Fairphone 3 (real low-end phone)
+
+Owner-authorised test phone: Fairphone 3 (FP3), Android 10 (SDK 29), Snapdragon 632, 3.6 GB RAM, ABIs arm64-v8a and armeabi-v7a. HEAD minifiedDebug build. No microphone, playback, radio or Bluetooth use; synthesis goes to samples only. Each run of `DeviceMeasurementTest` installs the engine and the en-US ljspeech voice, synthesizes "This is a radio test. Meet me at the library." once with zero VITS noise, and decodes that clip three times. Peak RAM is the highest `dumpsys meminfo` `TOTAL` PSS sampled every 0.5 s during the run. Every run is a fresh process; values are the median of three runs.
+
+Decoders, arm64-v8a, same clip (63232 samples, PCM SHA-256 `99277baa…57622` in all six runs, the same hash as on the emulator), same voice, same build. Runs alternated current and candidate engines.
+
+| Engine | ZIP bytes | Peak RAM (3 runs) | Decode s, median per run | Decode s, median | Model load s | Transcript |
+| --- | --- | --- | --- | --- | --- | --- |
+| current (original decoder) | 60136101 | 346583 KB (346009, 346583, 350826) | 1.614, 1.838, 1.647 | 1.647 | 10.43 | identical to the input text in all 9 decodes |
+| requantized candidate | 31153380 | 454980 KB (454980, 454965, 455322) | 3.228, 2.562, 2.766 | 2.766 | 9.57 | identical to the input text in all 9 decodes |
+
+On this phone the requantized decoder uses about 108000 KB (106 MiB) more memory and decodes about 1.7 times slower than the current one; it only saves download size. Receipts: `task16-fp3-arm64-decoders-summary.txt`, per run `task16-fp3-arm64-{current,candidate}-{1,2,3}.json` and `-ram-N.txt`.
+
+arm64-v8a vs armeabi-v7a, current engine. The v7a APK was installed with `adb install --abi armeabi-v7a` (`primaryCpuAbi=armeabi-v7a`, and the test reports `Process.is64Bit() == false`). This is a 32-bit process on a 64-bit phone (Fairphone 3), not a 32-bit phone.
+
+| Measurement | arm64-v8a | armeabi-v7a (32-bit process) |
+| --- | --- | --- |
+| Cold start | not measured: the phone was locked for the whole session | not measured: the phone was locked for the whole session |
+| `DeviceMeasurementTest` peak RAM, median of 3 | 346583 KB | 253761 KB (253761, 252388, 265319) |
+| Decode s, median | 1.647 | 2.141 (per run 2.174, 2.141, 2.130) |
+| Synthesis s, median | 3.42 | 6.71 |
+| Model load s, median | 10.43 | 11.74 |
+| `NativeSpeechTest` | OK (1 test), peak 326727 KB | OK (1 test), peak 246598 KB |
+
+The v7a clip has the same length and transcript but a different PCM hash (`19e474fb…69b3cb`); 32-bit floating-point code paths do not give bit-identical synthesis. In the v7a `NativeSpeechTest` run (default VITS noise, so audio differs run to run) the French transcript repeated a fragment ("Bonjour, ceci est un message radio. Bonjour, ce"); the test passes because it checks for "bonjour". Receipts: `task16-fp3-v7a-summary.txt`, `task16-fp3-v7a-*`, `task16-fp3-arm64-native*`.
+
+armeabi-v7a: measured as a 32-bit process on a 64-bit phone (Fairphone 3); the APK installs, speaks and transcribes there. It is still not distributed until measured on a 32-bit phone, because a phone with a 32-bit CPU (older cores, less RAM) is the case the 64-bit Fairphone cannot show.
+
+#### Decisions and open items
+
+- Whisper Tiny decoder: **awaiting owner**; the default stays the original decoder. The measurements favour keeping the current decoder (lower peak RAM, faster decoding, identical transcripts on the Fairphone clip); the candidate only saves download size. Emulator (Task 9): 2 of 8 clips transcribe differently, decode time ratio 1.281, ZIP 60136101 → 31153380 bytes. Fairphone 3: identical transcript on the one English clip, decode 1.647 s → 2.766 s (ratio 1.68), peak RAM 346583 → 454980 KB.
+- espeak-ng trimming: adopted. Trimmed and full data give bit-identical samples for all four sentences in fr and en-US (Task 9 section). Every voice carries the union of the catalog languages' espeak files, and the app keeps one shared copy so removing a voice cannot break another language (Task 13).
+- English voice A/B: **awaiting owner**. The lessac-low candidate was not pursued: its ZIP is 13885501 bytes vs 13979221 bytes for ljspeech (93720 bytes, 0.7% smaller).
+- Resume after a dropped connection: observed (Task 11 section: `Range: bytes=1000000-` answered 206, pack verified and installed).
+- Low space: refused before downloading (Task 11 section: `NotEnoughSpace`, nothing enqueued).
+- Network boundary: the release dex references networking APIs only from `PackDownloads` (and its nested classes). `android/network-boundary-allowlist.txt` lists no library exceptions; `:app:checkNetworkBoundary` prints `NETWORK_BOUNDARY_OK` on HEAD (`task16-check.txt`), requires `PackDownloads` to be present, and was shown to fail on a planted `MainActivity` → `URL.openStream` call (`task12-bites.txt`).
+- APK ceilings in `android/gradle.properties` stay at 12700000 (arm64-v8a) and 11700000 (armeabi-v7a) bytes: HEAD's release APKs (12270750 and 11313514 bytes) are larger than when the ceilings were set (12240298 and 11283062), so there was nothing to tighten. Headroom is now 429250 and 386486 bytes (3.4% and 3.3% of the ceilings).
+
+#### Verification on HEAD
+
+- `scripts/check.sh`: `CHECK_OK` (ruff, 162 Python tests, JVM tests, all APK builds, lint, size and network-boundary checks; `task16-check.txt`).
+- Emulator, every class in `app/src/androidTest` in one run: `OK (30 tests)`, `"passed": true` (`task16-full-instrumentation.txt`). Packs pushed: catalog Tiny and Base engines, both catalog voices, plus the reference engine and full voices for `PackEquivalenceTest`; local pack server on port 8777 for the download tests. The two gated `PackDownloadTest` cases (connection drop, low space) skip by assumption in this run; they need a dropping server or a filled small AVD and were not repeated (results in the Task 11 section).
 
 ## Task 9 gates: espeak trimming and decoder requantization
 

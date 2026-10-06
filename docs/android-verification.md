@@ -201,3 +201,23 @@ Emulator `Phonemesh_API_35` (arm64), minified debug build, host server `android/
 **Dropped connection: resume observed.** Server started with `--drop-after 1000000`. `PackDownloadTest#resumesAfterTheConnectionDrops`, `OK (1 test)`. The server log shows the first `GET` (no `Range`) cut after 1000000 bytes, then a `GET` with `Range: bytes=1000000-` answered `206` (64, 66, 71 and 75 s later in four runs); the pack then verified and installed.
 
 **Low space.** Small AVD `Phonemesh_API_35_small` (`system-images;android-35;default;arm64-v8a`). The emulator enforces a 6 GB minimum data partition for this image (`disk.dataPartition.size=2G` and `-partition-size 2048` were both raised to 6 GB), so the partition was filled with `fallocate` in `/data/local/tmp` to about 40950 KB available. `PackDownloadTest#lowSpaceIsRefusedBeforeDownloading` (`-e lowspace 1`), `OK (1 test)`: `start()` returned `NotEnoughSpace` and nothing was enqueued. `downloadsVerifiesAndInstalls` on the same device failed only at its first assertion with `NotEnoughSpace(neededBytes=69003782, freeBytes=41934848)`.
+
+## Phase 3 sub-project 3a: UI core loop
+
+Spec: `docs/specs/2026-10-06-ui-core-loop-design.md`. Emulator `Phonemesh_API_35` (arm64), minified debug build, fake radio and fake speech injected into `AppCore`; no microphone, playback or radio transmission in automated tests.
+
+| Item | Before (Task 1 baseline) | After | Change |
+| --- | --- | --- | --- |
+| arm64-v8a release APK | 12277058 B | 12352398 B | +75340 B (budget about 150,000 B) |
+| armeabi-v7a release APK | 11319822 B | 11395158 B | +75336 B |
+| classes.dex (arm64 release) | 818484 B | 911348 B | +92864 B |
+| resources.arsc | 40 B | 15068 B | +15028 B |
+| name clips (res/raw) | none | name_fr.m4a 3831 B, name_en.m4a 3970 B | renamed by resource shrinking in the APK |
+
+- Baseline dex and `resources.arsc` were measured from a clean release build of the baseline commit, whose APK sizes match the recorded baseline to the byte.
+- `scripts/check.sh`: `CHECK_OK` on the final tree (`.local/receipts/ui-final-check.txt`).
+- Emulator, every class in `app/src/androidTest`: `OK (134 tests)` (`.local/receipts/ui-final-full.txt`), with real packs pushed and the local pack server running. Skipped by assumption: connection drop, low space, candidate decoder, single espeak variant, name-clip export, screenshot tour (runs only in the screenshot build).
+- Screen checks: every screen state passes the 48 dp, description, eight-word, technical-word and 18 sp checks (`ScreenChecksTest`). `A11yCheckTest` proves each check reports a deliberate violation. Normal builds set FLAG_SECURE on every screen; release always does (`ReleaseFlagsTest`).
+- Screenshots: `docs/screenshots-phase3/` (nine states, captured from the test-only build without FLAG_SECURE).
+- `speech-smoke` is outside the gate and did not compile before this work (`PackDownloads.kt`: unresolved `BuildConfig`); unchanged here.
+- Owner walkthrough on the Pixel: pending.

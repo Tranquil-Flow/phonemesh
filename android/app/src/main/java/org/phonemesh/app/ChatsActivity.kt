@@ -67,9 +67,12 @@ class ChatsActivity : ScreenActivity() {
             tag = "empty"
             visibility = View.GONE
             addView(Ui.icon(this@ChatsActivity, R.drawable.ic_chat, palette.muted, 64))
-            addView(Ui.text(this@ChatsActivity, getString(R.string.no_messages), palette.muted, bold = true))
+            addView(Ui.text(this@ChatsActivity, getString(R.string.no_messages), palette.muted, bold = true).apply {
+                gravity = Gravity.CENTER
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        frame.addView(emptyHint, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        frame.addView(emptyHint, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+            .apply { marginStart = pad() * 2; marginEnd = pad() * 2 })
         val add = Ui.iconButton(this, palette, R.drawable.ic_plus, getString(R.string.new_private_chat), 64, palette.background).apply {
             tag = "new_chat"
             background = Ui.circle(palette.text)
@@ -171,17 +174,18 @@ class ChatsActivity : ScreenActivity() {
             card.addView(Ui.text(this, getString(R.string.progress_percent, percent), palette.text, bold = true).apply { tag = "voice_progress" })
             return card
         }
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, pad() / 2, 0, 0) }
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
+        val full = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT) }
         if (missing.isNotEmpty()) {
             buttons.addView(Ui.button(this, palette, getString(R.string.setup_download), R.drawable.ic_download, filled = true).apply {
                 tag = "voice_download"
                 setOnClickListener { core.downloadVoice(); render() }
-            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }, full())
         }
         buttons.addView(Ui.button(this, palette, getString(R.string.setup_file), R.drawable.ic_folder).apply {
             tag = "voice_file"
             setOnClickListener { pickFile() }
-        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() / 2 })
+        }, full().apply { if (missing.isNotEmpty()) topMargin = pad() / 2 })
         card.addView(buttons)
         return card
     }
@@ -243,6 +247,7 @@ class ChatsActivity : ScreenActivity() {
         middle.addView(titleLine)
         item.last?.let { last ->
             val lastLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val hasIcon = last.status != null
             last.status?.let { status ->
                 val look = Looks.status(status, palette)
                 lastLine.addView(Looks.statusIcon(this, look, 20).apply { tag = "last_status:${chat.id}" })
@@ -256,7 +261,7 @@ class ChatsActivity : ScreenActivity() {
             lastLine.addView(Ui.content(Ui.text(this, text, palette.muted).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
-            }), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Ui.dp(this@ChatsActivity, 4) })
+            }), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { if (hasIcon) marginStart = Ui.dp(this@ChatsActivity, 4) })
             middle.addView(lastLine)
         }
         row.addView(middle, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))

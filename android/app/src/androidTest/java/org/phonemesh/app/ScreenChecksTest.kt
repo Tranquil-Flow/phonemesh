@@ -1,11 +1,13 @@
 package org.phonemesh.app
 
 import android.app.Activity
+import android.view.WindowManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -38,4 +40,16 @@ class ScreenChecksTest {
     @Test fun recordingLocked() = check(minTargets = 2) { ScreenStates.recordingLocked() }
     @Test fun radio() = check(minTargets = 3, minRows = 2) { ScreenStates.radio() }
     @Test fun settings() = check(minTargets = 3) { ScreenStates.settings() }
+
+    @Test fun everyScreenIsSecure() {
+        assumeTrue("the screenshot build has no FLAG_SECURE", BuildConfig.SECURE_SCREENS)
+        for ((name, state) in ScreenStates.all) {
+            activity = state()
+            val shown = activity!!
+            val flags = TestCore.onMain { shown.window.attributes.flags }
+            assertTrue("$name lacks FLAG_SECURE", flags and WindowManager.LayoutParams.FLAG_SECURE != 0)
+            Views.finish(activity)
+            activity = null
+        }
+    }
 }

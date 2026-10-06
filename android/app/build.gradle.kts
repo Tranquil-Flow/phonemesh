@@ -2,6 +2,9 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+// Test-only screenshot build: `-Pphonemesh.screenshots=true` drops FLAG_SECURE from debug builds so
+// ScreenshotTour can capture the screens. Release always keeps it (ReleaseFlagsTest).
+val screenshotBuild = project.findProperty("phonemesh.screenshots") == "true"
 android {
     namespace = "org.phonemesh.app"
     compileSdk = 35
@@ -14,6 +17,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-rules.pro")
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
+        buildConfigField("boolean", "SECURE_SCREENS", "true")
         buildConfigField("String", "PACK_BASE_URL", "\"${project.findProperty("phonemesh.packBaseUrl") ?: "https://packs.invalid/"}\"")
     }
     buildFeatures { buildConfig = true }
@@ -25,6 +29,7 @@ android {
     buildTypes {
         debug {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
+            buildConfigField("boolean", "SECURE_SCREENS", (!screenshotBuild).toString())
             buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8777/\"")
         }
         release {

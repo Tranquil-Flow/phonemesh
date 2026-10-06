@@ -12,4 +12,7 @@ class ReleaseFlagsTest {
     /** Release builds never fetch packs over cleartext (the placeholder is `https://packs.invalid/`). */
     @Test fun releasePackBaseUrlIsHttps() =
         assertTrue(BuildConfig.PACK_BASE_URL, BuildConfig.PACK_BASE_URL.startsWith("https://"))
+
+    /** Only the test-only screenshot build may show screens to screenshots and recents thumbnails. */
+    @Test fun releaseScreensAreSecure() = assertTrue(BuildConfig.SECURE_SCREENS)
 }

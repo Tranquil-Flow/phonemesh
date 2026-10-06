@@ -50,7 +50,10 @@ class RadioActivity : ScreenActivity() {
             gravity = Gravity.CENTER_VERTICAL
             tag = "searching"
             minimumHeight = Ui.dp(this@RadioActivity, 56)
-            addView(ProgressBar(this@RadioActivity).apply { isIndeterminate = true },
+            addView(ProgressBar(this@RadioActivity).apply {
+                isIndeterminate = true
+                indeterminateTintList = android.content.res.ColorStateList.valueOf(palette.text)
+            },
                 LinearLayout.LayoutParams(Ui.dp(this@RadioActivity, 32), Ui.dp(this@RadioActivity, 32)))
             addView(Ui.text(this@RadioActivity, getString(R.string.radio_searching), palette.text, bold = true).apply {
                 setPadding(pad() / 2, 0, 0, 0)

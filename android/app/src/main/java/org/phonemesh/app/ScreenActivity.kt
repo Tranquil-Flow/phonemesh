@@ -28,7 +28,7 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (BuildConfig.SECURE_SCREENS) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         palette = Palette(this)
         window.decorView.setBackgroundColor(palette.background)
     }

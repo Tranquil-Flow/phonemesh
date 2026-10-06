@@ -58,6 +58,33 @@ def test_missing_voice_file_fails_the_build():
         bp.espeak_keep(FULL - {"lang/roa/fr"}, "fr")
 
 
+CORE = {"phontab", "phonindex", "phondata", "intonations"}
+CATALOG_VOICES = ("fr", "en")
+
+
+def test_voice_pack_keeps_the_union_of_catalog_languages():
+    union = CORE | {"fr_dict", "lang/roa/fr", "en_dict", "lang/gmw/en"}
+    assert bp.espeak_keep(FULL, "fr", CATALOG_VOICES) == union
+    assert bp.espeak_keep(FULL, "en", CATALOG_VOICES) == union
+
+
+def test_en_us_voice_matches_lang_gmw_en_us_case_insensitively():
+    assert bp.espeak_keep(FULL, "en-us", CATALOG_VOICES) == CORE | {
+        "fr_dict",
+        "lang/roa/fr",
+        "en_dict",
+        "lang/gmw/en",
+        "lang/gmw/en-US",
+    }
+
+
+def test_missing_file_of_another_catalog_language_fails_the_build():
+    with pytest.raises(ValueError, match="en_dict"):
+        bp.espeak_keep(FULL - {"en_dict"}, "fr", CATALOG_VOICES)
+    with pytest.raises(ValueError, match="lang/.*/en"):
+        bp.espeak_keep(FULL - {"lang/gmw/en"}, "fr", CATALOG_VOICES)
+
+
 def test_manifest_lists_every_file_but_itself_sorted():
     text = bp.manifest({"b": b"2", "a": b"1", "SHA256SUMS": b"x"}).decode()
     lines = text.splitlines()

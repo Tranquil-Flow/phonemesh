@@ -12,6 +12,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.phonemesh.core.GeneratedPackCatalog
+import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackStore
 import org.phonemesh.speech.LocalSpeech
 import org.phonemesh.speech.SpeechPack
@@ -45,20 +47,29 @@ class SpeechComparisonTest {
     )
 
     private val models = listOf(
-        Model("tiny", "phonemesh-{tag}-whisper-tiny-piper-{voice}-int8.zip"),
-        Model("base", "phonemesh-{tag}-whisper-base-piper-{voice}-int8.zip"),
+        Model("tiny", "phonemesh-engine-whisper-tiny-1.zip"),
+        Model("base", "phonemesh-engine-whisper-base-1.zip"),
     )
 
-    private data class Model(val id: String, val pattern: String)
+    private data class Model(val id: String, val engineArchive: String)
 
     /** Deterministic, reproducible attenuation; keeps audio comfortably above LocalSpeech silence floors. */
     private fun attenuate(samples: FloatArray, gain: Float): FloatArray =
         FloatArray(samples.size) { (samples[it] * gain).toFloat() }
 
-    private fun archiveName(model: Model, tag: String): String {
+    private fun voiceArchive(tag: String): String {
         val voice = if (tag == "en-US") "ljspeech" else "siwis"
-        return model.pattern.replace("{tag}", tag).replace("{voice}", voice)
+        return "phonemesh-voice-$tag-$voice-1.zip"
     }
+
+    private fun install(store: PackStore, sourceDir: File, name: String): PackInfo {
+        val archive = File(sourceDir, name)
+        assertTrue("Missing model pack ${archive.name}", archive.isFile)
+        return archive.inputStream().use { store.install(it) }
+    }
+
+    private fun speechPack(engine: PackInfo, voice: PackInfo) =
+        SpeechPack(engine.root, voice.root, checkNotNull(voice.languageTag), checkNotNull(voice.whisperLanguage))
 
     @Test
     fun tinyVersusBaseOnFixedSyntheticInput() {
@@ -70,7 +81,7 @@ class SpeechComparisonTest {
         val sourceDir = checkNotNull(context.getExternalFilesDir(null))
         val benchmarkDir = File(context.filesDir, "speech-benchmark-packs")
         benchmarkDir.deleteRecursively()
-        val store = PackStore(benchmarkDir)
+        val store = PackStore(benchmarkDir, GeneratedPackCatalog.entries)
         val results = JSONArray()
         var decodeCalls = 0
 
@@ -80,11 +91,10 @@ class SpeechComparisonTest {
             for (model in models) {
                 // Only the tiny Piper voice is needed to create the fixed input; base reuses it.
                 if (model.id != "tiny") continue
+                val engine = install(store, sourceDir, model.engineArchive)
                 for (tag in listOf("en-US", "fr")) {
-                    val archive = File(sourceDir, archiveName(model, tag))
-                    assertTrue("Missing model pack ${archive.name}", archive.isFile)
-                    val pack = archive.inputStream().use { store.install(it) }
-                    LocalSpeech(SpeechPack(pack.root, pack.languageTag, pack.whisperLanguage)).use { speech ->
+                    val voice = install(store, sourceDir, voiceArchive(tag))
+                    LocalSpeech(speechPack(engine, voice)).use { speech ->
                         for (s in sentences.filter { it.tag == tag }) {
                             val audio = speech.synthesize(s.text)
                             clips.add(s to audio)
@@ -98,12 +108,11 @@ class SpeechComparisonTest {
             // Pass 2: decode the identical samples with each recognizer, sequentially.
             for (model in models) {
                 var loadSecondsTotal = 0.0
+                val engine = install(store, sourceDir, model.engineArchive)
                 for (tag in listOf("en-US", "fr")) {
-                    val archive = File(sourceDir, archiveName(model, tag))
-                    assertTrue("Missing model pack ${archive.name}", archive.isFile)
-                    val pack = archive.inputStream().use { store.install(it) }
+                    val voice = install(store, sourceDir, voiceArchive(tag))
                     val loadStart = System.nanoTime()
-                    LocalSpeech(SpeechPack(pack.root, pack.languageTag, pack.whisperLanguage)).use { speech ->
+                    LocalSpeech(speechPack(engine, voice)).use { speech ->
                         val loadSeconds = (System.nanoTime() - loadStart) / 1e9
                         loadSecondsTotal += loadSeconds
                         for ((sentence, audio) in clips.filter { it.first.tag == tag }) {

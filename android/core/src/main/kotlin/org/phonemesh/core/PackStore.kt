@@ -1,117 +1,285 @@
 package org.phonemesh.core
 
+import org.phonemesh.core.PackRejected.Reason
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+import java.io.StringReader
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
+import java.security.MessageDigest
 import java.util.Properties
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipInputStream
-import java.security.MessageDigest
 
-data class PackInfo(val root: File, val languageTag: String, val whisperLanguage: String, val label: String,
-    val recognizerModel: String = "whisper-tiny")
-
-class PackStore(private val directory: File, private val maxBytes: Long = 512L * 1024 * 1024) {
-    private val required = listOf("whisper/encoder.int8.onnx", "whisper/decoder.int8.onnx",
-        "whisper/tokens.txt", "tts/model.onnx", "tts/tokens.txt", "tts/espeak-ng-data/phontab",
+/**
+ * Installs and lists format-2 engine and voice packs.
+ *
+ * An archive is accepted only if every entry is inside the format-2 allowlist (checked before
+ * anything is written), its `SHA256SUMS` hash matches the built-in [catalog] entry for its id,
+ * version and kind (unless [allowUnknown]), every file matches `SHA256SUMS` exactly, and it is not
+ * older than the installed pack with the same id. Every failure throws [PackRejected] and leaves
+ * nothing behind.
+ */
+class PackStore(private val directory: File, private val catalog: List<CatalogEntry>,
+    private val allowUnknown: Boolean = false, private val maxBytes: Long = 512L * 1024 * 1024) {
+    private val engineFiles = listOf("whisper/encoder.int8.onnx", "whisper/decoder.int8.onnx", "whisper/tokens.txt")
+    private val voiceFiles = listOf("tts/model.onnx", "tts/tokens.txt", "tts/espeak-ng-data/phontab",
         "tts/espeak-ng-data/phondata", "tts/espeak-ng-data/phonindex", "tts/espeak-ng-data/intonations")
+    private val recognizers = setOf("whisper-tiny", "whisper-base")
+    private val idPattern = Regex("^[A-Za-z0-9-]{3,64}$")
     private val languages = ("en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw gl mr pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt haw ln ha ba jw su").split(' ').toSet()
-    private fun inspect(root: File): PackInfo {
-        val manifest=root.resolve("pack.properties")
-        require(manifest.isFile && manifest.length() in 1..65536) { "Missing pack.properties" }
-        val props=Properties().apply { manifest.inputStream().use { load(it) } }
-        require(props.getProperty("format")=="1") { "Unsupported model pack version" }
-        val tag=props.getProperty("languageTag") ?: error("Missing languageTag")
-        require(MessageCodec.canonical(tag)==tag) { "Pack language must be canonical" }
-        val whisper=props.getProperty("whisperLanguage") ?: error("Missing whisperLanguage")
-        require(whisper in languages && tag.substringBefore('-')==whisper) { "Unsupported Whisper language" }
-        val label=props.getProperty("label",tag)
-        require(label.isNotBlank() && label.length<=80) { "Invalid pack label" }
-        required.forEach { path ->
-            val file=root.resolve(path)
-            require(file.isFile && file.length()>0) { "Missing model asset: $path" }
-            require(file.canonicalPath.startsWith(root.canonicalPath+File.separator)) { "Asset escaped pack root" }
+
+    /** Whisper language codes per engine root path, read once from `whisper/tokens.txt`. */
+    private val engineLanguages = ConcurrentHashMap<String, Set<String>>()
+    private val languageToken = Regex("^<\\|([a-z]{2,3})\\|>$")
+
+    /**
+     * Languages an engine can transcribe. A `tokens.txt` that lists `<|xx|>` language tokens limits
+     * the engine to those. The sherpa-onnx Whisper exports hold only the BPE tokens (the language
+     * tokens live in the model metadata); every accepted `recognizerModel` is a multilingual Whisper,
+     * so such an engine supports every Whisper language.
+     */
+    internal fun whisperLanguages(engine: PackInfo): Set<String> =
+        engineLanguages.getOrPut(engine.root.absolutePath) {
+            runCatching {
+                engine.root.resolve("whisper/tokens.txt").useLines { lines ->
+                    lines.mapNotNull { languageToken.matchEntire(it.substringBefore(' '))?.groupValues?.get(1) }.toSet()
+                }.ifEmpty { languages }
+            }.getOrDefault(emptySet())
         }
-        require(root.resolve("tts/espeak-ng-data/lang").walkTopDown().any { it.isFile && it.length()>0 }) {
-            "Missing eSpeak language data"
+
+    private fun forget(root: File) { engineLanguages.remove(root.absolutePath) }
+
+    private fun wrong(message: String): Nothing = throw PackRejected(Reason.WRONG_FILE, message)
+    private fun unsafe(message: String): Nothing = throw PackRejected(Reason.UNSAFE, message)
+    private fun damaged(message: String): Nothing = throw PackRejected(Reason.DAMAGED, message)
+
+    private fun readProperties(root: File): Properties {
+        val file = root.resolve("pack.properties")
+        if (!file.isFile || file.length() !in 1..65536) wrong("Ce fichier n'est pas un pack Phonemesh")
+        val text = try {
+            Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(file.readBytes())).toString()
+        } catch (e: CharacterCodingException) {
+            wrong("Description du pack illisible")
         }
-        val recognizer=props.getProperty("recognizerModel","whisper-tiny")
-        require(recognizer in setOf("whisper-tiny","whisper-base")) { "Unsupported recognizer model" }
-        return PackInfo(root,tag,whisper,label,recognizer)
+        return Properties().apply { load(StringReader(text)) }
     }
-    private fun verifyChecksums(root:File) {
-        val manifest=root.resolve("SHA256SUMS")
-        require(manifest.isFile && manifest.length() in 1..1048576) { "Missing bounded SHA256SUMS manifest" }
-        val actual=root.walkTopDown().filter { it.isFile }.map { it.relativeTo(root).invariantSeparatorsPath }
-            .filter { it=="pack.properties" || it.startsWith("whisper/") || it.startsWith("tts/") }.toSet()
-        val expected=linkedMapOf<String,String>()
-        manifest.useLines { lines -> lines.filter { it.isNotBlank() }.forEach { line ->
-            val fields=line.split("  ",limit=2)
-            require(fields.size==2 && Regex("[a-fA-F0-9]{64}").matches(fields[0])) { "Invalid checksum entry" }
-            require(fields[1] in actual && expected.put(fields[1],fields[0].lowercase())==null) { "Unknown or duplicate checksum path" }
-        } }
-        require(expected.keys==actual) { "Checksum manifest must cover every runtime asset" }
-        expected.forEach { (path,digest) ->
-            val hash=MessageDigest.getInstance("SHA-256")
-            root.resolve(path).inputStream().use { input ->
-                val buffer=ByteArray(65536)
-                while(true) { val n=input.read(buffer); if(n<0) break; hash.update(buffer,0,n) }
+
+    private fun kindOf(props: Properties): PackKind {
+        if (props.getProperty("format") != "2") wrong("Ancien format de pack non pris en charge")
+        return when (props.getProperty("kind")) {
+            "engine" -> PackKind.ENGINE
+            "voice" -> PackKind.VOICE
+            else -> wrong("Type de pack inconnu")
+        }
+    }
+
+    /** Validates `pack.properties` and the required files of an unpacked pack; no hashing. */
+    private fun describe(root: File, props: Properties, kind: PackKind): PackInfo {
+        val id = props.getProperty("id")?.takeIf { idPattern.matches(it) } ?: wrong("Identifiant de pack invalide")
+        val version = props.getProperty("version")?.toIntOrNull()?.takeIf { it > 0 } ?: wrong("Version de pack invalide")
+        val label = props.getProperty("label")?.takeIf { it.isNotBlank() && it.length <= 80 } ?: wrong("Nom de pack invalide")
+        val info = when (kind) {
+            PackKind.ENGINE -> {
+                val model = props.getProperty("recognizerModel")?.takeIf { it in recognizers }
+                    ?: wrong("Moteur vocal non pris en charge")
+                PackInfo(root, id, version, kind, label, recognizerModel = model)
             }
-            val observed=hash.digest().joinToString("") { (it.toInt() and 255).toString(16).padStart(2,'0') }
-            require(observed==digest) { "Model checksum mismatch: $path" }
+            PackKind.VOICE -> {
+                val tag = props.getProperty("languageTag") ?: wrong("Langue du pack manquante")
+                if (runCatching { MessageCodec.canonical(tag) }.getOrNull() != tag) wrong("Langue du pack invalide")
+                val whisper = props.getProperty("whisperLanguage") ?: wrong("Langue du pack manquante")
+                if (whisper !in languages || tag.substringBefore('-') != whisper) wrong("Langue du pack non prise en charge")
+                PackInfo(root, id, version, kind, label, languageTag = tag, whisperLanguage = whisper)
+            }
+        }
+        val rootPath = root.canonicalPath + File.separator
+        (if (kind == PackKind.ENGINE) engineFiles else voiceFiles).forEach { path ->
+            val file = root.resolve(path)
+            if (!file.isFile || file.length() <= 0) wrong("Fichier manquant dans le pack : $path")
+            if (!file.canonicalPath.startsWith(rootPath)) unsafe("Fichier hors du pack : $path")
+        }
+        if (kind == PackKind.VOICE &&
+            root.resolve("tts/espeak-ng-data/lang").walkTopDown().none { it.isFile && it.length() > 0 }) {
+            wrong("Données de prononciation manquantes")
+        }
+        return info
+    }
+
+    /** Full validation of a freshly extracted archive whose entry names are [names]. */
+    private fun inspect(stage: File, names: List<String>): PackInfo {
+        val props = readProperties(stage)
+        val kind = kindOf(props)
+        names.firstOrNull { !PackFormat.allowed(it, kind) }?.let { unsafe("Fichier inattendu dans le pack") }
+        val info = describe(stage, props, kind)
+        val sums = stage.resolve("SHA256SUMS")
+        if (!sums.isFile || sums.length() !in 1..1048576) wrong("Liste de contrôle du pack manquante")
+        return info
+    }
+
+    private fun inspectInstalled(root: File): PackInfo {
+        val props = readProperties(root)
+        return describe(root, props, kindOf(props))
+    }
+
+    private fun sha256(file: File): String {
+        val hash = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(65536)
+            while (true) { val n = input.read(buffer); if (n < 0) break; hash.update(buffer, 0, n) }
+        }
+        return hash.digest().joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+    }
+
+    /** The pack's `SHA256SUMS` must be the one pinned in the catalog for this id, version and kind. */
+    private fun checkPin(stage: File, info: PackInfo) {
+        if (allowUnknown) return
+        val pinned = catalog.firstOrNull { it.id == info.id && it.version == info.version && it.kind == info.kind }
+        if (pinned == null || !pinned.manifestSha256.equals(sha256(stage.resolve("SHA256SUMS")), ignoreCase = true)) {
+            throw PackRejected(Reason.UNKNOWN_PACK, "Pack inconnu de cette version de l'application")
         }
     }
-    fun install(input: InputStream): PackInfo {
-        require(maxBytes>0)
-        check(directory.exists() || directory.mkdirs()) { "Cannot create model directory" }
-        val id=UUID.randomUUID().toString()
-        val stage=directory.resolve(".incoming-$id")
-        check(stage.mkdir())
-        try {
-            var total=0L
-            var count=0
-            val seen=HashSet<String>()
-            ZipInputStream(input).use { zip ->
-                while(true) {
-                    val entry=zip.nextEntry ?: break
-                    require(++count<=5000) { "Too many archive entries" }
-                    val name=entry.name
-                    require(name.length<=512 && name.split('/').size<=16) { "Archive path is too deep or long" }
-                    require(name.isNotEmpty() && !name.startsWith('/') && '\\' !in name && '\u0000' !in name &&
-                        name.split('/').none { it==".." || it=="." }) { "Unsafe archive path" }
-                    require(seen.add(name.trimEnd('/'))) { "Duplicate archive entry" }
-                    val file=stage.resolve(name)
-                    require(file.canonicalPath.startsWith(stage.canonicalPath+File.separator)) { "Archive path escaped root" }
-                    if(entry.isDirectory) {
-                        check(file.isDirectory || file.mkdirs())
-                    } else {
-                        check(file.parentFile.isDirectory || file.parentFile.mkdirs())
-                        var fileBytes=0L
-                        file.outputStream().use { out ->
-                            val buffer=ByteArray(32768)
-                            while(true) {
-                                val n=zip.read(buffer)
-                                if(n<0) break
-                                total+=n; fileBytes+=n
-                                require(total<=maxBytes && fileBytes<=256L*1024*1024) { "Model archive is too large" }
-                                out.write(buffer,0,n)
-                            }
+
+    /** `SHA256SUMS` must list exactly the extracted files (except itself), each with a matching digest. */
+    private fun verifyChecksums(root: File) {
+        val actual = root.walkTopDown().filter { it.isFile }.map { it.relativeTo(root).invariantSeparatorsPath }
+            .filter { it != "SHA256SUMS" }.toSet()
+        val expected = linkedMapOf<String, String>()
+        root.resolve("SHA256SUMS").useLines { lines -> lines.filter { it.isNotBlank() }.forEach { line ->
+            val fields = line.split("  ", limit = 2)
+            if (fields.size != 2 || !Regex("[a-fA-F0-9]{64}").matches(fields[0])) damaged("Liste de contrôle invalide")
+            if (fields[1] !in actual || expected.put(fields[1], fields[0].lowercase()) != null) {
+                damaged("Liste de contrôle incohérente")
+            }
+        } }
+        if (expected.keys != actual) damaged("Liste de contrôle incomplète")
+        expected.forEach { (path, digest) ->
+            if (sha256(root.resolve(path)) != digest) damaged("Fichier endommagé : $path")
+        }
+    }
+
+    /** Extracts [input] into [stage], refusing unsafe or non-allowlisted entries before writing them. */
+    private fun extract(input: InputStream, stage: File): List<String> {
+        var total = 0L
+        var count = 0
+        val seen = HashSet<String>()
+        val names = ArrayList<String>()
+        val stagePath = stage.canonicalPath + File.separator
+        ZipInputStream(input).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                if (++count > 5000) unsafe("Trop de fichiers dans le pack")
+                val name = entry.name
+                if (name.length > 512 || name.split('/').size > 16) unsafe("Chemin trop long dans le pack")
+                if (name.isEmpty() || name.startsWith('/') || '\\' in name || '\u0000' in name ||
+                    name.split('/').any { it == ".." || it == "." }) unsafe("Chemin dangereux dans le pack")
+                if (!seen.add(name.trimEnd('/'))) unsafe("Fichier en double dans le pack")
+                if (!PackFormat.plausible(name)) unsafe("Fichier inattendu dans le pack")
+                val file = stage.resolve(name)
+                if (!file.canonicalPath.startsWith(stagePath)) unsafe("Chemin hors du pack")
+                names += name
+                if (entry.isDirectory) {
+                    if (!file.isDirectory && !file.mkdirs()) unsafe("Chemin en conflit dans le pack")
+                } else {
+                    val parent = file.parentFile
+                    if (!parent.isDirectory && !parent.mkdirs()) unsafe("Chemin en conflit dans le pack")
+                    var fileBytes = 0L
+                    file.outputStream().use { out ->
+                        val buffer = ByteArray(32768)
+                        while (true) {
+                            val n = zip.read(buffer)
+                            if (n < 0) break
+                            total += n; fileBytes += n
+                            if (total > maxBytes || fileBytes > 256L * 1024 * 1024) unsafe("Pack trop volumineux")
+                            out.write(buffer, 0, n)
                         }
                     }
-                    zip.closeEntry()
                 }
+                zip.closeEntry()
             }
-            val checked=inspect(stage)
+        }
+        return names
+    }
+
+    private fun Throwable.isNoSpace(): Boolean = generateSequence(this) { it.cause }.take(8)
+        .any { e -> e.message?.let { "No space" in it || "ENOSPC" in it } == true }
+
+    fun install(input: InputStream): PackInfo {
+        require(maxBytes > 0)
+        val stage = directory.resolve(".incoming-${UUID.randomUUID()}")
+        try {
+            if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create model directory")
+            if (!stage.mkdir()) throw IOException("Cannot create staging directory")
+            val names = extract(input, stage)
+            val info = inspect(stage, names)
+            checkPin(stage, info)
             verifyChecksums(stage)
-            val ready=directory.resolve(id)
-            check(stage.renameTo(ready)) { "Could not publish model pack" }
-            return checked.copy(root=ready)
-        } catch(error: Exception) {
+            val existing = installed().filter { it.id == info.id }
+            existing.firstOrNull { it.version > info.version }?.let {
+                throw PackRejected(Reason.OLDER_VERSION, "Une version plus récente de ce pack est déjà installée")
+            }
+            val manifest = sha256(stage.resolve("SHA256SUMS"))
+            existing.firstOrNull { it.version == info.version &&
+                runCatching { sha256(it.root.resolve("SHA256SUMS")) }.getOrNull() == manifest }?.let { same ->
+                stage.deleteRecursively()
+                return same
+            }
+            // A same-version pack with another manifest is replaced by this verified one.
+            val ready = directory.resolve(UUID.randomUUID().toString())
+            if (!stage.renameTo(ready)) throw IOException("Could not publish model pack")
+            existing.forEach { forget(it.root); it.root.deleteRecursively() } // Older or superseded copies of this pack only.
+            return info.copy(root = ready)
+        } catch (error: Throwable) {
             stage.deleteRecursively() // Only this failed import's newly-created staging files.
-            throw error
+            throw when {
+                error is PackRejected -> error
+                error.isNoSpace() -> PackRejected(Reason.NO_SPACE, "Espace de stockage insuffisant")
+                error is IOException -> PackRejected(Reason.DAMAGED, "Pack incomplet ou endommagé")
+                error is IllegalArgumentException -> PackRejected(Reason.DAMAGED, "Pack incomplet ou endommagé")
+                else -> error
+            }
         }
     }
-    fun list(): List<PackInfo> = directory.listFiles().orEmpty()
+
+    /** Every installed pack directory that still parses, including stale duplicates of one id. */
+    private fun installed(): List<PackInfo> = directory.listFiles().orEmpty()
         .filter { it.isDirectory && !it.name.startsWith('.') }
-        .mapNotNull { runCatching { inspect(it) }.getOrNull() }
-        .sortedBy { it.label }
+        .mapNotNull { runCatching { inspectInstalled(it) }.getOrNull() }
+
+    fun list(): List<PackInfo> = installed().groupBy { it.id }.values.map { same -> same.maxBy { it.version } }
+        .sortedWith(compareBy({ it.kind }, { it.label }))
+
+    fun remove(id: String): Boolean {
+        val matching = installed().filter { it.id == id }
+        matching.forEach { forget(it.root) }
+        return matching.isNotEmpty() && matching.map { it.root.deleteRecursively() }.all { it }
+    }
+}
+
+/** Whether the installed packs can run the speech loop for one language, and what is missing if not. */
+sealed interface Readiness {
+    data class Ready(val engine: PackInfo, val voice: PackInfo) : Readiness
+    object MissingEngine : Readiness
+    data class MissingVoice(val languageTag: String) : Readiness
+    data class UnsupportedLanguage(val engine: PackInfo, val voice: PackInfo) : Readiness
+}
+
+/**
+ * Picks the engine with [engineId] (else Whisper Tiny, else any installed engine) and the first voice
+ * for [languageTag], and checks that the engine's tokens include the voice's Whisper language.
+ */
+fun PackStore.readiness(engineId: String?, languageTag: String): Readiness {
+    val packs = list()
+    val engines = packs.filter { it.kind == PackKind.ENGINE }
+    val engine = engines.firstOrNull { it.id == engineId }
+        ?: engines.firstOrNull { it.id == "engine-whisper-tiny" }
+        ?: engines.firstOrNull()
+        ?: return Readiness.MissingEngine
+    val voice = packs.firstOrNull { it.kind == PackKind.VOICE && it.languageTag == languageTag }
+        ?: return Readiness.MissingVoice(languageTag)
+    return if (voice.whisperLanguage in whisperLanguages(engine)) Readiness.Ready(engine, voice) else Readiness.UnsupportedLanguage(engine, voice)
 }

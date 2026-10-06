@@ -16,18 +16,19 @@ import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
- * Local, offline speech model pack.
+ * Local, offline speech models: one engine pack (Whisper) and one voice pack (Piper).
  *
  * Required fixed layout:
- *   root/whisper/encoder.int8.onnx
- *   root/whisper/decoder.int8.onnx
- *   root/whisper/tokens.txt
- *   root/tts/model.onnx
- *   root/tts/tokens.txt
- *   root/tts/espeak-ng-data/
+ *   engineRoot/whisper/encoder.int8.onnx
+ *   engineRoot/whisper/decoder.int8.onnx
+ *   engineRoot/whisper/tokens.txt
+ *   voiceRoot/tts/model.onnx
+ *   voiceRoot/tts/tokens.txt
+ *   voiceRoot/tts/espeak-ng-data/
  */
 data class SpeechPack(
-    val root: File,
+    val engineRoot: File,
+    val voiceRoot: File,
     val languageTag: String,
     val whisperLanguage: String,
 )
@@ -222,7 +223,8 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
     }
 
     private data class PackPaths(
-        val root: File,
+        val engineRoot: File,
+        val voiceRoot: File,
         val languageTag: String,
         val whisperEncoder: File,
         val whisperDecoder: File,
@@ -242,19 +244,19 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
                     "whisperLanguage must be a language code, not a path"
                 }
 
-                val root = pack.root.canonicalFile
-                require(root.isDirectory) { "Speech pack root is not a directory: ${root.path}" }
-                require(root.canRead()) { "Speech pack root is not readable: ${root.path}" }
+                val engineRoot = pack.engineRoot.requiredRoot("engine")
+                val voiceRoot = pack.voiceRoot.requiredRoot("voice")
 
-                val whisperEncoder = root.requiredFile("whisper encoder", "whisper", "encoder.int8.onnx")
-                val whisperDecoder = root.requiredFile("whisper decoder", "whisper", "decoder.int8.onnx")
-                val whisperTokens = root.requiredFile("whisper tokens", "whisper", "tokens.txt")
-                val ttsModel = root.requiredFile("Piper/VITS model", "tts", "model.onnx")
-                val ttsTokens = root.requiredFile("Piper/VITS tokens", "tts", "tokens.txt")
-                val espeakData = root.requiredDirectory("espeak-ng-data", "tts", "espeak-ng-data")
+                val whisperEncoder = engineRoot.requiredFile("whisper encoder", "whisper", "encoder.int8.onnx")
+                val whisperDecoder = engineRoot.requiredFile("whisper decoder", "whisper", "decoder.int8.onnx")
+                val whisperTokens = engineRoot.requiredFile("whisper tokens", "whisper", "tokens.txt")
+                val ttsModel = voiceRoot.requiredFile("Piper/VITS model", "tts", "model.onnx")
+                val ttsTokens = voiceRoot.requiredFile("Piper/VITS tokens", "tts", "tokens.txt")
+                val espeakData = voiceRoot.requiredDirectory("espeak-ng-data", "tts", "espeak-ng-data")
 
                 return PackPaths(
-                    root = root,
+                    engineRoot = engineRoot,
+                    voiceRoot = voiceRoot,
                     languageTag = pack.languageTag,
                     whisperEncoder = whisperEncoder,
                     whisperDecoder = whisperDecoder,
@@ -263,6 +265,13 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
                     ttsTokens = ttsTokens,
                     espeakData = espeakData,
                 )
+            }
+
+            private fun File.requiredRoot(label: String): File {
+                val root = canonicalFile
+                require(root.isDirectory) { "Speech $label pack root is not a directory: ${root.path}" }
+                require(root.canRead()) { "Speech $label pack root is not readable: ${root.path}" }
+                return root
             }
 
             private fun File.requiredFile(label: String, vararg segments: String): File {

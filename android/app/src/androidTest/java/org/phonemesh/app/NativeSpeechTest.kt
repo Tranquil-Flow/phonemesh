@@ -7,7 +7,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.phonemesh.core.GeneratedPackCatalog
+import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackStore
+import org.phonemesh.core.Readiness
+import org.phonemesh.core.readiness
 import org.phonemesh.speech.LocalSpeech
 import org.phonemesh.speech.SpeechPack
 import java.io.File
@@ -19,16 +23,22 @@ class NativeSpeechTest {
         assertEquals(PackageManager.PERMISSION_DENIED,
             context.packageManager.checkPermission(Manifest.permission.INTERNET,context.packageName))
         val sourceDir=checkNotNull(context.getExternalFilesDir(null))
-        val store=PackStore(File(context.filesDir,"native-test-packs"))
+        val store=PackStore(File(context.filesDir,"native-test-packs"),GeneratedPackCatalog.entries)
         val receipt=File(sourceDir,"native-speech-results.txt")
         receipt.writeText("Real Android JNI speech test; synthetic input; no microphone/playback/radio.\n")
-        for(tag in listOf("en-US","fr")) {
-            val voice=if(tag=="en-US") "ljspeech" else "siwis"
-            val archive=File(sourceDir,"phonemesh-$tag-whisper-tiny-piper-$voice-int8.zip")
+        fun install(name:String):PackInfo {
+            val archive=File(sourceDir,name)
             assertTrue("Missing model pack $archive",archive.isFile)
-            val pack=archive.inputStream().use { store.install(it) }
+            return archive.inputStream().use { store.install(it) }
+        }
+        val engine=install("phonemesh-engine-whisper-tiny-1.zip")
+        for(tag in listOf("en-US","fr")) {
+            val voiceName=if(tag=="en-US") "ljspeech" else "siwis"
+            val voice=install("phonemesh-voice-$tag-$voiceName-1.zip")
+            assertEquals(Readiness.Ready(engine,voice),store.readiness(engine.id,tag))
             val text=if(tag=="fr") "Bonjour, ceci est un message radio." else "This is a radio test. Meet me at the library."
-            LocalSpeech(SpeechPack(pack.root,pack.languageTag,pack.whisperLanguage)).use { speech ->
+            LocalSpeech(SpeechPack(engine.root,voice.root,checkNotNull(voice.languageTag),
+                checkNotNull(voice.whisperLanguage))).use { speech ->
                 val start=System.nanoTime()
                 val audio=speech.synthesize(text)
                 assertTrue(audio.samples.isNotEmpty())

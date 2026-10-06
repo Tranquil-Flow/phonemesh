@@ -13,13 +13,18 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-rules.pro")
+        buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
     }
+    buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
     buildTypes {
+        debug {
+            buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

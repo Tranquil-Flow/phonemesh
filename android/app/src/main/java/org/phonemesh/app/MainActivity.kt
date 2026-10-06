@@ -19,9 +19,13 @@ import android.view.View
 import android.view.WindowManager
 import android.view.WindowInsets
 import android.widget.*
+import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.MessageCodec
 import org.phonemesh.core.PackInfo
+import org.phonemesh.core.PackKind
 import org.phonemesh.core.PackStore
+import org.phonemesh.core.Readiness
+import org.phonemesh.core.readiness
 import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.speech.LocalSpeech
@@ -58,9 +62,9 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     private var packs=emptyList<PackInfo>()
     private var languageChoices=emptyList<Pair<String,String>>()
     private var currentLanguage="fr"
-    private var selected:PackInfo?=null
+    private var selected:Readiness=Readiness.MissingEngine
     private var engine:LocalSpeech?=null // confined to work executor
-    private var engineRoot:String?=null
+    private var engineRoot:String?=null // "engineRoot|voiceRoot" of the loaded engine
     private var player:MediaPlayer?=null
     private var playingFile:File?=null
     private var recording=false
@@ -73,7 +77,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        store=PackStore(File(filesDir,"packs"))
+        store=PackStore(File(filesDir,"packs"),GeneratedPackCatalog.entries,BuildConfig.ALLOW_UNKNOWN_PACKS)
         bridge=BleMeshTransport(this, this)
         val scroll=ScrollView(this)
         scroll.setOnApplyWindowInsetsListener { view, insets ->
@@ -139,7 +143,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         modelSpinner.onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent:AdapterView<*>?) {}
             override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long) {
-                selectPack(modelChoices.getOrNull(position))
+                selectEngine(modelChoices.getOrNull(position))
             }
         }
         packsSpinner.onItemSelectedListener=object:AdapterView.OnItemSelectedListener {
@@ -156,7 +160,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         record.setOnClickListener {
             if(recording) { microphone.stop(); record.isEnabled=false }
             else if(!busy) {
-                if(selected==null) note("Importez d'abord un pack de modèles.")
+                if(selected !is Readiness.Ready) note("Importez d'abord un pack de modèles.")
                 else if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
                     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO),102)
                 else startRecording()
@@ -171,7 +175,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         preview=Button(this).apply { text="▶ Écouter le brouillon"; contentDescription="Preview speech" }
         layout.addView(preview)
         preview.setOnClickListener {
-            selected?.let { speak(draft.text.toString(),it) } ?: note("Importez les modèles de cette langue.")
+            (selected as? Readiness.Ready)?.let { speak(draft.text.toString(),it) } ?: note("Importez les modèles de cette langue.")
         }
         val stopPlayback=Button(this).apply { text="■ Arrêter la lecture"; contentDescription="Stop playback" }
         layout.addView(stopPlayback)
@@ -214,36 +218,41 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         packs=store.list()
         val defaults=linkedMapOf("fr" to "Français", "en-US" to "English (US)", "en-GB" to "English (UK)",
             "es" to "Español", "hi" to "हिन्दी", "it" to "Italiano", "ja" to "日本語", "pt-BR" to "Português (Brasil)", "zh" to "中文")
-        packs.forEach { if(it.languageTag !in defaults) defaults[it.languageTag]=it.label }
+        val voices=packs.filter { it.kind==PackKind.VOICE }
+        voices.forEach { val tag=checkNotNull(it.languageTag); if(tag !in defaults) defaults[tag]=it.label }
         languageChoices=defaults.map { it.key to it.value }
         packsSpinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
-            languageChoices.map { (tag,name) -> "$name [$tag]"+if(packs.any { it.languageTag==tag }) " • modèles installés" else " • texte" })
+            languageChoices.map { (tag,name) -> "$name [$tag]"+if(voices.any { it.languageTag==tag }) " • modèles installés" else " • texte" })
         currentLanguage=getPreferences(MODE_PRIVATE).getString("language","fr") ?: "fr"
         val index=languageChoices.indexOfFirst { it.first==currentLanguage }.coerceAtLeast(0)
         currentLanguage=languageChoices[index].first
         packsSpinner.setSelection(index)
         refreshModelChoices()
     }
+    private fun engineName(engine:PackInfo) = if(engine.recognizerModel=="whisper-base") "Whisper Base" else "Whisper Tiny"
     private fun refreshModelChoices() {
-        modelChoices=packs.filter { it.languageTag==currentLanguage }
-        val preferred=getPreferences(MODE_PRIVATE).getString("pack:$currentLanguage",
-            getPreferences(MODE_PRIVATE).getString("pack",null))
-        val index=modelChoices.indexOfFirst { it.root.name==preferred }.coerceAtLeast(0)
+        modelChoices=packs.filter { it.kind==PackKind.ENGINE }
+        val preferred=getPreferences(MODE_PRIVATE).getString("engine",null)
+        val index=modelChoices.indexOfFirst { it.id==preferred }.coerceAtLeast(0)
         modelSpinner.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,
-            if(modelChoices.isEmpty()) listOf("Aucun modèle installé") else modelChoices.map {
-                "${if(it.recognizerModel=="whisper-base") "Whisper Base" else "Whisper Tiny"} • ${it.label}"
-            })
+            if(modelChoices.isEmpty()) listOf("Aucun modèle installé") else modelChoices.map { engineName(it) })
         modelSpinner.setSelection(index)
-        selectPack(modelChoices.getOrNull(index))
+        selectEngine(modelChoices.getOrNull(index))
     }
-    private fun selectPack(pack:PackInfo?) {
-        selected=pack
-        pack?.let { getPreferences(MODE_PRIVATE).edit().putString("pack:$currentLanguage",it.root.name).apply() }
-        voiceStatus.text=pack?.let {
-            "${it.label} • ${if(it.recognizerModel=="whisper-base") "Whisper Base" else "Whisper Tiny"} + Piper • hors ligne"
-        } ?: "$currentLanguage : texte disponible ; importez les modèles pour la voix"
+    private fun selectEngine(choice:PackInfo?) {
+        choice?.let { getPreferences(MODE_PRIVATE).edit().putString("engine",it.id).apply() }
+        selected=store.readiness(choice?.id,currentLanguage)
+        voiceStatus.text=when(val state=selected) {
+            is Readiness.Ready -> "${state.voice.label} • ${engineName(state.engine)} + Piper • hors ligne"
+            Readiness.MissingEngine -> "Téléchargez le moteur vocal"
+            is Readiness.MissingVoice -> "$currentLanguage : texte disponible ; ajoutez la voix"
+            is Readiness.UnsupportedLanguage -> "Ce moteur ne gère pas cette langue"
+        }
         if(::record.isInitialized && ::send.isInitialized) updateControls()
     }
+    /** Engine and voice for speaking a received message in [languageTag], if both are installed. */
+    private fun readyFor(languageTag:String) =
+        store.readiness(getPreferences(MODE_PRIVATE).getString("engine",null),languageTag) as? Readiness.Ready
     private fun connectRadio(address:String,name:String) {
         getPreferences(MODE_PRIVATE).edit().putString("radioAddress",address).putString("radioName",name).apply()
         note("Connexion demandée pour $name. Attendez l'état « connectée » ; diagnostic disponible en cas d'échec.")
@@ -301,16 +310,18 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         radioAdapter?.addAll(radioDevices.map { "${it.value} (${it.key})" })
         radioAdapter?.notifyDataSetChanged()
     }
-    private fun speech(pack:PackInfo):LocalSpeech {
-        if(engineRoot!=pack.root.absolutePath) {
+    private fun speech(pack:Readiness.Ready):LocalSpeech {
+        val key="${pack.engine.root.absolutePath}|${pack.voice.root.absolutePath}"
+        if(engineRoot!=key) {
             engine?.close(); engine=null; engineRoot=null
-            engine=LocalSpeech(SpeechPack(pack.root,pack.languageTag,pack.whisperLanguage))
-            engineRoot=pack.root.absolutePath
+            engine=LocalSpeech(SpeechPack(pack.engine.root,pack.voice.root,
+                checkNotNull(pack.voice.languageTag),checkNotNull(pack.voice.whisperLanguage)))
+            engineRoot=key
         }
         return checkNotNull(engine)
     }
     private fun startRecording() {
-        val pack=selected ?: return
+        val pack=selected as? Readiness.Ready ?: return
         playbackEpoch++; stopPlayback()
         val epoch=++captureEpoch
         recording=true; record.text="■ Annuler"; note("Préparation du microphone…")
@@ -331,7 +342,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             updateControls(); note(error.message ?: "Microphone indisponible")
         }
     }
-    private fun speak(text:String,pack:PackInfo) {
+    private fun speak(text:String,pack:Readiness.Ready) {
         if(busy || recording) return
         val epoch=++playbackEpoch
         stopPlayback()
@@ -421,12 +432,16 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                 this.text=if(message.language==null) "▶ Choisir la langue et écouter" else "▶ Écouter"
                 setOnClickListener {
                     if(message.language==null) {
-                        if(packs.isEmpty()) note("Importez un pack vocal pour écouter.")
+                        val voices=packs.filter { it.kind==PackKind.VOICE }
+                        if(voices.isEmpty()) note("Importez un pack vocal pour écouter.")
                         else AlertDialog.Builder(this@MainActivity).setTitle("Langue de ce message")
-                            .setItems(packs.map { it.label }.toTypedArray()) { _,i -> speak(message.text,packs[i]) }
+                            .setItems(voices.map { it.label }.toTypedArray()) { _,i ->
+                                val pack=readyFor(checkNotNull(voices[i].languageTag))
+                                if(pack==null) note("Téléchargez le moteur vocal") else speak(message.text,pack)
+                            }
                             .setNegativeButton("Annuler",null).show()
                     } else {
-                        val pack=packs.firstOrNull { it.languageTag==message.language }
+                        val pack=readyFor(checkNotNull(message.language))
                         if(pack==null) note("Importez un pack ${message.language} pour écouter.")
                         else speak(message.text,pack)
                     }
@@ -456,7 +471,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     private fun note(text:String) { operationStatus.text=text }
     private fun updateControls() {
         record.isEnabled=!busy
-        preview.isEnabled=!busy && !recording && selected!=null
+        preview.isEnabled=!busy && !recording && selected is Readiness.Ready
         send.isEnabled=!busy && !recording && connected
         packsSpinner.isEnabled=!busy && !recording
         modelSpinner.isEnabled=!busy && !recording && modelChoices.isNotEmpty()
@@ -473,9 +488,10 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             task {
                 val input=contentResolver.openInputStream(uri) ?: error("Fichier inaccessible")
                 val installed=input.use { store.install(it) }
-                getPreferences(MODE_PRIVATE).edit().putString("pack",installed.root.name)
-                    .putString("pack:${installed.languageTag}",installed.root.name)
-                    .putString("language",installed.languageTag).apply()
+                val preferences=getPreferences(MODE_PRIVATE).edit()
+                if(installed.kind==PackKind.ENGINE) preferences.putString("engine",installed.id)
+                else preferences.putString("language",installed.languageTag)
+                preferences.apply()
                 ui { refreshPacks(); note("Pack importé : ${installed.label}") }
             }
         }

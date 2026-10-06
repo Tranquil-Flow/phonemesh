@@ -102,7 +102,7 @@ HF_ASSETS = [
 ]
 
 
-def espeak_keep(names: set[str], voice: str) -> set[str]:
+def espeak_language_files(names: set[str], voice: str) -> set[str]:
     base = voice.split("-")[0].lower()
     dictionary = f"{base}_dict"
     if dictionary not in names:
@@ -112,10 +112,20 @@ def espeak_keep(names: set[str], voice: str) -> set[str]:
     )
     if len(voice_files) != 1:
         raise ValueError(f"expected exactly one lang/*/{voice}, found {voice_files}")
+    return {dictionary, voice_files[0]}
+
+
+def espeak_keep(names: set[str], voice: str, union: tuple[str, ...] = ()) -> set[str]:
+    """Core files, the voice's own dictionary and language file, and those of every voice in
+    `union`. sherpa-onnx loads espeak-ng data once per process from the first voice used, so
+    every catalog voice pack must carry the data for every catalog language."""
+    keep = set(ESPEAK_CORE)
+    for name in dict.fromkeys((voice, *union)):
+        keep |= espeak_language_files(names, name)
     missing = ESPEAK_CORE - names
     if missing:
         raise ValueError(f"espeak-ng core files missing: {sorted(missing)}")
-    return ESPEAK_CORE | {dictionary, voice_files[0]}
+    return keep
 
 
 def manifest(files: dict[str, bytes]) -> bytes:
@@ -221,7 +231,15 @@ def whisper_base_files() -> tuple[dict[str, bytes], list[dict]]:
     return files, receipts
 
 
-def voice_files(tar_path: Path) -> tuple[dict[str, bytes], str]:
+def espeak_voice(tar_path: Path) -> str:
+    with tarfile.open(tar_path, "r:bz2") as archive:
+        for member in archive.getmembers():
+            if member.isfile() and member.name.endswith(".onnx.json"):
+                return json.loads(archive.extractfile(member).read())["espeak"]["voice"]
+    raise ValueError(f"{tar_path.name}: missing .onnx.json")
+
+
+def voice_files(tar_path: Path, union: tuple[str, ...] = ()) -> tuple[dict[str, bytes], str]:
     model, tokens, espeak, voice = None, None, {}, None
     with tarfile.open(tar_path, "r:bz2") as archive:
         members = archive.getmembers()
@@ -244,7 +262,7 @@ def voice_files(tar_path: Path) -> tuple[dict[str, bytes], str]:
     if model is None or tokens is None or voice is None:
         raise ValueError(f"{tar_path.name}: missing model, tokens or .onnx.json")
     files = {"model.onnx": model, "tokens.txt": tokens}
-    for name in sorted(espeak_keep(set(espeak), voice)):
+    for name in sorted(espeak_keep(set(espeak), voice, union)):
         files["espeak-ng-data/" + name] = espeak[name]
     return {"tts/" + k: v for k, v in files.items()}, voice
 
@@ -318,6 +336,7 @@ def main() -> None:
     parser.add_argument("--catalog-include", action="append", default=[])
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    wanted = set(DEFAULT_CATALOG) | set(args.catalog_include)
 
     built = []
 
@@ -353,17 +372,24 @@ def main() -> None:
         name = f"phonemesh-{pack_id}-{VERSION}.zip"
         record(pack_id, "engine", write_pack(args.out, name, files, "engine", model, receipts))
 
+    # Every voice pack carries the espeak-ng data of every catalog voice (see espeak_keep).
+    union = tuple(
+        sorted({espeak_voice(fetch(pack_id)[0]) for pack_id in VOICES if pack_id in wanted})
+    )
+    shared: dict[str, bytes] = {}
     for pack_id, meta in VOICES.items():
         path, receipt = fetch(pack_id)
-        files, espeak_voice = voice_files(path)
+        files, voice = voice_files(path, union)
+        for name, data in files.items():
+            if name.startswith("tts/espeak-ng-data/") and shared.setdefault(name, data) != data:
+                raise ValueError(f"{pack_id}: {name} differs from another voice pack")
         files["pack.properties"] = pack_properties(
             kind="voice", id=pack_id, version=VERSION, **meta
         )
         name = f"phonemesh-{pack_id}-{VERSION}.zip"
         record(pack_id, "voice", write_pack(args.out, name, files, "voice", pack_id, [receipt]))
-        print(json.dumps({"id": pack_id, "espeak_voice": espeak_voice}), flush=True)
+        print(json.dumps({"id": pack_id, "espeak_voice": voice, "union": union}), flush=True)
 
-    wanted = set(DEFAULT_CATALOG) | set(args.catalog_include)
     unknown = wanted - {e["id"] for e in built}
     if unknown:
         raise SystemExit(f"unknown catalog ids: {sorted(unknown)}")

@@ -20,9 +20,6 @@ object Ui {
     const val BODY_SP = 18f
     const val TOUCH_DP = 48
 
-    /** Tag for text that people or radios wrote (names, messages): exempt from the eight-word check. */
-    const val CONTENT = "content"
-
     fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
 
     fun outline(context: Context, fill: Int, stroke: Int, radiusDp: Int = 12, strokeDp: Int = 2, dashed: Boolean = false) =
@@ -46,7 +43,10 @@ object Ui {
             if (bold) setTypeface(typeface, Typeface.BOLD)
         }
 
-    fun content(view: TextView): TextView = view.apply { tag = CONTENT }
+    /** Marks text that people or radios wrote (names, messages): exempt from the eight-word check. Leaves the view's tag free. */
+    fun content(view: TextView): TextView = view.apply { setTag(R.id.ui_content, true) }
+
+    fun isContent(view: View): Boolean = view.getTag(R.id.ui_content) == true
 
     fun icon(context: Context, drawable: Int, color: Int, sizeDp: Int = 24) = ImageView(context).apply {
         setImageResource(drawable)

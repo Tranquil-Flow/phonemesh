@@ -163,6 +163,61 @@ class ChatsActivityTest {
         assertEquals("Pack importé : Français", Views.textOf(Views.tagged(chats, "note")!!))
     }
 
+    private fun packIntent() = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(FixturePackProvider.VOICE), "application/zip")
+        .setClass(context, ChatsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+    @Test fun aPackOpenedDuringFirstLaunchBringsBackTheLanguageScreenThenAsks() {
+        TestCore.install(language = null, voices = emptyList())
+        val first = Views.start(ChatsActivity::class.java)
+        activity = first
+        Views.waitUntil { resumedNow() is LanguageActivity }
+        val firstLanguage = Views.resumed()
+        context.startActivity(packIntent())
+        Views.waitUntil { resumedNow().let { it is LanguageActivity && it !== firstLanguage } }
+        // A finger takes longer than the stop of the screen underneath; the recreate for the new language needs that stop.
+        Views.waitUntil { ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(first) == Stage.STOPPED }
+        Views.tap(checkNotNull(Views.resumed()), "language:fr")
+        Views.waitUntil { resumedNow().let { it is ChatsActivity && it !== first } }
+        val chats = Views.resumed() as ChatsActivity
+        activity = chats
+        Views.waitUntil { chats.importDialogForTest != null }
+        assertTrue(core.store.list().isEmpty())
+    }
+
+    @Test fun theConfirmQuestionSurvivesRotationAndIsNotAskedAgainAfterwards() {
+        TestCore.install(voices = emptyList())
+        val first = start()
+        context.startActivity(packIntent())
+        Views.waitUntil { first.importDialogForTest != null }
+        TestCore.onMain { first.recreate() }
+        Views.waitUntil { resumedNow().let { it is ChatsActivity && it !== first } }
+        val second = Views.resumed() as ChatsActivity
+        activity = second
+        Views.waitUntil { second.importDialogForTest != null }
+        assertTrue(core.store.list().isEmpty())
+        val dialog = checkNotNull(second.importDialogForTest)
+        TestCore.onMain { dialog.getButton(DialogInterface.BUTTON_NEGATIVE).performClick() }
+        inst.waitForIdleSync()
+        TestCore.onMain { second.recreate() }
+        Views.waitUntil { resumedNow().let { it is ChatsActivity && it !== second } }
+        val third = Views.resumed() as ChatsActivity
+        activity = third
+        inst.waitForIdleSync()
+        assertNull(third.importDialogForTest)
+    }
+
+    @Test fun aPackReopenedFromHistoryWhileRecordingIsIgnoredQuietly() {
+        TestCore.install()
+        val chats = start()
+        assertTrue(TestCore.onMain { core.startRecording(core.groupChatId()) })
+        val intent = packIntent().addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+        TestCore.onMain { chats.onNewIntent(intent) }
+        inst.waitForIdleSync()
+        assertNull(chats.importDialogForTest)
+        assertNull(Views.tagged(chats, "note"))
+        TestCore.onMain { core.cancelRecording() }
+    }
+
     /** Controller ruling C13: a pack that arrives while the microphone is in use is refused before asking. */
     @Test fun aPackOpenedWhileRecordingIsRefusedWithoutAsking() {
         TestCore.install()

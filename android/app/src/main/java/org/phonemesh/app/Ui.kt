@@ -2,10 +2,11 @@ package org.phonemesh.app
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
-import android.util.TypedValue
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
@@ -29,6 +30,12 @@ object Ui {
             if (dashed) setStroke(dp(context, strokeDp), stroke, dp(context, 8).toFloat(), dp(context, 6).toFloat())
             else setStroke(dp(context, strokeDp), stroke)
         }
+
+    /** [content] with a translucent [pressed] colour that ripples over it; the content also masks the ripple. */
+    fun ripple(content: android.graphics.drawable.Drawable, pressed: Int) =
+        RippleDrawable(ColorStateList.valueOf(pressed), content, content)
+
+    private fun pressedOf(color: Int) = (color and 0x00FFFFFF) or (0x33 shl 24)
 
     fun circle(fill: Int) = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
@@ -60,9 +67,8 @@ object Ui {
             setImageResource(drawable)
             imageTintList = ColorStateList.valueOf(color)
             contentDescription = description
-            val ripple = TypedValue()
-            context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true)
-            setBackgroundResource(ripple.resourceId)
+            // Unbounded ripple: no content, so the pressed circle is drawn at the view's size.
+            background = RippleDrawable(ColorStateList.valueOf(pressedOf(palette.text)), null, circle(Color.WHITE))
             scaleType = ImageView.ScaleType.CENTER
             val size = dp(context, maxOf(sizeDp, TOUCH_DP))
             minimumWidth = size
@@ -81,7 +87,9 @@ object Ui {
             setTextColor(foreground)
             minHeight = dp(context, 56)
             minimumHeight = dp(context, 56)
-            background = outline(context, if (filled) palette.text else palette.background, palette.outline)
+            // Filled buttons are dark, so their press shows in the light colour.
+            background = ripple(outline(context, if (filled) palette.text else palette.background, palette.outline),
+                pressedOf(if (filled) palette.background else palette.text))
             stateListAnimator = null
             setPadding(dp(context, 16), 0, dp(context, 16), 0)
             if (drawable != null) {

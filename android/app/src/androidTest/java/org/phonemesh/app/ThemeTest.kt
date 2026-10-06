@@ -42,6 +42,14 @@ class ThemeTest {
         }
     }
 
+    @Test fun buttonsShowFeedbackWhenPressed() {
+        inst.runOnMainSync {
+            val p = Palette(context)
+            assertTrue(Ui.button(context, p, "Envoyer", null).background is android.graphics.drawable.RippleDrawable)
+            assertTrue(Ui.iconButton(context, p, R.drawable.ic_gear, "Réglages").background is android.graphics.drawable.RippleDrawable)
+        }
+    }
+
     @Test fun bodyTextIsAtLeast18sp() {
         inst.runOnMainSync {
             val text = Ui.text(context, "Bonjour", Palette(context).text)

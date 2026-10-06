@@ -77,6 +77,8 @@ class RadioActivityTest {
         Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:02")
         assertFalse(activity!!.isFinishing)
         assertNotNull(Views.tagged(activity!!, "connecting"))
+        TestCore.onMain { TestCore.radio.connected(false) } // the first radio drops
+        assertFalse(activity!!.isFinishing)
         TestCore.onMain { TestCore.radio.connected(true) }
         assertTrue(activity!!.isFinishing)
     }
@@ -89,5 +91,21 @@ class RadioActivityTest {
         assertEquals("Radio EE01", Views.tagged(activity!!, "radio:AA:BB:CC:DD:EE:01")!!.contentDescription)
         Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:01")
         assertEquals("Radio EE01", TestCore.core.settings.radioName)
+    }
+
+    @Test fun aScanThatFailsShowsSearchAgainWithoutASpinner() {
+        TestCore.install(connected = false)
+        activity = Views.start(RadioActivity::class.java)
+        assertEquals(1, TestCore.radio.scans)
+        TestCore.onMain { TestCore.radio.failScan() }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(activity!!, "searching"))
+        val again = checkNotNull(Views.tagged(activity!!, "radio_search_again"))
+        assertEquals("Chercher", again.contentDescription)
+        assertTrue(TestCore.onMain { again.height } >= Ui.dp(inst.targetContext, 48))
+        Views.tap(activity!!, "radio_search_again")
+        assertEquals(2, TestCore.radio.scans)
+        assertNotNull(Views.tagged(activity!!, "searching"))
+        assertNull(Views.tagged(activity!!, "radio_search_again"))
     }
 }

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same theme from API 27: the navigation bar is white with dark icons too. Light, high contrast: white background, near-black outlines and text. Green and red always come with a shape. -->
+    <style name="Theme.Phonemesh" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="pmBackground">#FFFFFFFF</item>
+        <item name="pmSurface">#FFF1F3F4</item>
+        <item name="pmText">#FF111111</item>
+        <item name="pmMuted">#FF4A4F55</item>
+        <item name="pmOutline">#FF111111</item>
+        <item name="pmGood">#FF0B6E2C</item>
+        <item name="pmBad">#FFB3261E</item>
+        <item name="pmAccent">#FFFFD54F</item>
+        <item name="pmSent">#FFE2F2E3</item>
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorAccent">#FF0B6E2C</item>
+        <item name="android:statusBarColor">#FFFFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FFFFFFFF</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

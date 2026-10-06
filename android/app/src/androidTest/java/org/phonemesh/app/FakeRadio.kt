@@ -24,8 +24,9 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     var peerList: List<RadioPeer> = emptyList()
     private var nextPacket = 1000L
 
-    override fun scan() { scans++ }
-    override fun stopScan() { stopScans++ }
+    // Like BleMeshTransport, scan bookkeeping is reported as a diagnostic state that keeps the connection flag.
+    override fun scan() { scans++; listener.onState(ready, "Scanning") }
+    override fun stopScan() { stopScans++; listener.onState(ready, "Scan stopped") }
     override fun connect(address: String) { connects += address }
     override fun disconnect() { disconnects++ }
     override fun peers(): List<RadioPeer> = peerList
@@ -41,6 +42,8 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
         ready = on
         listener.onState(on, if (on) "ready" else "lost")
     }
+    /** The scan ended without results: a failure or Android's throttling, reported like BleMeshTransport does. */
+    fun failScan() = listener.onScanStopped()
     fun failConnect() = listener.onConnectFailed()
     fun receive(sender: String, text: String, direct: Boolean, channel: Int = 0) = listener.onText(sender, text, channel, direct)
     fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")

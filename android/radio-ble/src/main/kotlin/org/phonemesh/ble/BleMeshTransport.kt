@@ -94,6 +94,7 @@ class BleMeshTransport(
         override fun onScanFailed(errorCode: Int) {
             scanning = false
             post(status.scanFailed(errorCode))
+            postScanStopped()
         }
     }
 
@@ -228,16 +229,19 @@ class BleMeshTransport(
         val missing = missingScanPermission()
         if (missing != null) {
             post(status.diagnostic("Missing permission for BLE scan: $missing"))
+            postScanStopped()
             return
         }
         val adapter = adapter
         if (adapter == null || !adapter.isEnabled) {
             workHandler.post { disconnectAndCleanup("Bluetooth is disabled or unavailable") }
+            postScanStopped()
             return
         }
         val scanner = adapter.bluetoothLeScanner
         if (scanner == null) {
             post(status.diagnostic("BLE scanner is unavailable"))
+            postScanStopped()
             return
         }
         try {
@@ -250,8 +254,10 @@ class BleMeshTransport(
             post(status.diagnostic("Scanning for Meshtastic BLE radios"))
         } catch (security: SecurityException) {
             post(status.diagnostic("BLE scan denied: ${security.message}"))
+            postScanStopped()
         } catch (runtime: RuntimeException) {
             post(status.diagnostic("BLE scan failed: ${runtime.message}"))
+            postScanStopped()
         }
     }
 
@@ -266,6 +272,7 @@ class BleMeshTransport(
             scanning = false
             // Stopping a scan is not a connection event: readiness is preserved on purpose.
             post(status.scanStopped())
+            postScanStopped()
         }
     }
 
@@ -719,6 +726,10 @@ class BleMeshTransport(
 
     private fun postConnectFailed() {
         mainHandler.post { if (!closed.get()) listener.onConnectFailed() }
+    }
+
+    private fun postScanStopped() {
+        mainHandler.post { if (!closed.get()) listener.onScanStopped() }
     }
 
     private fun postState(connected: Boolean, detail: String) {

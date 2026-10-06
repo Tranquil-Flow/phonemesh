@@ -25,6 +25,7 @@ class RadioActivity : ScreenActivity() {
     private lateinit var state: TextView
     private lateinit var disconnect: Button
     private lateinit var searching: LinearLayout
+    private lateinit var searchAgain: Button
     private val adapter = RadioAdapter()
     /** Ready reports seen when a radio was tapped; null when none was. Only a later report ends the screen. */
     private var readyAtTap: Int? = null
@@ -60,6 +61,11 @@ class RadioActivity : ScreenActivity() {
             })
         }
         root.addView(searching)
+        searchAgain = Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search).apply {
+            tag = "radio_search_again"
+            setOnClickListener { beginSearch() }
+        }
+        root.addView(searchAgain)
         val list = ListView(this).apply {
             tag = "radios"
             divider = null
@@ -122,6 +128,7 @@ class RadioActivity : ScreenActivity() {
         else getString(R.string.radio_not_connected)
         disconnect.visibility = if (connected) View.VISIBLE else View.GONE
         searching.visibility = if (core.scanning) View.VISIBLE else View.GONE
+        searchAgain.visibility = if (core.scanning) View.GONE else View.VISIBLE
         adapter.items = core.found
         adapter.notifyDataSetChanged()
         val tapped = readyAtTap

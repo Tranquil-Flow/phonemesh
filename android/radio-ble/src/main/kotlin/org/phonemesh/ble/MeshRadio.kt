@@ -15,6 +15,9 @@ interface MeshRadio : AutoCloseable {
          */
         fun onConnectFailed() {}
 
+        /** The scan is over: it was stopped, never started, or failed (no scanner, Android throttling). */
+        fun onScanStopped() {}
+
         /** [direct] is true when the message was addressed to this radio, false for a broadcast. */
         fun onText(sender: String, text: String, channel: Int, direct: Boolean)
 

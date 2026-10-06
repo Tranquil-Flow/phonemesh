@@ -255,4 +255,40 @@ class AppCoreTest {
         assertTrue(changes.contains(AppCore.Change.RADIO))
         assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
     }
+
+    @Test fun diagnosticReportsWhileReadyAreNotNewConnections() {
+        TestCore.install(connected = true)
+        val before = main { core.readyReports }
+        main { radio.stopScan(); radio.scan(); radio.connected(true) }
+        assertEquals(before, main { core.readyReports })
+        main { radio.connected(false); radio.connected(true) }
+        assertEquals(before + 1, main { core.readyReports })
+    }
+
+    @Test fun aScanThatStopsByItselfClearsTheSearch() {
+        TestCore.install(connected = false)
+        val changes = mutableListOf<AppCore.Change>()
+        main {
+            core.observe { changes += it }
+            core.startScan()
+            assertTrue(core.scanning)
+            changes.clear()
+            radio.failScan()
+        }
+        assertFalse(main { core.scanning })
+        assertTrue(changes.contains(AppCore.Change.RADIO))
+    }
+
+    @Test fun aScanThatNeverEndsIsStoppedAfterAWhile() {
+        TestCore.install(connected = false)
+        main {
+            core.scanWaitMs = 100
+            core.startScan()
+            assertTrue(core.scanning)
+        }
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline && main { core.scanning }) Thread.sleep(20)
+        assertFalse(main { core.scanning })
+        assertTrue(radio.stopScans >= 1)
+    }
 }

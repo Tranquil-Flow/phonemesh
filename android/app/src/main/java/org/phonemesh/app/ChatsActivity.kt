@@ -36,6 +36,10 @@ class ChatsActivity : ScreenActivity() {
     private val rows = ChatAdapter()
     private var built = false
     private var importDialog: AlertDialog? = null
+    /** The pack waiting for "Installer"; kept across rotation, dropped when answered. */
+    private var pendingImport: Uri? = null
+    /** First launch: a pack intent is waiting for the language to be chosen, so the recreate after it must replay it. */
+    private var importWaitsForLanguage = false
     private var peerDialog: AlertDialog? = null
     private var showedVoiceCard = false
     private var showedRadioCard = false
@@ -85,11 +89,27 @@ class ChatsActivity : ScreenActivity() {
         show(root)
         built = true
         if (core.settings.language == null) {
-            // First launch: the language screen first; this screen recreates in the chosen language (ScreenActivity.onStart).
-            startActivity(Intent(this, LanguageActivity::class.java))
+            // First launch: onStart shows the language screen; this screen recreates in the chosen language (ScreenActivity.onStart).
+            importWaitsForLanguage = true
             return
         }
-        openFromIntent(intent)
+        // A recreate (rotation, process death) must not replay the intent that already ran; only the recreate after the
+        // first-launch language choice does, and a question that was open comes back.
+        val waited = savedInstanceState?.getBoolean(STATE_WAITS_FOR_LANGUAGE) == true
+        if (savedInstanceState == null || waited) openFromIntent(intent)
+        else savedInstanceState.getString(STATE_PENDING_IMPORT)?.let { askToInstall(Uri.parse(it)) }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Also reached after a pack intent destroyed the language screen on top of this one: ask again.
+        if (core.settings.language == null) startActivity(Intent(this, LanguageActivity::class.java))
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_WAITS_FOR_LANGUAGE, importWaitsForLanguage)
+        pendingImport?.let { outState.putString(STATE_PENDING_IMPORT, it.toString()) }
     }
 
     private fun topBar(): View {
@@ -332,8 +352,8 @@ class ChatsActivity : ScreenActivity() {
     private fun openFromIntent(intent: Intent?) {
         if (intent == null || (intent.action != Intent.ACTION_VIEW && intent.action != Intent.ACTION_SEND)) return
         setIntent(Intent(this, ChatsActivity::class.java)) // handled once; never replayed
-        if (core.recordState != AppCore.RecordState.IDLE) { core.note(UiText(R.string.wait_for_operation)); return }
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
+        if (core.recordState != AppCore.RecordState.IDLE) { core.note(UiText(R.string.wait_for_operation)); return }
         val uri = if (intent.action == Intent.ACTION_SEND) {
             if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
             else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
@@ -343,12 +363,17 @@ class ChatsActivity : ScreenActivity() {
             core.note(PackMessages.forFailure(PackRejected(PackRejected.Reason.UNSAFE, "not content")))
             return
         }
+        askToInstall(uri)
+    }
+
+    private fun askToInstall(uri: Uri) {
         importDialog?.dismiss()
+        pendingImport = uri
         val dialog = AlertDialog.Builder(this).setTitle(R.string.install_pack_title)
             .setPositiveButton(R.string.install) { _, _ -> core.importPack(uri) }
             .setNegativeButton(R.string.cancel, null)
             .create()
-        dialog.setOnDismissListener { if (importDialog === dialog) importDialog = null }
+        dialog.setOnDismissListener { if (importDialog === dialog) { importDialog = null; pendingImport = null } }
         importDialog = dialog
         dialog.show()
     }
@@ -371,6 +396,8 @@ class ChatsActivity : ScreenActivity() {
     internal val peerDialogForTest: AlertDialog? get() = peerDialog?.takeIf { it.isShowing }
 
     private companion object {
+        const val STATE_WAITS_FOR_LANGUAGE = "waits_for_language"
+        const val STATE_PENDING_IMPORT = "pending_import"
         const val REQUEST_FILE = 101
         const val DONE_MS = 2_000L
     }

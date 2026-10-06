@@ -73,6 +73,9 @@ class AppCore private constructor(
     private val foundRadios = LinkedHashMap<String, FoundRadio>()
     val found: List<FoundRadio> get() = foundRadios.values.sortedByDescending { it.rssi }
     private var started = 0
+    // Test hook: tests shorten the wait for a scan that never reports an end.
+    internal var scanWaitMs = SCAN_WAIT_MS
+    private val scanExpired = Runnable { stopScan() }
     private val connectExpired = Runnable { changed(Change.RADIO) }
     private val backgroundStop = Runnable { if (started == 0) leaveRadio() }
 
@@ -162,13 +165,16 @@ class AppCore private constructor(
     fun startScan() {
         foundRadios.clear()
         scanning = true
+        main.removeCallbacks(scanExpired)
+        main.postDelayed(scanExpired, scanWaitMs)
         changed(Change.SCAN)
-        runCatching { radio.scan() }.onFailure { scanning = false; changed(Change.SCAN) }
+        runCatching { radio.scan() }.onFailure { main.removeCallbacks(scanExpired); scanning = false; changed(Change.SCAN) }
     }
 
     fun stopScan() {
         if (!scanning) return
         scanning = false
+        main.removeCallbacks(scanExpired)
         runCatching { radio.stopScan() }
         changed(Change.SCAN)
     }
@@ -216,13 +222,24 @@ class AppCore private constructor(
     private fun knownName(id: String): String? =
         radio.peers().firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() && it != id }
 
+    /** The radio ended the scan itself (never started, failed, throttled) or finished stopping one. */
+    override fun onScanStopped() {
+        if (!scanning) return
+        scanning = false
+        main.removeCallbacks(scanExpired)
+        changed(Change.SCAN)
+        changed(Change.RADIO)
+    }
+
     override fun onState(connected: Boolean, detail: String) {
         val was = this.connected
         this.connected = connected
-        if (connected) readyReports++
+        // Diagnostics (scan stopped, ...) repeat the ready flag; only a false to true change is a new connection.
+        val becameReady = connected && !was
+        if (becameReady) readyReports++
         // Only success ends an attempt here; false is progress too (the radio reports it many times while connecting).
         val attempting = connectingAddress != null
-        if (connected) endAttempt()
+        if (becameReady) endAttempt()
         if (connected != was || attempting) changed(Change.RADIO)
     }
 
@@ -619,6 +636,7 @@ class AppCore private constructor(
         const val BROADCAST = "^all"
         const val BACKGROUND_GRACE_MS = 60_000L
         const val CONNECT_WAIT_MS = 35_000L
+        const val SCAN_WAIT_MS = 30_000L
         const val POLL_MS = 1_000L
         const val HISTORY_DB = "history.db"
         private const val MAX_FOUND = 50

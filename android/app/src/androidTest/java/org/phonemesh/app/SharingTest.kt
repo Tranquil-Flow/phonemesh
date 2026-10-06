@@ -110,7 +110,7 @@ class SharingTest {
             fail("expected NO_SPACE")
         } catch (e: PackRejected) {
             assertEquals(PackRejected.Reason.NO_SPACE, e.reason)
-            assertEquals("Pas assez d'espace sur le téléphone.", PackMessages.forFailure(e))
+            assertEquals(UiText(R.string.no_space), PackMessages.forFailure(e))
         }
         assertTrue(share.listFiles().orEmpty().isEmpty())
     }
@@ -126,8 +126,8 @@ class SharingTest {
             val shared = PackSharing.prepare(ctx, store)
             assertEquals(listOf("Phonemesh.apk", "phonemesh-voice-fr-siwis-1.zip"), shared.uris.map { it.lastPathSegment })
             assertEquals(listOf(english.id), shared.skipped.map { it.id })
-            val names = shared.skipped.map { pack -> PackDownloadText.name(GeneratedPackCatalog.entries.first { it.id == pack.id }) }
-            assertEquals("Pack abîmé, non partagé : English.", PackMessages.forSkipped(names))
+            val names = shared.skipped.map { pack -> PackDownloadText.name(GeneratedPackCatalog.entries.first { it.id == pack.id }).resolve(ctx) }
+            assertEquals(UiText(R.string.pack_skipped, listOf("English")), PackMessages.forSkipped(names))
             assertEquals(listOf("Phonemesh.apk", "phonemesh-voice-fr-siwis-1.zip"),
                 File(ctx.cacheDir, "share").list().orEmpty().sorted())
         } finally { model.setReadable(true, false) }

@@ -166,7 +166,7 @@ class MainActivity : Activity(), MeshRadio.Listener {
                 try {
                     val shared=PackSharing.prepare(this,store,onProgress={ bytes -> ui { note(PackMessages.shareProgress(bytes)) } })
                     ui {
-                        note(PackMessages.forSkipped(shared.skipped.map { nameOf(it) }) ?: "Choisissez l'application pour partager.")
+                        note(PackMessages.forSkipped(shared.skipped.map { nameOf(it) })?.resolve(this) ?: "Choisissez l'application pour partager.")
                         startActivity(Intent.createChooser(PackSharing.shareIntent(this,shared.uris),null))
                     }
                 } catch(error:Exception) { Log.w(TAG,"share failed",error); ui { note(PackMessages.forFailure(error)) } }
@@ -280,7 +280,7 @@ class MainActivity : Activity(), MeshRadio.Listener {
         packList.removeAllViews()
         for(row in rows) {
             val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL }
-            line.addView(TextView(this).apply { text=row.name; textSize=15f },
+            line.addView(TextView(this).apply { text=row.name.resolve(this@MainActivity); textSize=15f },
                 LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
             line.addView(when(val action=row.action) {
                 PackRow.Action.Download -> Button(this).apply {
@@ -291,7 +291,7 @@ class MainActivity : Activity(), MeshRadio.Listener {
                 }
                 is PackRow.Action.Progress -> LinearLayout(this).apply {
                     orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
-                    addView(TextView(this@MainActivity).apply { text=action.text; textSize=15f })
+                    addView(TextView(this@MainActivity).apply { text=getString(R.string.progress_percent,action.percent); textSize=15f })
                     addView(Button(this@MainActivity).apply {
                         text="Annuler"; isAllCaps=false; contentDescription="Cancel ${row.id}"
                         setOnClickListener { cancelDownload(row) }
@@ -311,13 +311,13 @@ class MainActivity : Activity(), MeshRadio.Listener {
         if(busy || recording) { note("Attendez la fin de l'opération."); return }
         try {
             val decision=packDownloads.start(checkNotNull(row.entry))
-            note(PackMessages.forDecision(decision) ?: "Téléchargement : ${row.name}")
+            note(PackMessages.forDecision(decision)?.resolve(this) ?: "Téléchargement : ${row.name.resolve(this)}")
         } catch(error:Exception) { note(PackMessages.forFailure(error)) }
         pollDownloads()
     }
     private fun cancelDownload(row:PackRow) {
         runCatching { packDownloads.cancel(row.id) }.onFailure { Log.w(TAG,"cancel failed",it) }
-        note("Téléchargement annulé : ${row.name}")
+        note("Téléchargement annulé : ${row.name.resolve(this)}")
         pollDownloads()
     }
     private fun remove(row:PackRow) {
@@ -326,7 +326,7 @@ class MainActivity : Activity(), MeshRadio.Listener {
             // Nothing may keep using the files about to be deleted.
             releaseSpeech()
             val removed=runCatching { store.remove(row.id) }.getOrDefault(false)
-            val message=if(removed) "Pack retiré : ${row.name}" else PackMessages.REMOVE_FAILED
+            val message=if(removed) "Pack retiré : ${row.name.resolve(this)}" else PackMessages.REMOVE_FAILED.resolve(this)
             ui { refreshPacks(); note(message) }
         }
     }
@@ -343,12 +343,12 @@ class MainActivity : Activity(), MeshRadio.Listener {
         val messages=try {
             val results=packDownloads.collectFinished()
             if(results.any { it.isSuccess }) releaseSpeechIfGone()
-            results.map { result -> result.fold({ "Pack installé : ${nameOf(it)}" },{ PackMessages.forFailure(it) }) }
-        } catch(error:Exception) { listOf(PackMessages.forFailure(error)) }
+            results.map { result -> result.fold({ "Pack installé : ${nameOf(it)}" },{ PackMessages.forFailure(it).resolve(this) }) }
+        } catch(error:Exception) { listOf(PackMessages.forFailure(error).resolve(this)) }
         ui { refreshPacks(); if(messages.isNotEmpty()) note(messages.joinToString("\n")) }
     }
     private fun nameOf(pack:PackInfo) =
-        GeneratedPackCatalog.entries.firstOrNull { it.id==pack.id }?.let { PackDownloadText.name(it) } ?: pack.label
+        GeneratedPackCatalog.entries.firstOrNull { it.id==pack.id }?.let { PackDownloadText.name(it).resolve(this) } ?: pack.label
     /** Installs a ZIP the user picked or opened from another app. */
     private fun importPack(uri:Uri) = task {
         try {
@@ -644,7 +644,7 @@ class MainActivity : Activity(), MeshRadio.Listener {
             catch(error:Exception) {
                 Log.w(TAG,"operation failed",error)
                 releaseSpeech()
-                ui { note(PackMessages.forOperation(error)) }
+                ui { note(if(error is ShownError) error.message ?: "" else PackMessages.forOperation(error).resolve(this)) }
             }
             catch(error:LinkageError) {
                 Log.w(TAG,"native speech unavailable",error)
@@ -656,6 +656,8 @@ class MainActivity : Activity(), MeshRadio.Listener {
     }
     private fun ui(action:()->Unit) { runOnUiThread { if(!isDestroyed) action() } }
     private fun note(text:String) { operationStatus.text=text }
+    private fun note(text:UiText) { note(text.resolve(this)) }
+    override fun attachBaseContext(base:Context) { super.attachBaseContext(Locales.wrap(base,"fr")) }
     private fun updateControls() {
         record.isEnabled=!busy
         preview.isEnabled=!busy && !recording && selected is Readiness.Ready

@@ -50,7 +50,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
     fun start(entry: CatalogEntry): DownloadDecision = synchronized(LOCK) {
         require(entry in catalog) { "Pack de langue inconnu" }
         // Its previous download is being installed from the same file name.
-        if (entry.id in installing.keys) throw PackDownloadFailure("Attendez la fin de l'opération.")
+        if (entry.id in installing.keys) throw PackDownloadFailure(UiText(R.string.wait_for_operation))
         val decision = DownloadPlan.decide(entry, downloadsDir().usableSpace)
         if (decision != DownloadDecision.Start) return@synchronized decision
         pending()[entry.id]?.let { forget(entry.id, it) }
@@ -60,7 +60,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            .setTitle(PackDownloadText.title(entry))
+            .setTitle(PackDownloadText.title(entry).resolve(context))
         val id = dm.enqueue(request)
         prefs.edit().putLong(entry.id, id).commit()
         decision
@@ -129,7 +129,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         }
         if (row == null) {
             forget(packId, id)
-            return Outcome.Done(Result.failure(PackDownloadFailure("Échec du téléchargement")))
+            return Outcome.Done(Result.failure(PackDownloadFailure(UiText(R.string.download_failed))))
         }
         val (status, reason, localUri) = row
         return when (status) {
@@ -223,21 +223,21 @@ class PackDownloads(private val context: Context, private val store: PackStore,
     }
 }
 
-/** A download-level failure whose message is already a short plain-French sentence for the screen. */
-class PackDownloadFailure(message: String) : IOException(message)
+/** A download-level failure whose text is already a short sentence for the screen. */
+class PackDownloadFailure(val text: UiText) : IOException("pack download failure ${text.id}")
 
-/** Short plain-French wording for download notifications and failures (no ids or codes). */
+/** Plain wording for download notifications and failures (no ids or codes). */
 internal object PackDownloadText {
-    fun title(entry: CatalogEntry): String = when (entry.kind) {
-        PackKind.ENGINE -> "Pack de reconnaissance vocale"
-        PackKind.VOICE -> "Pack de langue " + language(entry)
+    fun title(entry: CatalogEntry): UiText = when (entry.kind) {
+        PackKind.ENGINE -> UiText(R.string.pack_title_engine)
+        PackKind.VOICE -> UiText(R.string.pack_title_voice, listOf(language(entry)))
     }
 
     /** The pack's name in the pack list: the language in its own words, or the recognition model. */
-    fun name(entry: CatalogEntry): String = when (entry.kind) {
-        PackKind.ENGINE -> "Reconnaissance vocale (" +
-            entry.id.removePrefix("engine-whisper-").replaceFirstChar { it.titlecase(Locale.ROOT) } + ")"
-        PackKind.VOICE -> language(entry)
+    fun name(entry: CatalogEntry): UiText = when (entry.kind) {
+        PackKind.ENGINE -> UiText(R.string.pack_engine_name,
+            listOf(entry.id.removePrefix("engine-whisper-").replaceFirstChar { it.titlecase(Locale.ROOT) }))
+        PackKind.VOICE -> UiText(R.string.plain, listOf(language(entry)))
     }
 
     private fun language(entry: CatalogEntry): String {
@@ -245,11 +245,13 @@ internal object PackDownloadText {
         return locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
     }
 
-    fun failure(reason: Int): String = when (reason) {
-        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Pas assez d'espace sur le téléphone."
-        DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_UNHANDLED_HTTP_CODE,
-        DownloadManager.ERROR_TOO_MANY_REDIRECTS, DownloadManager.ERROR_CANNOT_RESUME,
-        in 400..599 -> "Problème de connexion. Réessayez."
-        else -> "Échec du téléchargement"
-    }
+    fun failure(reason: Int): UiText = UiText(
+        when (reason) {
+            DownloadManager.ERROR_INSUFFICIENT_SPACE -> R.string.no_space
+            DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_UNHANDLED_HTTP_CODE,
+            DownloadManager.ERROR_TOO_MANY_REDIRECTS, DownloadManager.ERROR_CANNOT_RESUME,
+            in 400..599 -> R.string.connection_problem
+            else -> R.string.download_failed
+        },
+    )
 }

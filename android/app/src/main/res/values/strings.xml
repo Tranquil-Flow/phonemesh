@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Phonemesh</string>
+    <string name="plain" translatable="false">%1$s</string>
+
+    <string name="language_title">Choose your language</string>
+    <string name="radio_connected">Radio connected</string>
+    <string name="radio_not_connected">Radio not connected</string>
+
+    <string name="chats_title">Chats</string>
+    <string name="settings">Settings</string>
+    <string name="setup_voice_title">English voice</string>
+    <string name="setup_voice_card">%1$s · %2$d MB · one time only</string>
+    <string name="setup_download">Download</string>
+    <string name="setup_file">File</string>
+    <string name="progress_percent">↓ %1$d%%</string>
+    <string name="setup_radio_title">Connect the radio</string>
+    <string name="setup_radio_hint">Turn on the radio, then tap.</string>
+    <string name="setup_search">Search</string>
+    <string name="setup_done">Ready</string>
+    <string name="group_name">Group</string>
+    <string name="unnamed_radio">Radio %1$s</string>
+    <string name="no_messages">No messages yet</string>
+    <string name="new_private_chat">New private chat</string>
+    <string name="radios_heard">Radios heard</string>
+    <string name="no_radio_heard">No radio heard yet.</string>
+    <string name="people_heard">People heard: %1$d</string>
+    <string name="unread">Unread: %1$d</string>
+    <string name="sender_prefix">%1$s: %2$s</string>
+    <string name="you">You</string>
+
+    <string name="talk">Talk</string>
+    <string name="keyboard">Keyboard</string>
+    <string name="slide_to_cancel">◀ Cancel</string>
+    <string name="recording_locked">Recording locked</string>
+    <string name="stop_recording">Stop</string>
+    <string name="draft_clear">Clear</string>
+    <string name="listen">Listen</string>
+    <string name="stop_listening">Stop listening</string>
+    <string name="send">Send</string>
+    <string name="draft_hint">Type here</string>
+    <string name="too_long">Too long. Make it shorter.</string>
+    <string name="status_waiting">Waiting</string>
+    <string name="status_sent">Sent</string>
+    <string name="status_delivered">Delivered</string>
+    <string name="status_unconfirmed">Not confirmed</string>
+    <string name="status_failed">Failed</string>
+    <string name="resend">Send again</string>
+    <string name="voice_fallback">No %1$s voice. Using your voice.</string>
+    <string name="voice_missing">Voice missing. Add it in Chats.</string>
+    <string name="play_failed">Cannot play this.</string>
+    <string name="record_too_short">Too short. Try again.</string>
+    <string name="record_failed">Microphone unavailable.</string>
+    <string name="mic_denied">Microphone refused. You can still type.</string>
+    <string name="transcribe_failed">Not understood. Try again.</string>
+
+    <string name="radio_title">Radio</string>
+    <string name="radio_searching">Searching…</string>
+    <string name="radio_help">Not found? Turn on the radio. Come closer.</string>
+    <string name="radio_connecting">Connecting…</string>
+    <string name="radio_connected_to">Connected: %1$s</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="bluetooth_off">Turn on Bluetooth.</string>
+    <string name="bluetooth_refused">Bluetooth refused.</string>
+    <string name="signal_bars">Signal %1$d of 4</string>
+
+    <string name="settings_language">Language</string>
+    <string name="settings_packs">Languages (packs)</string>
+    <string name="settings_model">Speech model</string>
+    <string name="model_tiny">Tiny · light</string>
+    <string name="model_base">Base · larger</string>
+    <string name="share_app">Share the app</string>
+    <string name="licences">Licences</string>
+    <string name="close">Close</string>
+
+    <string name="pack_damaged">Damaged file. Download it again.</string>
+    <string name="pack_wrong_file">This is not a Phonemesh pack.</string>
+    <string name="pack_unknown">Unknown pack. It was refused.</string>
+    <string name="pack_older">A newer version is installed.</string>
+    <string name="no_space">Not enough space on the phone.</string>
+    <string name="pack_unsafe">File refused for your safety.</string>
+    <string name="download_failed_retry">Download failed. Try again.</string>
+    <string name="generic_failed">Failed. Try again.</string>
+    <string name="pack_remove_failed">Could not remove the pack.</string>
+    <string name="file_unreachable">Cannot open the file. Try again.</string>
+    <string name="operation_failed">Could not do that. Try again.</string>
+    <string name="pack_skipped">Damaged pack, not shared: %1$s.</string>
+    <string name="import_progress">Importing: %1$d MB</string>
+    <string name="share_progress">Sharing: %1$d MB</string>
+    <string name="connection_problem">Connection problem. Try again.</string>
+    <string name="download_failed">Download failed</string>
+    <string name="pack_title_engine">Speech recognition pack</string>
+    <string name="pack_title_voice">Language pack %1$s</string>
+    <string name="pack_engine_name">Speech recognition (%1$s)</string>
+    <string name="wait_for_operation">Wait for the current task.</string>
+    <string name="pack_imported">Pack added: %1$s</string>
+    <string name="pack_installed">Pack installed: %1$s</string>
+    <string name="pack_removed">Pack removed: %1$s</string>
+    <string name="download_cancelled">Download cancelled: %1$s</string>
+    <string name="download_started">Downloading: %1$s</string>
+    <string name="install_pack_title">Install this language pack?</string>
+    <string name="install">Install</string>
+    <string name="cancel">Cancel</string>
+    <string name="pack_download_button">Download (%1$d MB)</string>
+    <string name="pack_download_cd">Download %1$s</string>
+    <string name="pack_cancel_cd">Cancel %1$s</string>
+    <string name="pack_remove">Remove</string>
+    <string name="pack_remove_cd">Remove %1$s</string>
+    <string name="pack_installed_label">Installed</string>
+    <string name="share_choose">Choose an app to share.</string>
+</resources>

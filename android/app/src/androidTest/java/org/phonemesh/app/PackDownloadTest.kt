@@ -128,7 +128,7 @@ class PackDownloadTest {
         var results = emptyList<Result<PackInfo>>()
         waitFor(60) { results = missing.collectFinished(); results.isNotEmpty() }
         assertEquals(1, results.size)
-        assertEquals("Problème de connexion. Réessayez.", results.single().exceptionOrNull()?.message)
+        assertEquals(UiText(R.string.connection_problem), (results.single().exceptionOrNull() as PackDownloadFailure).text)
         assertTrue(missing.pending().isEmpty())
         assertTrue(store.list().isEmpty())
         assertTrue(downloadsEmpty())

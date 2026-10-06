@@ -5,10 +5,10 @@ import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackKind
 
 /** One line of the pack list: a plain name and what the user can do with the pack. */
-data class PackRow(val id: String, val kind: PackKind, val name: String, val entry: CatalogEntry?, val action: Action) {
+data class PackRow(val id: String, val kind: PackKind, val name: UiText, val entry: CatalogEntry?, val action: Action) {
     sealed interface Action {
         object Download : Action
-        data class Progress(val percent: Int) : Action { val text get() = "↓ $percent %" }
+        data class Progress(val percent: Int) : Action
         object Remove : Action
         /** Installed, but it cannot be removed (the only engine). */
         object None : Action
@@ -32,7 +32,7 @@ object PackRows {
         }
         val catalogIds = catalog.map { it.id }.toSet()
         val extra = installed.filter { it.id !in catalogIds }.sortedBy { it.kind != PackKind.ENGINE }
-            .map { PackRow(it.id, it.kind, it.label, null, removable(it.kind)) }
+            .map { PackRow(it.id, it.kind, UiText(R.string.plain, listOf(it.label)), null, removable(it.kind)) }
         return known + extra
     }
 

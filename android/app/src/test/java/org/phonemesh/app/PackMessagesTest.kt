@@ -2,69 +2,50 @@ package org.phonemesh.app
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.phonemesh.core.DownloadDecision
 import org.phonemesh.core.PackRejected
 import java.io.FileNotFoundException
 import java.io.IOException
 
+/** Wording lives in strings.xml (StringsFileTest checks length and words); these check which sentence is chosen. */
 class PackMessagesTest {
-    @Test fun eachReasonHasItsOwnShortMessage() {
+    @Test fun eachReasonHasItsOwnMessage() {
         val texts = PackRejected.Reason.values().map { PackMessages.forFailure(PackRejected(it, "x")) }
         assertEquals(texts.size, texts.toSet().size)
-        texts.forEach { assertTrue(it, it.split(" ").size <= 8) }
     }
     @Test fun unknownErrorsGetAGenericMessage() =
-        assertEquals("Échec. Réessayez.", PackMessages.forFailure(IllegalStateException("boom")))
+        assertEquals(UiText(R.string.generic_failed), PackMessages.forFailure(IllegalStateException("boom")))
     @Test fun lowSpaceDecisionIsExplained() =
-        assertEquals("Pas assez d'espace sur le téléphone.", PackMessages.forDecision(DownloadDecision.NotEnoughSpace(1, 0)))
-
+        assertEquals(UiText(R.string.no_space), PackMessages.forDecision(DownloadDecision.NotEnoughSpace(1, 0)))
     @Test fun startNeedsNoMessage() = assertNull(PackMessages.forDecision(DownloadDecision.Start))
-
     @Test fun inputOutputErrorsAreDownloadFailuresWithoutTheRawMessage() =
-        assertEquals("Échec du téléchargement. Réessayez.", PackMessages.forFailure(IOException("ENOENT /data/x")))
-
-    @Test fun plainDownloadFailuresKeepTheirSentence() {
-        listOf("Pas assez d'espace sur le téléphone.", "Problème de connexion. Réessayez.", "Échec du téléchargement").forEach {
-            assertEquals(it, PackMessages.forFailure(PackDownloadFailure(it)))
+        assertEquals(UiText(R.string.download_failed_retry), PackMessages.forFailure(IOException("ENOENT /data/x")))
+    @Test fun plainDownloadFailuresKeepTheirText() {
+        listOf(R.string.no_space, R.string.connection_problem, R.string.download_failed).forEach {
+            assertEquals(UiText(it), PackMessages.forFailure(PackDownloadFailure(UiText(it))))
         }
     }
-
-    @Test fun removalFailureNeverMentionsDownloading() {
-        assertEquals("Impossible de retirer le pack.", PackMessages.REMOVE_FAILED)
-        assertTrue(!PackMessages.REMOVE_FAILED.contains("téléchargement", ignoreCase = true))
-    }
-
-    @Test fun rejectionMessagesAreTheFixedSentencesNotTheRawOnes() =
-        assertEquals("Fichier abîmé. Téléchargez-le à nouveau.",
-            PackMessages.forFailure(PackRejected(PackRejected.Reason.DAMAGED, "Fichier endommagé : tts/model.onnx")))
-
-    @Test fun importFailuresSayTheFileIsUnreachableNotTheDownload() {
+    @Test fun removalFailureHasItsOwnText() = assertEquals(UiText(R.string.pack_remove_failed), PackMessages.REMOVE_FAILED)
+    @Test fun rejectionMessagesAreTheFixedSentences() = assertEquals(UiText(R.string.pack_damaged),
+        PackMessages.forFailure(PackRejected(PackRejected.Reason.DAMAGED, "Fichier endommagé : tts/model.onnx")))
+    @Test fun importFailuresSayTheFileIsUnreachable() {
         for (error in listOf(IOException("EACCES /storage/x"), FileNotFoundException("content://x"))) {
-            assertEquals("Fichier inaccessible. Réessayez.", PackMessages.forImportFailure(error))
+            assertEquals(UiText(R.string.file_unreachable), PackMessages.forImportFailure(error))
         }
-        assertTrue(PackMessages.forImportFailure(IOException()).split(" ").size <= 8)
-        assertEquals("Pack inconnu. Il a été refusé.",
-            PackMessages.forImportFailure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "x")))
+        assertEquals(UiText(R.string.pack_unknown), PackMessages.forImportFailure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "x")))
     }
-
     @Test fun operationFailuresNeverShowTheRawText() {
-        assertEquals("Opération impossible. Réessayez.",
-            PackMessages.forOperation(IllegalStateException("Cannot update /data/user/0/org.phonemesh.app/files/espeak-ng-data/phontab")))
-        assertEquals("Opération impossible. Réessayez.", PackMessages.forOperation(IOException("Speech voice pack root is not a directory")))
-        assertEquals("Pas assez d'espace sur le téléphone.", PackMessages.forOperation(IOException("write failed: ENOSPC (No space left on device)")))
-        assertEquals("Texte trop long : 200 octets maximum.", PackMessages.forOperation(ShownError("Texte trop long : 200 octets maximum.")))
-        assertEquals("Fichier abîmé. Téléchargez-le à nouveau.", PackMessages.forOperation(PackRejected(PackRejected.Reason.DAMAGED, "x")))
+        assertEquals(UiText(R.string.operation_failed), PackMessages.forOperation(IllegalStateException("Cannot update /data/x")))
+        assertEquals(UiText(R.string.no_space), PackMessages.forOperation(IOException("write failed: ENOSPC (No space left on device)")))
+        assertEquals(UiText(R.string.pack_damaged), PackMessages.forOperation(PackRejected(PackRejected.Reason.DAMAGED, "x")))
     }
-
     @Test fun progressIsCountedInWholeMegabytes() {
-        assertEquals("Import : 12 Mo", PackMessages.importProgress(12_345_678))
-        assertEquals("Partage : 5 Mo", PackMessages.shareProgress(5_000_000))
+        assertEquals(UiText(R.string.import_progress, listOf(12L)), PackMessages.importProgress(12_345_678))
+        assertEquals(UiText(R.string.share_progress, listOf(5L)), PackMessages.shareProgress(5_000_000))
     }
-
-    @Test fun skippedPacksAreNamedInPlainWords() {
+    @Test fun skippedPacksAreNamed() {
         assertNull(PackMessages.forSkipped(emptyList()))
-        assertEquals("Pack abîmé, non partagé : Français.", PackMessages.forSkipped(listOf("Français")))
+        assertEquals(UiText(R.string.pack_skipped, listOf("Français")), PackMessages.forSkipped(listOf("Français")))
     }
 }

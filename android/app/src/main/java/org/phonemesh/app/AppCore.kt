@@ -61,6 +61,9 @@ class AppCore private constructor(
         private set
     var scanning = false
         private set
+    /** How many times the radio has reported itself ready; a screen compares it to tell a new connection from an old one. */
+    var readyReports = 0
+        private set
     /** The radio the user last asked to connect to, until it connects. */
     var connectingAddress: String? = null
         private set
@@ -184,7 +187,10 @@ class AppCore private constructor(
     }
 
     /** True while a connection asked for in the last 35 s has not finished (the radio gives up after 30 s). */
-    fun isConnecting(address: String): Boolean = connectingAddress == address && !connected &&
+    fun isConnecting(address: String): Boolean = !connected && isAttempting(address)
+
+    /** Like [isConnecting], but also true while another radio is still connected and this one was just asked for. */
+    fun isAttempting(address: String): Boolean = connectingAddress == address &&
         SystemClock.elapsedRealtime() - connectingSince < connectWaitMs
 
     /** The user let the radio go: it is forgotten, so it does not reconnect by itself. */
@@ -213,6 +219,7 @@ class AppCore private constructor(
     override fun onState(connected: Boolean, detail: String) {
         val was = this.connected
         this.connected = connected
+        if (connected) readyReports++
         // Only success ends an attempt here; false is progress too (the radio reports it many times while connecting).
         val attempting = connectingAddress != null
         if (connected) endAttempt()
@@ -281,6 +288,10 @@ class AppCore private constructor(
             if (chat.kind == ChatKind.GROUP) PeopleHeard.count(history.sendersHeard(chat.id), null) else null,
         )
     }
+
+    /** A radio's name for screens: "Radio EE01" when it has none (blank, missing, or just its address). */
+    fun radioLabel(name: String?, address: String?): String =
+        if (name.isNullOrBlank() || name == address) text(unnamedRadio(address.orEmpty())) else name
 
     fun senderName(id: String): String = knownName(id) ?: text(unnamedRadio(id))
 
@@ -637,7 +648,8 @@ class AppCore private constructor(
         )
 
         /** "Radio 4a2f": the last four hex digits of a radio id with no name yet. */
-        fun unnamedRadio(id: String) = UiText(R.string.unnamed_radio, listOf(id.removePrefix("!").takeLast(4)))
+        fun unnamedRadio(id: String) =
+            UiText(R.string.unnamed_radio, listOf(id.removePrefix("!").filter { it.isLetterOrDigit() }.takeLast(4)))
 
         // Test hook: swaps the process-wide core; null lets the next get() build the real one.
         internal fun replaceForTest(core: AppCore?) = synchronized(this) {

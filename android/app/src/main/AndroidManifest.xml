@@ -21,6 +21,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".LanguageActivity" android:exported="false" />
+        <activity android:name=".RadioActivity" android:exported="false" />
         <provider android:name=".ShareProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true" />
     </application>

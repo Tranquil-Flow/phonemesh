@@ -1,2 +1,0 @@
--keep class org.phonemesh.mesh.** { *; }
--keep class com.geeksville.mesh.** { *; }

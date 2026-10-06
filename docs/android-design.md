@@ -26,8 +26,8 @@ The app therefore uses **direct Meshtastic Bluetooth GATT**, with official proto
 schemas, rather than pretending a legacy AIDL bridge works against the current app.
 Only one application should hold a node's Bluetooth connection: disconnect the stock
 Meshtastic app before connecting in Phonemesh. Configure channel/region/keys with the
-stock app first. Phonemesh does not change them. The standalone `mesh-bridge` module
-records the historical AIDL investigation; it is not a runtime app dependency.
+stock app first. Phonemesh does not change them. The AIDL investigation record in
+`docs/android-aidl-investigation.md` is historical; it is not a runtime app dependency.
 
 Submission/queueing, GATT write completion, peer radio reception, read and playback
 are distinct events. The UI must not display a submission as confirmed delivery.

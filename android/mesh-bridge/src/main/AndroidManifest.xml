@@ -1,9 +1,0 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Required on Android 11+ so clients can discover/bind the Meshtastic app. -->
-    <queries>
-        <package android:name="com.geeksville.mesh" />
-        <intent>
-            <action android:name="com.geeksville.mesh.Service" />
-        </intent>
-    </queries>
-</manifest>

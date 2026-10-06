@@ -1,4 +1,4 @@
-"""Local pack server for emulator download tests (reached from the emulator at 10.0.2.2).
+"""Local pack server for emulator download tests (reached from the emulator at 10.0.2.2:8777).
 
 Serves files from one directory with ETag and `Range: bytes=N-` support. With --drop-after N the
 first full (non-Range) GET of each file closes the connection after N body bytes, so a client must
@@ -118,7 +118,8 @@ def make_server(directory, port, drop_after=None, log_path=None, host="0.0.0.0")
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dir", required=True, type=Path)
-    p.add_argument("--port", required=True, type=int)
+    # 8777 matches the debug PACK_BASE_URL (8765 is taken by another service on the dev host).
+    p.add_argument("--port", default=8777, type=int)
     p.add_argument("--drop-after", type=int)
     p.add_argument("--log", type=Path)
     a = p.parse_args()

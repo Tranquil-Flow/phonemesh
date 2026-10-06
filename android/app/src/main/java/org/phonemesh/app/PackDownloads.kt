@@ -4,15 +4,18 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import org.phonemesh.core.CatalogEntry
 import org.phonemesh.core.DownloadDecision
 import org.phonemesh.core.DownloadPlan
 import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.PackInfo
+import org.phonemesh.core.PackKind
 import org.phonemesh.core.PackRejected
 import org.phonemesh.core.PackStore
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 
 /**
  * The app's only network use: language packs fetched by the system [DownloadManager] from
@@ -52,7 +55,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            .setTitle(entry.id)
+            .setTitle(PackDownloadText.title(entry))
         val id = dm.enqueue(request)
         prefs.edit().putLong(entry.id, id).commit()
         decision
@@ -73,53 +76,64 @@ class PackDownloads(private val context: Context, private val store: PackStore,
 
     /**
      * Installs every successfully finished download once and reports every failed one; running
-     * downloads are left alone. The preference is dropped before installing, so a crash mid-install
-     * cannot install twice, and the ZIP is deleted on every path.
+     * downloads are left alone. The preference is durably dropped before installing (a download
+     * whose preference cannot be dropped stays pending for the next call), so a crash mid-install
+     * cannot install twice. Every collected download has its ZIP deleted and its system row removed,
+     * and a failure in one download becomes that download's result without stopping the others.
      */
     fun collectFinished(): List<Result<PackInfo>> = synchronized(LOCK) {
         val results = mutableListOf<Result<PackInfo>>()
         for ((packId, id) in pending()) {
-            val row = dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
-                if (!c.moveToFirst()) null
-                else Triple(c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
-                    c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
-                    c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)))
-            }
-            val entry = catalog.firstOrNull { it.id == packId }
-            if (row == null) {
-                forget(packId, id)
-                results += Result.failure(IOException("Téléchargement introuvable"))
-                continue
-            }
-            val (status, reason, localUri) = row
-            when (status) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    prefs.edit().remove(packId).commit()
-                    val file = downloadedFile(localUri) ?: entry?.let { destination(it) }
-                    try {
-                        results += when {
-                            entry == null || file == null ->
-                                Result.failure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "Pack de langue inconnu"))
-                            !DownloadPlan.sizeMatches(entry, file.length()) ->
-                                Result.failure(PackRejected(PackRejected.Reason.DAMAGED, "Téléchargement incomplet"))
-                            else -> try {
-                                Result.success(file.inputStream().use { store.install(it) })
-                            } catch (e: Exception) {
-                                Result.failure(e)
-                            }
-                        }
-                    } finally {
-                        file?.delete()
-                        dm.remove(id)
-                    }
-                }
-                DownloadManager.STATUS_FAILED -> {
-                    forget(packId, id)
-                    results += Result.failure(IOException("Échec du téléchargement (code $reason)"))
-                }
+            try {
+                collect(packId, id)?.let { results += it }
+            } catch (e: Exception) {
+                results += Result.failure(e)
             }
         }
         results
+    }
+
+    /** One download's result, or null while it is still running or could not be claimed. */
+    private fun collect(packId: String, id: Long): Result<PackInfo>? {
+        val row = dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
+            if (!c.moveToFirst()) null
+            else Triple(c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
+                c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
+                c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)))
+        }
+        if (row == null) {
+            forget(packId, id)
+            return Result.failure(IOException("Échec du téléchargement"))
+        }
+        val (status, reason, localUri) = row
+        return when (status) {
+            DownloadManager.STATUS_SUCCESSFUL -> {
+                if (!prefs.edit().remove(packId).commit()) return null
+                val entry = catalog.firstOrNull { it.id == packId }
+                var file: File? = null
+                try {
+                    file = downloadedFile(localUri) ?: entry?.let { destination(it) }
+                    when {
+                        entry == null || file == null ->
+                            Result.failure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "Pack de langue inconnu"))
+                        !DownloadPlan.sizeMatches(entry, file.length()) ->
+                            Result.failure(PackRejected(PackRejected.Reason.DAMAGED, "Téléchargement incomplet"))
+                        else -> Result.success(file.inputStream().use { store.install(it) })
+                    }
+                } catch (e: Exception) {
+                    Result.failure(e)
+                } finally {
+                    runCatching { (file ?: entry?.let { destination(it) })?.delete() }
+                    dm.remove(id)
+                }
+            }
+            DownloadManager.STATUS_FAILED -> {
+                Log.w(TAG, "download of $packId failed, reason $reason")
+                forget(packId, id)
+                Result.failure(IOException(PackDownloadText.failure(reason)))
+            }
+            else -> null
+        }
     }
 
     /** Stops a download and deletes whatever it fetched. */
@@ -142,7 +156,27 @@ class PackDownloads(private val context: Context, private val store: PackStore,
 
     private companion object {
         const val DIR = "downloads"
+        const val TAG = "PackDownloads"
         /** Shared by every instance: two instances must never collect the same download. */
         val LOCK = Any()
+    }
+}
+
+/** Short plain-French wording for download notifications and failures (no ids or codes). */
+internal object PackDownloadText {
+    fun title(entry: CatalogEntry): String = when (entry.kind) {
+        PackKind.ENGINE -> "Pack de reconnaissance vocale"
+        PackKind.VOICE -> {
+            val locale = Locale(entry.id.removePrefix("voice-").substringBefore('-'))
+            "Pack de langue " + locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
+        }
+    }
+
+    fun failure(reason: Int): String = when (reason) {
+        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Pas assez d'espace"
+        DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_UNHANDLED_HTTP_CODE,
+        DownloadManager.ERROR_TOO_MANY_REDIRECTS, DownloadManager.ERROR_CANNOT_RESUME,
+        in 400..599 -> "Problème de connexion. Réessayez."
+        else -> "Échec du téléchargement"
     }
 }

@@ -18,7 +18,7 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class NativeSpeechTest {
-    @Test fun realWhisperPiperRoundTripWithoutNetworkOrPlayback() {
+    @Test fun realWhisperPiperRoundTripItselfUsesNoNetworkOrPlayback() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         // Network is used only for setup-time pack downloads (PackDownloads).
         assertEquals(PackageManager.PERMISSION_GRANTED,

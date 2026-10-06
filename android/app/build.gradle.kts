@@ -25,7 +25,7 @@ android {
     buildTypes {
         debug {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
-            buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8765/\"")
+            buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8777/\"")
         }
         release {
             isMinifyEnabled = true

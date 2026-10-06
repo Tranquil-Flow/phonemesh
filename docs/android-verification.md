@@ -75,3 +75,10 @@ Delivery rows/inbox are session-local, not durable message history. Broadcast ha
 - `.local/android-speech-comparison/base-pack-sources.json`
 
 The Phonemesh emulator was shut down. The phone's instrumentation-only APK and benchmark scratch model ZIP/WAV inputs were removed; the production app, installed user packs, Download ZIPs and benchmark result JSON were retained. No commits or radio configuration/key changes were made.
+
+## Phase 3 sub-project 1 size measurements
+
+| Step | arm64 release APK | dex total | note |
+| --- | --- | --- | --- |
+| baseline (before Task 2) | 34573669 bytes | 7416288 bytes | `classes.dex` + `classes2.dex`; 40 `.proto` files packaged (491937 bytes) |
+| protobuf-javalite + no .proto | 33557866 bytes | 4967760 bytes | single `classes.dex`; 0 `.proto` files packaged |

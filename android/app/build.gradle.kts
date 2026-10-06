@@ -21,7 +21,10 @@ android {
     buildTypes {
         release { isMinifyEnabled = false }
     }
-    packaging { jniLibs { useLegacyPackaging = false } }
+    packaging {
+        jniLibs { useLegacyPackaging = false }
+        resources { excludes += setOf("**/*.proto") }
+    }
     splits {
         abi {
             isEnable=true

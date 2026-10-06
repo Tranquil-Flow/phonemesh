@@ -16,6 +16,7 @@ speech = ["faster-whisper==1.2.1", "kokoro==0.9.4", "misaki[en,ja,zh]==0.9.4", "
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.9"]
+packs = ["onnx==1.17.0", "numpy>=1.26,<3"]
 
 [project.scripts]
 phonemesh = "phonemesh.cli:main"

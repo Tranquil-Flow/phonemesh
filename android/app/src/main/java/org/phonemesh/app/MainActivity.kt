@@ -150,6 +150,13 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                     "content://com.android.externalstorage.documents/document/primary%3ADownload"))
             },101)
         }
+        val licences=Button(this).apply { text="Licences"; contentDescription="Licences" }
+        layout.addView(licences)
+        licences.setOnClickListener {
+            val body=TextView(this).apply { text=Notices.TEXT; textSize=13f; setPadding(32,16,32,16); setTextIsSelectable(true) }
+            AlertDialog.Builder(this).setTitle("Licences").setView(ScrollView(this).apply { addView(body) })
+                .setPositiveButton("Fermer",null).show()
+        }
         val shareApp=Button(this).apply { text="Partager l'application"; contentDescription="Share app" }
         layout.addView(shareApp)
         shareApp.setOnClickListener {

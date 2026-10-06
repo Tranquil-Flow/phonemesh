@@ -35,6 +35,7 @@ class AppBoundaryTest {
             instrumentation.runOnMainSync {
                 val views=descendants(activity.window.decorView)
                 assertNotNull(views.firstOrNull { it.contentDescription=="Record speech" })
+                assertNotNull(views.firstOrNull { it.contentDescription=="Licences" })
                 assertFalse((views.first { it.contentDescription=="Review and send" } as Button).isEnabled)
                 assertTrue((views.first { it is Spinner } as Spinner).count>=9)
                 assertEquals(PackageManager.PERMISSION_DENIED,context.checkSelfPermission(Manifest.permission.RECORD_AUDIO))

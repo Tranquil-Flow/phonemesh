@@ -13,6 +13,7 @@
 -keep class kotlin.collections.ArraysKt { *; }
 -keep class kotlin.collections.CollectionsKt { *; }
 -keep class kotlin.collections.MapsKt { *; }
+-keep class kotlin.collections.SetsKt { *; }
 -keep class kotlin.concurrent.ThreadsKt { *; }
 -keep class kotlin.io.ByteStreamsKt { *; }
 -keep class kotlin.io.CloseableKt { *; }

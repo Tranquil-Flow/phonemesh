@@ -110,3 +110,13 @@ Emulator `Phonemesh_API_35` (arm64), `PackEquivalenceTest`, 2/2 pass.
 | fr | quiet | NO | 0.304 | 0.253 |
 
 Totals: reference 1.296 s, candidate 1.659 s, ratio 1.281.
+
+## Task 11 gates: in-app pack downloads
+
+Emulator `Phonemesh_API_35` (arm64), minified debug build, host server `android/scripts/test_pack_server.py` serving `android/model-packs/`, reached from the emulator at `10.0.2.2`. Port 8777 was used because another local service already listened on `127.0.0.1:8765` (the emulator's `10.0.2.2` maps to host loopback, so it would have answered instead); the test takes the port as instrumentation argument `port`.
+
+**Normal run.** `PackDownloadTest`, `OK (4 tests)` (the drop and low-space tests skip by assumption). `voice-fr-siwis` (6334594 bytes) downloads through `DownloadManager`, matches the catalog size, installs through `PackStore`, and the ZIP is deleted; a second `PackDownloads` instance collects a download finished under the first exactly once. Server log: two full `GET`s, no `Range` (one earlier run also showed a `HEAD`).
+
+**Dropped connection: resume observed.** Server started with `--drop-after 1000000`. `PackDownloadTest#resumesAfterTheConnectionDrops`, `OK (1 test)`. The server log shows the first `GET` (no `Range`) cut after 1000000 bytes, then a `GET` with `Range: bytes=1000000-` answered `206` (64, 71 and 75 s later in three runs); the pack then verified and installed.
+
+**Low space.** Small AVD `Phonemesh_API_35_small` (`system-images;android-35;default;arm64-v8a`). The emulator enforces a 6 GB minimum data partition for this image (`disk.dataPartition.size=2G` and `-partition-size 2048` were both raised to 6 GB), so the partition was filled with `fallocate` in `/data/local/tmp` to about 40950 KB available. `PackDownloadTest#lowSpaceIsRefusedBeforeDownloading` (`-e lowspace 1`), `OK (1 test)`: `start()` returned `NotEnoughSpace` and nothing was enqueued. `downloadsVerifiesAndInstalls` on the same device failed only at its first assertion with `NotEnoughSpace(neededBytes=69003782, freeBytes=41934848)`.

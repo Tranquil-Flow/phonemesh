@@ -14,6 +14,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-rules.pro")
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
+        buildConfigField("String", "PACK_BASE_URL", "\"${project.findProperty("phonemesh.packBaseUrl") ?: "https://packs.invalid/"}\"")
     }
     buildFeatures { buildConfig = true }
     compileOptions {
@@ -24,6 +25,7 @@ android {
     buildTypes {
         debug {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
+            buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8765/\"")
         }
         release {
             isMinifyEnabled = true
@@ -39,6 +41,13 @@ android {
         }
     }
     testBuildType = "minifiedDebug"
+    // minifiedDebug does not inherit src/debug; the minified test build must reach the local test server.
+    sourceSets {
+        getByName("minifiedDebug") {
+            manifest.srcFile("src/debug/AndroidManifest.xml")
+            res.srcDirs("src/debug/res")
+        }
+    }
     packaging {
         jniLibs { useLegacyPackaging = true }
         resources { excludes += setOf("**/*.proto") }

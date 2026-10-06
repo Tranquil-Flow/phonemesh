@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -57,6 +58,21 @@ class AppBoundaryTest {
                 activity.finish()
             }
         }
+    }
+
+    @Test fun requestedPermissionsAreExactlyMicrophoneRadioAndPackDownloads() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val requested=context.packageManager.getPackageInfo(context.packageName,PackageManager.GET_PERMISSIONS)
+            .requestedPermissions.orEmpty().toSet()
+        // Network is used only for setup-time pack downloads (PackDownloads).
+        val expected=mutableSetOf(Manifest.permission.RECORD_AUDIO,Manifest.permission.INTERNET,
+            Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT)
+        // Legacy radio permissions are declared with maxSdkVersion and only requested on old Android.
+        if(Build.VERSION.SDK_INT<=30) expected+=listOf(Manifest.permission.BLUETOOTH,
+            Manifest.permission.BLUETOOTH_ADMIN,Manifest.permission.ACCESS_FINE_LOCATION)
+        if(Build.VERSION.SDK_INT<=28) expected+=Manifest.permission.ACCESS_COARSE_LOCATION
+        assertEquals(expected,requested)
+        assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.INTERNET))
     }
 
     @Test fun missingBluetoothPermissionCannotStartAScanOrAdmitASend() {

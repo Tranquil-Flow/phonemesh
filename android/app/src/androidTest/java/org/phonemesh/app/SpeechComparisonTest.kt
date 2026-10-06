@@ -74,8 +74,9 @@ class SpeechComparisonTest {
     @Test
     fun tinyVersusBaseOnFixedSyntheticInput() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        // Network is used only for setup-time pack downloads (PackDownloads).
         assertEquals(
-            PackageManager.PERMISSION_DENIED,
+            PackageManager.PERMISSION_GRANTED,
             context.packageManager.checkPermission(Manifest.permission.INTERNET, context.packageName),
         )
         val sourceDir = checkNotNull(context.getExternalFilesDir(null))

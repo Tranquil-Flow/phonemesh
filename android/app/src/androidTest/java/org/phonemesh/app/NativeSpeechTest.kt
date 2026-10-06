@@ -20,7 +20,8 @@ import java.io.File
 class NativeSpeechTest {
     @Test fun realWhisperPiperRoundTripWithoutNetworkOrPlayback() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals(PackageManager.PERMISSION_DENIED,
+        // Network is used only for setup-time pack downloads (PackDownloads).
+        assertEquals(PackageManager.PERMISSION_GRANTED,
             context.packageManager.checkPermission(Manifest.permission.INTERNET,context.packageName))
         val sourceDir=checkNotNull(context.getExternalFilesDir(null))
         val store=PackStore(File(context.filesDir,"native-test-packs"),GeneratedPackCatalog.entries)

@@ -1,5 +1,8 @@
 import importlib.util
+import zipfile
 from pathlib import Path
+
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "android/scripts/check_network_boundary.py"
 spec = importlib.util.spec_from_file_location("nb", SCRIPT)
@@ -71,3 +74,24 @@ def test_allowlist_file_ignores_comments_and_blank_lines(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("# why\n\nLfoo/Bar; Ljava/net/Socket;  # trailing\n")
     assert nb.load_allowlist(f) == {"Lfoo/Bar; Ljava/net/Socket;"}
+
+
+def test_apk_without_dex_fails(tmp_path):
+
+    apk = tmp_path / "a.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("assets/classes.dex", "x")
+        z.writestr("classes.txt", "x")
+    with pytest.raises(nb.ScanError):
+        nb.dump_apk(apk, "unused")
+
+
+def test_empty_dump_fails():
+    with pytest.raises(nb.ScanError):
+        nb.check_scanned("Processing 'classes.dex'...\n", [])
+
+
+def test_required_class_missing_fails_and_present_passes():
+    with pytest.raises(nb.ScanError):
+        nb.check_scanned(DUMP, ["Lorg/phonemesh/app/Nope;"])
+    nb.check_scanned(DUMP, ["Lorg/phonemesh/app/PackDownloads;"])

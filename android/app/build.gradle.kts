@@ -113,6 +113,7 @@ val checkNetworkBoundary by tasks.registering(Exec::class) {
             "python3", "$rootPath/scripts/check_network_boundary.py", apk.absolutePath,
             "--allowlist", "$rootPath/network-boundary-allowlist.txt",
             "--dexdump", dexdump.absolutePath,
+            "--require-class", "Lorg/phonemesh/app/PackDownloads;",
         )
     }
 }

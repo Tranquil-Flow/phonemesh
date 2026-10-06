@@ -2,6 +2,7 @@
 """Fail if networking APIs appear in the compiled APK outside the allowed callers."""
 
 import argparse
+import re
 import subprocess
 import sys
 import tempfile
@@ -50,10 +51,29 @@ def load_allowlist(path: Path) -> set[str]:
     return entries
 
 
+class ScanError(Exception):
+    """The scan could not be trusted (it would have passed vacuously)."""
+
+
+def descriptors(dump: str) -> set[str]:
+    return {line.split("'")[1] for line in dump.splitlines() if DESCRIPTOR_MARKER in line}
+
+
+def check_scanned(dump: str, required: list[str]) -> None:
+    found = descriptors(dump)
+    if not found:
+        raise ScanError("dexdump output has no class descriptors; nothing was scanned")
+    missing = [c for c in required if c not in found]
+    if missing:
+        raise ScanError(f"required class missing from the scanned dex: {', '.join(missing)}")
+
+
 def dump_apk(apk: Path, dexdump: str) -> str:
     parts = []
     with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(apk) as z:
-        dex_names = [n for n in z.namelist() if n.startswith("classes") and n.endswith(".dex")]
+        dex_names = [n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)]
+        if not dex_names:
+            raise ScanError(f"no classes*.dex in {apk}; nothing was scanned")
         for name in sorted(dex_names):
             dex = Path(tmp) / name
             dex.write_bytes(z.read(name))
@@ -68,8 +88,14 @@ def main() -> int:
     ap.add_argument("apk", type=Path)
     ap.add_argument("--allowlist", type=Path, required=True)
     ap.add_argument("--dexdump", required=True)
+    ap.add_argument("--require-class", action="append", default=[], metavar="DESCRIPTOR")
     args = ap.parse_args()
-    dump = dump_apk(args.apk, args.dexdump)
+    try:
+        dump = dump_apk(args.apk, args.dexdump)
+        check_scanned(dump, args.require_class)
+    except ScanError as e:
+        print(f"NETWORK_BOUNDARY_SCAN_FAILED: {e}", file=sys.stderr)
+        return 1
     found = violations(dump, ALLOWED_CALLERS, load_allowlist(args.allowlist))
     if found:
         print("NETWORK_BOUNDARY_VIOLATIONS", file=sys.stderr)

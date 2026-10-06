@@ -17,6 +17,7 @@ import android.os.Looper
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -137,8 +138,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         layout.addView(disconnect)
         disconnect.setOnClickListener { bridge.disconnect() }
         label("Déconnectez la radio de l'application Meshtastic avant de la connecter ici.",13f)
-        voiceStatus=label("Voix hors ligne : importer un pack de modèles").apply { contentDescription="Offline voice status" }
-        val import=Button(this).apply { text="Importer un pack de modèles ZIP"; contentDescription="Import offline models" }
+        voiceStatus=label("Voix hors ligne : téléchargez les packs de langue").apply { contentDescription="Offline voice status" }
+        val import=Button(this).apply { text="Importer un pack de langue reçu"; contentDescription="Import offline models" }
         layout.addView(import)
         import.setOnClickListener {
             if(busy || recording) { note("Attendez la fin de l'opération."); return@setOnClickListener }
@@ -162,9 +163,12 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         shareApp.setOnClickListener {
             task {
                 try {
-                    val uris=PackSharing.prepare(this,store)
-                    ui { startActivity(Intent.createChooser(PackSharing.shareIntent(this,uris),null)) }
-                } catch(error:Exception) { ui { note(PackMessages.forFailure(error)) } }
+                    val shared=PackSharing.prepare(this,store,onProgress={ bytes -> ui { note(PackMessages.shareProgress(bytes)) } })
+                    ui {
+                        note(PackMessages.forSkipped(shared.skipped.map { nameOf(it) }) ?: "Choisissez l'application pour partager.")
+                        startActivity(Intent.createChooser(PackSharing.shareIntent(this,shared.uris),null))
+                    }
+                } catch(error:Exception) { Log.w(TAG,"share failed",error); ui { note(PackMessages.forFailure(error)) } }
             }
         }
         packList=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; contentDescription="Language packs" }
@@ -194,7 +198,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         record.setOnClickListener {
             if(recording) { microphone.stop(); record.isEnabled=false }
             else if(!busy) {
-                if(selected !is Readiness.Ready) note("Importez d'abord un pack de modèles.")
+                if(selected !is Readiness.Ready) note(missingText())
                 else if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)
                     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO),102)
                 else startRecording()
@@ -209,7 +213,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         preview=Button(this).apply { text="▶ Écouter le brouillon"; contentDescription="Preview speech" }
         layout.addView(preview)
         preview.setOnClickListener {
-            (selected as? Readiness.Ready)?.let { speak(draft.text.toString(),it) } ?: note("Importez les modèles de cette langue.")
+            (selected as? Readiness.Ready)?.let { speak(draft.text.toString(),it) } ?: note(missingText())
         }
         val stopPlayback=Button(this).apply { text="■ Arrêter la lecture"; contentDescription="Stop playback" }
         layout.addView(stopPlayback)
@@ -247,6 +251,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         setContentView(scroll)
         scroll.requestApplyInsets()
         updateControls()
+        // Leftovers of a download whose install was cut short (the store sweeps its own staging dirs).
+        work.execute { runCatching { packDownloads.sweep() }.onFailure { Log.w(TAG,"download sweep failed",it) } }
         if(savedInstanceState==null) openFromIntent(intent)
     }
     private fun refreshPacks() {
@@ -282,7 +288,14 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                     contentDescription="Download ${row.id}"
                     setOnClickListener { download(row) }
                 }
-                is PackRow.Action.Progress -> TextView(this).apply { text=action.text; textSize=15f }
+                is PackRow.Action.Progress -> LinearLayout(this).apply {
+                    orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
+                    addView(TextView(this@MainActivity).apply { text=action.text; textSize=15f })
+                    addView(Button(this@MainActivity).apply {
+                        text="Annuler"; isAllCaps=false; contentDescription="Cancel ${row.id}"
+                        setOnClickListener { cancelDownload(row) }
+                    })
+                }
                 PackRow.Action.Remove -> Button(this).apply {
                     text="Retirer"; isAllCaps=false; contentDescription="Remove ${row.id}"
                     setOnClickListener { remove(row) }
@@ -293,10 +306,17 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         }
     }
     private fun download(row:PackRow) {
+        // An install may be running on the work executor; nothing here may wait for it.
+        if(busy || recording) { note("Attendez la fin de l'opération."); return }
         try {
             val decision=packDownloads.start(checkNotNull(row.entry))
             note(PackMessages.forDecision(decision) ?: "Téléchargement : ${row.name}")
         } catch(error:Exception) { note(PackMessages.forFailure(error)) }
+        pollDownloads()
+    }
+    private fun cancelDownload(row:PackRow) {
+        runCatching { packDownloads.cancel(row.id) }.onFailure { Log.w(TAG,"cancel failed",it) }
+        note("Téléchargement annulé : ${row.name}")
         pollDownloads()
     }
     private fun remove(row:PackRow) {
@@ -331,15 +351,17 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     /** Installs a ZIP the user picked or opened from another app. */
     private fun importPack(uri:Uri) = task {
         try {
-            val input=contentResolver.openInputStream(uri) ?: error("Fichier inaccessible")
-            val installed=input.use { store.install(it) }
+            val input=contentResolver.openInputStream(uri) ?: throw java.io.FileNotFoundException("no stream")
+            ui { note(PackMessages.importProgress(0)) }
+            val installed=ProgressInputStream(input,IMPORT_PROGRESS_STEP) { bytes -> ui { note(PackMessages.importProgress(bytes)) } }
+                .use { store.install(it) }
             releaseSpeechIfGone()
             val preferences=getPreferences(MODE_PRIVATE).edit()
             if(installed.kind==PackKind.ENGINE) preferences.putString("engine",installed.id)
             else preferences.putString("language",installed.languageTag)
             preferences.apply()
             ui { refreshPacks(); note("Pack importé : ${nameOf(installed)}") }
-        } catch(error:Exception) { ui { note(PackMessages.forFailure(error)) } }
+        } catch(error:Exception) { Log.w(TAG,"import failed",error); ui { note(PackMessages.forImportFailure(error)) } }
     }
     /**
      * A ZIP opened or shared from another app (file manager, browser downloads, messaging). Any app
@@ -385,12 +407,20 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         choice?.let { getPreferences(MODE_PRIVATE).edit().putString("engine",it.id).apply() }
         selected=store.readiness(choice?.id,currentLanguage)
         voiceStatus.text=when(val state=selected) {
-            is Readiness.Ready -> "${state.voice.label} • ${engineName(state.engine)} + Piper • hors ligne"
-            Readiness.MissingEngine -> "Téléchargez le moteur vocal"
-            is Readiness.MissingVoice -> "$currentLanguage : texte disponible ; ajoutez la voix"
+            is Readiness.Ready -> "${languageName()} : voix prête, hors ligne"
+            Readiness.MissingEngine -> "Téléchargez la reconnaissance vocale"
+            is Readiness.MissingVoice -> "${languageName()} : texte seulement ; ajoutez la voix"
             is Readiness.UnsupportedLanguage -> "Ce moteur ne gère pas cette langue"
         }
         if(::record.isInitialized && ::send.isInitialized) updateControls()
+    }
+    private fun languageName() = languageChoices.firstOrNull { it.first==currentLanguage }?.second ?: currentLanguage
+    /** What the record and listen buttons need first, in plain words. */
+    private fun missingText() = when(selected) {
+        Readiness.MissingEngine -> "Téléchargez d'abord la reconnaissance vocale."
+        is Readiness.MissingVoice -> "Téléchargez d'abord la voix de cette langue."
+        is Readiness.UnsupportedLanguage -> "Ce moteur ne gère pas cette langue."
+        is Readiness.Ready -> ""
     }
     /** Engine and voice for speaking a received message in [languageTag], if both are installed. */
     private fun readyFor(languageTag:String) =
@@ -411,11 +441,11 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                 requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT),103); return
             }
             val adapter=(getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-            require(adapter!=null) { "Bluetooth indisponible sur cet appareil" }
+            if(adapter==null) { pendingReconnect=false; note("Bluetooth indisponible sur cet appareil."); return }
             if(!adapter.isEnabled) { startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),104); return }
             pendingReconnect=false
             connectRadio(address,getPreferences(MODE_PRIVATE).getString("radioName","Meshtastic") ?: "Meshtastic")
-        } catch(error:Exception) { pendingReconnect=false; note(error.message ?: "Reconnexion impossible") }
+        } catch(error:Exception) { pendingReconnect=false; Log.w(TAG,"reconnect failed",error); note("Reconnexion impossible.") }
     }
     private fun chooseRadio() {
         if(busy || recording) { note("Attendez la fin de l'opération."); return }
@@ -428,7 +458,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                 requestPermissions(permissions,103); return
             }
             val adapter=(getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-            require(adapter!=null) { "Bluetooth indisponible sur cet appareil" }
+            if(adapter==null) { note("Bluetooth indisponible sur cet appareil."); return }
             if(!adapter.isEnabled) {
                 startActivityForResult(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),104); return
             }
@@ -443,7 +473,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             radioDialog?.setOnDismissListener { bridge.stopScan(); radioAdapter=null }
             radioDialog?.show()
             bridge.scan()
-        } catch(error:Exception) { radioDialog?.dismiss(); note(error.message ?: "Bluetooth indisponible") }
+        } catch(error:Exception) { radioDialog?.dismiss(); Log.w(TAG,"radio choice failed",error); note("Bluetooth indisponible.") }
     }
     override fun onDevice(address:String,name:String) {
         if(radioAdapter==null || (address !in radioDevices && radioDevices.size>=50)) return
@@ -484,14 +514,14 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             if(epoch!=captureEpoch) return@ui
             recording=false; record.text="● Enregistrer (30 s maximum)"; record.isEnabled=true
             updateControls()
-            if(error!=null) { note(error); return@ui }
+            if(error!=null) { note(error); return@ui } // already a fixed sentence (MicrophoneCapture)
             task {
                 val text=speech(pack).transcribe(checkNotNull(samples))
                 ui { draft.setText(text); note("Transcription locale terminée. Vérifiez avant l'envoi.") }
             }
         } } } catch(error:Exception) {
             recording=false; record.text="● Enregistrer (30 s maximum)"
-            updateControls(); note(error.message ?: "Microphone indisponible")
+            updateControls(); Log.w(TAG,"microphone start failed",error); note("Microphone indisponible.")
         }
     }
     private fun speak(text:String,pack:Readiness.Ready) {
@@ -499,8 +529,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         val epoch=++playbackEpoch
         stopPlayback()
         task {
-            MessageCodec.validateText(text)
-            require(text.toByteArray().size<=200) { "Texte trop long — 200 octets maximum" }
+            runCatching { MessageCodec.validateText(text) }.onFailure { throw ShownError("Texte vide ou non pris en charge.") }
+            if(text.toByteArray().size>200) throw ShownError("Texte trop long : 200 octets maximum.")
             val audio=speech(pack).synthesize(text)
             val file=File.createTempFile("speech-",".wav",cacheDir)
             WavOutput.write(file,audio.samples,audio.sampleRate)
@@ -514,7 +544,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                     next.setOnErrorListener { _,_,_ -> stopPlayback(); note("Lecture audio impossible"); true }
                     next.prepare(); next.start()
                     note("Lecture locale — aucun audio transmis")
-                } catch(error:Exception) { stopPlayback(); note(error.message ?: "Lecture impossible") }
+                } catch(error:Exception) { stopPlayback(); Log.w(TAG,"playback failed",error); note("Lecture impossible.") }
             }
         }
     }
@@ -524,13 +554,14 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     }
     private fun confirmSend() {
         try {
-            check(connected) { "Connectez une radio Meshtastic d'abord" }
+            if(!connected) throw ShownError("Connectez une radio Meshtastic d'abord")
             val recipient=destination.text.toString().trim()
-            require(recipient=="^all" || Regex("![0-9a-fA-F]{8}").matches(recipient)) { "Identifiant destinataire invalide" }
-            require(recipient.lowercase()!="!ffffffff") { "Pour diffuser, choisissez explicitement ^all" }
-            val index=channel.text.toString().toInt()
-            require(index in 0..7) { "Canal invalide" }
-            val payload=MessageCodec.encode(draft.text.toString(),currentLanguage)
+            if(!(recipient=="^all" || Regex("![0-9a-fA-F]{8}").matches(recipient))) throw ShownError("Identifiant destinataire invalide")
+            if(recipient.lowercase()=="!ffffffff") throw ShownError("Pour diffuser, choisissez explicitement ^all")
+            val index=channel.text.toString().toIntOrNull()
+            if(index==null || index !in 0..7) throw ShownError("Canal invalide")
+            val payload=try { MessageCodec.encode(draft.text.toString(),currentLanguage) }
+                catch(error:IllegalArgumentException) { throw ShownError("Texte vide ou trop long (200 octets maximum).") }
             AlertDialog.Builder(this).setTitle("Envoyer ce texte ?")
                 .setMessage("À $recipient • canal $index • ${payload.toByteArray().size}/200 octets\n\n$payload")
                 .setNegativeButton("Annuler",null)
@@ -541,7 +572,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                         ui { note("Envoi #$id : consultez le suivi ci-dessous. Aucun renvoi automatique.") }
                     }
                 }.show()
-        } catch(error:Exception) { note(error.message ?: "Message invalide") }
+        } catch(error:ShownError) { note(error.message ?: "Message invalide.") }
+        catch(error:Exception) { Log.w(TAG,"send review failed",error); note("Message invalide.") }
     }
     override fun onState(connected:Boolean,detail:String) {
         val wasConnected=this.connected
@@ -601,7 +633,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             })
             inbox.addView(row,0)
             while(inbox.childCount>20) inbox.removeViewAt(inbox.childCount-1)
-        } catch(error:Exception) { note("Message non pris en charge : ${error.message}") }
+        } catch(error:Exception) { Log.w(TAG,"incoming message not shown",error); note("Message non pris en charge.") }
     }
     private fun task(action:()->Unit) {
         if(busy || recording) { note("Une opération est déjà en cours."); return }
@@ -609,10 +641,12 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         work.execute {
             try { action() }
             catch(error:Exception) {
+                Log.w(TAG,"operation failed",error)
                 releaseSpeech()
-                ui { note(error.message ?: "Opération impossible") }
+                ui { note(PackMessages.forOperation(error)) }
             }
             catch(error:LinkageError) {
+                Log.w(TAG,"native speech unavailable",error)
                 releaseSpeech()
                 ui { note("Le moteur vocal natif est indisponible sur cet appareil.") }
             }
@@ -666,6 +700,11 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         microphone.close(); bridge.close()
         work.execute { engine?.close(); engine=null }; work.shutdown()
         super.onDestroy()
+    }
+    private companion object {
+        const val TAG="Phonemesh"
+        /** Import progress is shown every 5 MB. */
+        const val IMPORT_PROGRESS_STEP=5_000_000L
     }
     // Test hook
     internal fun refreshPacksForTest() = runOnUiThread { refreshPacks() }

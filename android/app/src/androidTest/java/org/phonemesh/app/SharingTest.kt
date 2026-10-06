@@ -44,6 +44,11 @@ class SharingTest {
         try {
             PackSharing.rebuild(pack, tmp)
             val second = store("share-b")
+            // Catalog packs only: the rebuilt archive must fit under the import cap.
+            val cap = checkNotNull(second.maxArchiveBytes)
+            assertTrue("rebuilt ${tmp.length()} B is over the $cap B cap", tmp.length() <= cap)
+            File(ctx.getExternalFilesDir(null), "rebuilt-sizes.txt").writeText(
+                "${pack.id} catalog=${voiceZip.length()} rebuilt=${tmp.length()} cap=$cap\n")
             val again = tmp.inputStream().use { second.install(it) }
             assertEquals(pack.id, again.id)
             assertEquals(pack.version, again.version)
@@ -52,7 +57,7 @@ class SharingTest {
 
     @Test fun providerServesOnlyItsDirectory() {
         val (store, _) = installedVoice("share-c")
-        val uris = PackSharing.prepare(ctx, store)
+        val uris = PackSharing.prepare(ctx, store).uris
         assertTrue(uris.size >= 2)
         for (uri in uris) {
             ctx.contentResolver.query(uri, null, null, null, null)!!.use { c ->
@@ -110,6 +115,24 @@ class SharingTest {
         assertTrue(share.listFiles().orEmpty().isEmpty())
     }
 
+    @Test fun aDamagedPackIsLeftOutAndTheAppAndOtherPacksAreShared() {
+        val (store, _) = installedVoice("share-f")
+        val englishZip = File(ctx.getExternalFilesDir(null), "phonemesh-voice-en-US-ljspeech-1.zip")
+        assertTrue("missing ${englishZip.name}", englishZip.isFile)
+        val english = englishZip.inputStream().use { store.install(it) }
+        val model = File(english.root, "tts/model.onnx")
+        assertTrue(model.setReadable(false, false))
+        try {
+            val shared = PackSharing.prepare(ctx, store)
+            assertEquals(listOf("Phonemesh.apk", "phonemesh-voice-fr-siwis-1.zip"), shared.uris.map { it.lastPathSegment })
+            assertEquals(listOf(english.id), shared.skipped.map { it.id })
+            val names = shared.skipped.map { pack -> PackDownloadText.name(GeneratedPackCatalog.entries.first { it.id == pack.id }) }
+            assertEquals("Pack abîmé, non partagé : English.", PackMessages.forSkipped(names))
+            assertEquals(listOf("Phonemesh.apk", "phonemesh-voice-fr-siwis-1.zip"),
+                File(ctx.cacheDir, "share").list().orEmpty().sorted())
+        } finally { model.setReadable(true, false) }
+    }
+
     @Test fun failurePartwayCleansUpAndSkipsSymlinksAndTemps() {
         val (store, pack) = installedVoice("share-e")
         // A symlink inside the pack pointing outside must never be packed.
@@ -129,9 +152,23 @@ class SharingTest {
             // Leftover files from an earlier run are cleared by prepare.
             File(ctx.cacheDir, "share").mkdirs()
             File(ctx.cacheDir, "share/old.zip.tmp").writeText("x")
-            val uris = PackSharing.prepare(ctx, store)
+            val uris = PackSharing.prepare(ctx, store).uris
             assertFalse(File(ctx.cacheDir, "share/old.zip.tmp").exists())
             assertTrue(uris.isNotEmpty())
+            // A write failure partway through the pack (after the APK was copied) cancels the whole
+            // share and leaves nothing behind.
+            val apkBytes = File(ctx.applicationInfo.sourceDir).length()
+            var failedAt = 0L
+            try {
+                PackSharing.prepare(ctx, store, onProgress = { copied ->
+                    if (copied > apkBytes) { failedAt = copied; throw java.io.IOException("injected write failure") }
+                })
+                fail("the injected failure was swallowed")
+            } catch (e: IllegalStateException) {
+                assertTrue(e.cause?.message == "injected write failure")
+            }
+            assertTrue("failed at $failedAt, not inside the pack", failedAt > apkBytes)
+            assertTrue(File(ctx.cacheDir, "share").list().orEmpty().isEmpty())
         } finally { out.delete(); link.delete(); dirLink.delete(); secret.delete() }
     }
 }

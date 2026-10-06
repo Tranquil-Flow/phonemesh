@@ -9,6 +9,7 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -27,8 +28,8 @@ class MicrophoneCapture(private val context:Context) : Closeable {
             var failure:String?=null
             var audio:AudioRecord?=null
             try {
-                check(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) {
-                    "Permission microphone refusée ou révoquée"
+                if(context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {
+                    throw SecurityException("RECORD_AUDIO not granted")
                 }
                 val minimum=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT)
                 check(minimum>0) { "16 kHz recording is unavailable on this phone" }
@@ -51,12 +52,14 @@ class MicrophoneCapture(private val context:Context) : Closeable {
                     if(n<0) { if(active.get()) error("Microphone read failed ($n)") else break }
                     for(i in 0 until n) samples[count++]=buffer[i]/32768f
                 }
-                require(count>=1600) { "Recording is too short" }
-                result=samples.copyOf(count)
+                failure=if(count<1600) "Enregistrement trop court. Réessayez." else null
+                if(failure==null) result=samples.copyOf(count)
             } catch(error:SecurityException) {
                 failure="Permission microphone refusée ou révoquée"
             } catch(error:Exception) {
-                failure=error.message ?: "Microphone unavailable"
+                // Details go to the log; the screen gets a fixed sentence.
+                Log.w("Phonemesh","recording failed",error)
+                failure="Microphone indisponible."
             } finally {
                 handler.removeCallbacks(timeout)
                 active.set(false)

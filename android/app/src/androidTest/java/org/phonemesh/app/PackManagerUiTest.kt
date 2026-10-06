@@ -136,7 +136,7 @@ class PackManagerUiTest {
         tap("Remove voice-fr-siwis")
         assertNull(described("Remove voice-fr-siwis"))
         assertNotNull(described("Download voice-fr-siwis"))
-        assertEquals("fr : texte disponible ; ajoutez la voix", textOf("Offline voice status"))
+        assertEquals("Français : texte seulement ; ajoutez la voix", textOf("Offline voice status"))
         assertFalse("speech still holds the removed voice", activity.speechLoadedForTest())
         assertTrue(PackStore(packDir, GeneratedPackCatalog.entries).list().none { it.id == "voice-fr-siwis" })
     }
@@ -162,6 +162,37 @@ class PackManagerUiTest {
         assertEquals("Attendez la fin de l'opération.", textOf("Operation status"))
         assertNull(activity.importDialogForTest)
         inst.runOnMainSync { activity.recordingForTest = false }
+        assertTrue(installedIds().isEmpty())
+    }
+
+    @Test fun downloadIsRefusedWhileRecording() {
+        val activity = launch()
+        inst.runOnMainSync { activity.recordingForTest = true }
+        tap("Download voice-fr-siwis")
+        assertEquals("Attendez la fin de l'opération.", textOf("Operation status"))
+        inst.runOnMainSync { activity.recordingForTest = false }
+        assertTrue(PackDownloads(context, PackStore(packDir, GeneratedPackCatalog.entries)).pending().isEmpty())
+    }
+
+    @Test fun aDownloadInProgressCanBeCancelled() {
+        // Nothing listens on port 9, so the download keeps waiting to retry instead of finishing.
+        val voice = GeneratedPackCatalog.entries.first { it.id == "voice-fr-siwis" }
+        PackDownloads(context, PackStore(packDir, GeneratedPackCatalog.entries), "http://10.0.2.2:9/").start(voice)
+        launch()
+        assertNotNull("no cancel button while downloading", described("Cancel voice-fr-siwis"))
+        assertEquals("Annuler", textOf("Cancel voice-fr-siwis"))
+        tap("Cancel voice-fr-siwis")
+        assertEquals("Téléchargement annulé : Français", textOf("Operation status"))
+        assertTrue(PackDownloads(context, PackStore(packDir, GeneratedPackCatalog.entries)).pending().isEmpty())
+        assertNull(described("Cancel voice-fr-siwis"))
+        assertNotNull(described("Download voice-fr-siwis"))
+    }
+
+    @Test fun anUnreadableFileGetsItsOwnMessage() {
+        launch()
+        deliver(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(FixturePackProvider.MISSING), "application/zip"))
+        pressDialog(android.content.DialogInterface.BUTTON_POSITIVE)
+        assertEquals("Fichier inaccessible. Réessayez.", textOf("Operation status"))
         assertTrue(installedIds().isEmpty())
     }
 

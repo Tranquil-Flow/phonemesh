@@ -30,5 +30,31 @@ object PackMessages {
         is DownloadDecision.NotEnoughSpace -> NO_SPACE
     }
 
+    /** A picked or received file: an unreadable file is not a download problem. */
+    fun forImportFailure(error: Throwable): String = when (error) {
+        is PackRejected -> forFailure(error)
+        is IOException -> "Fichier inaccessible. Réessayez."
+        else -> GENERIC
+    }
+
+    /** Any other background operation: a fixed sentence, never the exception's own text. */
+    fun forOperation(error: Throwable): String = when {
+        error is ShownError -> error.message ?: OPERATION_FAILED
+        error is PackRejected || error is PackDownloadFailure -> forFailure(error)
+        generateSequence(error) { it.cause }.take(8).any { e -> e.message?.let { "No space" in it || "ENOSPC" in it } == true } -> NO_SPACE
+        else -> OPERATION_FAILED
+    }
+
+    /** Names the damaged packs a share left out, or null if none was. */
+    fun forSkipped(names: List<String>): String? =
+        if (names.isEmpty()) null else "Pack abîmé, non partagé : ${names.joinToString(", ")}."
+
+    fun importProgress(bytes: Long) = "Import : ${bytes / 1_000_000} Mo"
+    fun shareProgress(bytes: Long) = "Partage : ${bytes / 1_000_000} Mo"
+
+    private const val OPERATION_FAILED = "Opération impossible. Réessayez."
     private const val GENERIC = "Échec. Réessayez."
 }
+
+/** A failure whose message is already a short plain-French sentence written for the screen. */
+class ShownError(message: String) : Exception(message)

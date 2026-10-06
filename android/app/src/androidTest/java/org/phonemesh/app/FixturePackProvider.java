@@ -25,6 +25,8 @@ import java.util.zip.ZipOutputStream;
  */
 public class FixturePackProvider extends ContentProvider {
     public static final String VOICE = "content://org.phonemesh.app.test.fixtures/voice.zip";
+    /** Never served: opening it fails like a file that vanished or a grant that was lost. */
+    public static final String MISSING = "content://org.phonemesh.app.test.fixtures/missing.zip";
 
     @Override public boolean onCreate() { return true; }
 

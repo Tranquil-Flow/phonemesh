@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import org.phonemesh.core.PackFormat
 import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackRejected
@@ -19,6 +20,8 @@ import java.util.zip.ZipOutputStream
 object PackSharing {
     private const val FIXED_TIME = 1577836800000L // 2020-01-01
     private const val MARGIN = 50L * 1024 * 1024
+    private const val PROGRESS_STEP = 5_000_000L
+    private const val TAG = "PackSharing"
     private val sumLine = Regex("^[a-fA-F0-9]{64}  (.+)$")
 
     fun authority(context: Context) = "${context.packageName}.share"
@@ -52,35 +55,68 @@ object PackSharing {
         }
     }
 
-    /** Deterministic ZIP of one installed pack: sorted entries, fixed time, DEFLATED level 9. */
-    fun rebuild(pack: PackInfo, out: File) {
+    /**
+     * Deterministic ZIP of one installed pack: sorted entries, fixed time. The `*.onnx` model
+     * tensors barely compress and dominate the time, so they are deflated at BEST_SPEED; every
+     * other file at BEST_COMPRESSION. Receivers verify the files by manifest, not the ZIP bytes.
+     * [onBytes] is told how many source bytes were copied after each buffer.
+     */
+    fun rebuild(pack: PackInfo, out: File, onBytes: (Int) -> Unit = {}) {
         val files = packFiles(pack)
         ZipOutputStream(out.outputStream().buffered()).use { zip ->
-            zip.setLevel(Deflater.BEST_COMPRESSION)
             zip.setMethod(ZipOutputStream.DEFLATED)
+            val buffer = ByteArray(65536)
             for ((path, file) in files) {
+                zip.setLevel(if (path.endsWith(".onnx")) Deflater.BEST_SPEED else Deflater.BEST_COMPRESSION)
                 val entry = ZipEntry(path)
                 entry.time = FIXED_TIME
                 zip.putNextEntry(entry)
-                file.inputStream().use { it.copyTo(zip) }
+                val input = try { file.inputStream() } catch (e: IOException) { throw Unreadable(e) }
+                input.use {
+                    while (true) {
+                        val n = try { it.read(buffer) } catch (e: IOException) { throw Unreadable(e) }
+                        if (n < 0) break
+                        zip.write(buffer, 0, n)
+                        onBytes(n)
+                    }
+                }
                 zip.closeEntry()
             }
         }
     }
 
+    /** A file of an installed pack could not be read (the pack is damaged, not the share). */
+    private class Unreadable(cause: IOException) : IOException(cause)
+
+    /** What [prepare] made ready: the content URIs, and the installed packs left out because they are damaged. */
+    class Prepared(val uris: List<Uri>, val skipped: List<PackInfo>)
+
     /**
      * Copies the installed APK and rebuilds each installed pack into `cacheDir/share`, returning
-     * their content URIs. [freeSpace] reports usable bytes for a directory (replaceable in tests).
+     * their content URIs. A pack whose files cannot be listed or read is left out (and named in
+     * [Prepared.skipped]) so the APK and the other packs are still shared; any other failure
+     * cancels the whole share and leaves nothing behind. [freeSpace] reports usable bytes for a
+     * directory (replaceable in tests); [onProgress] gets the bytes copied so far, every 5 MB.
      */
-    fun prepare(context: Context, store: PackStore, freeSpace: (File) -> Long = { it.usableSpace }): List<Uri> {
+    fun prepare(context: Context, store: PackStore, freeSpace: (File) -> Long = { it.usableSpace },
+        onProgress: (Long) -> Unit = {}): Prepared {
         val share = File(context.cacheDir, "share")
         share.deleteRecursively() // Also clears leftovers of an interrupted earlier run.
         try {
             val apk = File(context.applicationInfo.sourceDir)
-            val packs = store.list().map { it to packFiles(it) }
+            val skipped = ArrayList<PackInfo>()
+            val packs = store.list().mapNotNull { pack ->
+                try { pack to packFiles(pack) } catch (e: PackRejected) { Log.w(TAG, "not sharing ${pack.id}", e); skipped += pack; null }
+            }
             val needed = apk.length() + packs.sumOf { (_, files) -> files.sumOf { it.second.length() } } + MARGIN
             if (freeSpace(context.cacheDir) < needed) throw PackRejected(PackRejected.Reason.NO_SPACE, "Espace insuffisant")
             if (!share.mkdirs()) throw IOException("Cannot create share directory")
+            var copied = 0L
+            var next = PROGRESS_STEP
+            val count = { n: Int ->
+                copied += n
+                if (copied >= next) { next = (copied / PROGRESS_STEP + 1) * PROGRESS_STEP; onProgress(copied) }
+            }
             val names = ArrayList<String>()
             fun publish(name: String, write: (File) -> Unit) {
                 val tmp = File(share, "$name.tmp")
@@ -88,9 +124,24 @@ object PackSharing {
                 if (!tmp.renameTo(File(share, name))) throw IOException("Cannot publish $name")
                 names += name
             }
-            publish("Phonemesh.apk") { apk.copyTo(it, overwrite = true) }
-            for ((pack, _) in packs) publish("phonemesh-${pack.id}-${pack.version}.zip") { rebuild(pack, it) }
-            return names.map { Uri.parse("content://${authority(context)}/$it") }
+            publish("Phonemesh.apk") { tmp ->
+                apk.inputStream().use { input -> tmp.outputStream().use { out ->
+                    val buffer = ByteArray(65536)
+                    while (true) { val n = input.read(buffer); if (n < 0) break; out.write(buffer, 0, n); count(n) }
+                } }
+            }
+            for ((pack, _) in packs) {
+                val name = "phonemesh-${pack.id}-${pack.version}.zip"
+                try {
+                    publish(name) { rebuild(pack, it, count) }
+                } catch (e: Exception) {
+                    if (e !is PackRejected && e !is Unreadable) throw e
+                    Log.w(TAG, "not sharing ${pack.id}", e)
+                    File(share, "$name.tmp").delete()
+                    skipped += pack
+                }
+            }
+            return Prepared(names.map { Uri.parse("content://${authority(context)}/$it") }, skipped)
         } catch (error: Throwable) {
             share.deleteRecursively()
             val noSpace = generateSequence(error) { it.cause }.take(8)

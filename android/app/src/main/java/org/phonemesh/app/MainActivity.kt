@@ -29,6 +29,7 @@ import org.phonemesh.core.readiness
 import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.speech.LocalSpeech
+import org.phonemesh.speech.SharedEspeakData
 import org.phonemesh.speech.SpeechPack
 import java.io.File
 import java.util.concurrent.Executors
@@ -314,8 +315,12 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         val key="${pack.engine.root.absolutePath}|${pack.voice.root.absolutePath}"
         if(engineRoot!=key) {
             engine?.close(); engine=null; engineRoot=null
+            // Every voice shares one espeak-ng copy that pack removal never deletes (see SharedEspeakData).
+            val pronunciation=SharedEspeakData(File(filesDir,"espeak-ng-data"))
             engine=LocalSpeech(SpeechPack(pack.engine.root,pack.voice.root,
-                checkNotNull(pack.voice.languageTag),checkNotNull(pack.voice.whisperLanguage)))
+                checkNotNull(pack.voice.languageTag),checkNotNull(pack.voice.whisperLanguage),
+                espeakDataDir=pronunciation.prepare(pack.voice.root)))
+            pronunciation.markLoaded()
             engineRoot=key
         }
         return checkNotNull(engine)

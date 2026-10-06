@@ -24,7 +24,7 @@ import kotlin.math.sqrt
  *   engineRoot/whisper/tokens.txt
  *   voiceRoot/tts/model.onnx
  *   voiceRoot/tts/tokens.txt
- *   voiceRoot/tts/espeak-ng-data/
+ *   voiceRoot/tts/espeak-ng-data/  (or [SpeechPack.espeakDataDir])
  */
 data class SpeechPack(
     val engineRoot: File,
@@ -34,6 +34,8 @@ data class SpeechPack(
     /** VITS sampling noise; the defaults are production values. Tests pass 0 for determinism. */
     val noiseScale: Float = DEFAULT_NOISE_SCALE,
     val noiseScaleW: Float = DEFAULT_NOISE_SCALE_W,
+    /** espeak-ng data to use instead of the voice pack's own copy (see [SharedEspeakData]). */
+    val espeakDataDir: File? = null,
 )
 
 private const val DEFAULT_NOISE_SCALE: Float = 0.667f
@@ -258,7 +260,9 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
                 val whisperTokens = engineRoot.requiredFile("whisper tokens", "whisper", "tokens.txt")
                 val ttsModel = voiceRoot.requiredFile("Piper/VITS model", "tts", "model.onnx")
                 val ttsTokens = voiceRoot.requiredFile("Piper/VITS tokens", "tts", "tokens.txt")
-                val espeakData = voiceRoot.requiredDirectory("espeak-ng-data", "tts", "espeak-ng-data")
+                val espeakData = pack.espeakDataDir?.canonicalFile?.also {
+                    require(it.isDirectory && it.canRead()) { "espeak-ng-data directory is not readable: ${it.path}" }
+                } ?: voiceRoot.requiredDirectory("espeak-ng-data", "tts", "espeak-ng-data")
 
                 return PackPaths(
                     engineRoot = engineRoot,

@@ -7,6 +7,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.core.GeneratedPackCatalog
@@ -15,6 +16,9 @@ import org.phonemesh.core.PackStore
 import org.phonemesh.speech.LocalSpeech
 import org.phonemesh.speech.SpeechPack
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.security.MessageDigest
 
 /** Gates for trimmed espeak data and the requantized Whisper Tiny decoder. Packs are built with
  *  `build_packs.py --reference` and pushed to the app's external files dir. */
@@ -85,5 +89,50 @@ class PackEquivalenceTest {
         }
         File(ctx.getExternalFilesDir(null), "pack-equivalence.json").writeText(rows.toString(2))
         assertEquals(8, rows.length())
+    }
+
+    /**
+     * Gated (`-e variant fr-full|fr-trimmed|en-full|en-trimmed`): synthesizes with exactly one voice
+     * variant. espeak-ng is set up once per process from the first data directory it is given, so
+     * comparing trimmed with full data needs one `am instrument` run (one process) per variant; the
+     * host compares the sample hashes. The voice's own espeak-ng-data is passed (never the app's
+     * shared copy), and the receipt names the directory espeak-ng was given.
+     */
+    @Test fun singleVariantSynthesis() {
+        val variant = InstrumentationRegistry.getArguments().getString("variant")
+        assumeTrue(variant != null)
+        val (tag, kind) = checkNotNull(variant).split('-', limit = 2)
+        val voiceName = if (tag == "fr") "fr-siwis" else "en-US-ljspeech"
+        val languageTag = if (tag == "fr") "fr" else "en-US"
+        val dir = File(ctx.filesDir, "espeak-variant-$variant")
+        dir.deleteRecursively()
+        val store = PackStore(dir, GeneratedPackCatalog.entries, allowUnknown = true)
+        val engine = install(store, "phonemesh-engine-whisper-tiny-1.zip")
+        val voice = install(store, if (kind == "full") "phonemesh-voice-$voiceName-full-1.zip" else "phonemesh-voice-$voiceName-1.zip")
+        val espeakDir = File(voice.root, "tts/espeak-ng-data").canonicalFile
+        val espeakFiles = espeakDir.walkTopDown().filter { it.isFile }.toList()
+        val rows = JSONArray()
+        LocalSpeech(SpeechPack(engine.root, voice.root, languageTag, tag, noiseScale = 0f, noiseScaleW = 0f, espeakDataDir = espeakDir))
+            .use { speech ->
+                for ((_, text) in sentences.filter { it.first == languageTag }) {
+                    val audio = speech.synthesize(text)
+                    val pcm = ByteBuffer.allocate(audio.samples.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+                    audio.samples.forEach { pcm.putFloat(it) }
+                    rows.put(
+                        JSONObject().put("text", text)
+                            .put("sha256", MessageDigest.getInstance("SHA-256").digest(pcm.array()).joinToString("") { "%02x".format(it) })
+                            .put("samples", audio.samples.size).put("sampleRate", audio.sampleRate)
+                            .put("transcript", speech.transcribe(audio.samples, audio.sampleRate)),
+                    )
+                }
+            }
+        File(ctx.getExternalFilesDir(null), "espeak-variant-$variant.json").writeText(
+            JSONObject().put("variant", variant).put("pid", android.os.Process.myPid())
+                .put("voicePack", voice.id).put("espeakDataDir", espeakDir.path)
+                .put("espeakFiles", espeakFiles.size).put("espeakBytes", espeakFiles.sumOf { it.length() })
+                .put("sharedCopyPresent", File(ctx.filesDir, "espeak-ng-data").exists())
+                .put("rows", rows).toString(2),
+        )
+        assertEquals(2, rows.length())
     }
 }

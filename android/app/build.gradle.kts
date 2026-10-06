@@ -83,3 +83,36 @@ val checkApkSize by tasks.registering {
         }
     }
 }
+
+// Networking APIs may appear in the release dex only inside PackDownloads (see scripts/check_network_boundary.py).
+fun compareVersions(a: String, b: String): Int {
+    val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
+    val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(pa.size, pb.size)) {
+        val c = pa.getOrElse(i) { 0 }.compareTo(pb.getOrElse(i) { 0 })
+        if (c != 0) return c
+    }
+    return 0
+}
+
+val checkNetworkBoundary by tasks.registering(Exec::class) {
+    dependsOn("assembleRelease")
+    val sdkDir = android.sdkDirectory
+    val apkDir = layout.buildDirectory.dir("outputs/apk/release")
+    val rootPath = rootDir
+    doFirst {
+        val dexdump = File(sdkDir, "build-tools").listFiles().orEmpty()
+            .filter { File(it, "dexdump").canExecute() }
+            .maxWithOrNull { a, b -> compareVersions(a.name, b.name) }
+            ?.let { File(it, "dexdump") }
+            ?: error("No dexdump found under ${File(sdkDir, "build-tools")}; install Android build-tools")
+        val apk = apkDir.get().asFile.listFiles().orEmpty()
+            .singleOrNull { it.name.contains("arm64-v8a") && it.extension == "apk" }
+            ?: error("No arm64-v8a release APK in ${apkDir.get().asFile}")
+        commandLine(
+            "python3", "$rootPath/scripts/check_network_boundary.py", apk.absolutePath,
+            "--allowlist", "$rootPath/network-boundary-allowlist.txt",
+            "--dexdump", dexdump.absolutePath,
+        )
+    }
+}

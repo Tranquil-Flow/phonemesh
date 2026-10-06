@@ -1,0 +1,1 @@
+# Reviewed library references to networking APIs. One 'caller pattern' per line.

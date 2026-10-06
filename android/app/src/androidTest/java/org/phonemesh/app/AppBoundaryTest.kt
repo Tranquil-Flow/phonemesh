@@ -1,15 +1,8 @@
 package org.phonemesh.app
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.os.Build
-import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
-import android.widget.Button
-import android.widget.Spinner
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
@@ -17,48 +10,31 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.MeshRadio
-import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class AppBoundaryTest {
-    private fun descendants(view:View):List<View> = listOf(view) +
-        if(view is ViewGroup) (0 until view.childCount).flatMap { descendants(view.getChildAt(it)) } else emptyList()
-
-    @Test fun appLaunchesWithoutModelsAndDoesNotAutoRecordOrSend() {
-        val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val context=instrumentation.targetContext
-        val activity=instrumentation.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-        val drawn=CountDownLatch(1)
+    /** The Phase 2 empty-state screenshot moved to the screenshot build (Task 16). */
+    @Test fun appStartsWithoutPacksAndNeverRecordsOrSendsByItself() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        TestCore.install(voices=emptyList(),connected=false)
+        val chats=Views.start(ChatsActivity::class.java)
         try {
-            instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync {
-                val views=descendants(activity.window.decorView)
-                assertNotNull(views.firstOrNull { it.contentDescription=="Record speech" })
-                assertNotNull(views.firstOrNull { it.contentDescription=="Licences" })
-                assertFalse((views.first { it.contentDescription=="Review and send" } as Button).isEnabled)
-                assertTrue((views.first { it is Spinner } as Spinner).count>=9)
-                assertEquals(PackageManager.PERMISSION_DENIED,context.checkSelfPermission(Manifest.permission.RECORD_AUDIO))
-                // Only this synthetic empty-screen UI test permits a screenshot.
-                activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                activity.window.decorView.invalidate()
-                activity.window.decorView.postOnAnimation {
-                    activity.window.decorView.postOnAnimation { drawn.countDown() }
-                }
-            }
-            assertTrue(drawn.await(5,TimeUnit.SECONDS))
-            instrumentation.waitForIdleSync()
-            val screenshot=instrumentation.uiAutomation.takeScreenshot()
-            assertNotNull(screenshot)
-            File(context.getExternalFilesDir(null),"ui-empty-state.png").outputStream().use {
-                checkNotNull(screenshot).compress(Bitmap.CompressFormat.PNG,100,it)
-            }
+            assertNotNull(Views.tagged(chats,"card_voice"))
+            assertNotNull(Views.tagged(chats,"card_radio"))
+            val conversation=Views.launch<ConversationActivity>(ConversationActivity.intent(context,TestCore.core.groupChatId()))
+            val mic=checkNotNull(Views.tagged(conversation,"mic"))
+            assertTrue(mic.alpha<0.5f)
+            Views.tap(conversation,"mic")
+            assertTrue(conversation.isFinishing)
+            assertEquals(0,TestCore.speech.recordings)
+            assertTrue(TestCore.speech.spoken.isEmpty())
+            assertTrue(TestCore.radio.sent.isEmpty())
+            assertEquals(PackageManager.PERMISSION_DENIED,context.checkSelfPermission(Manifest.permission.RECORD_AUDIO))
         } finally {
-            instrumentation.runOnMainSync {
-                activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                activity.finish()
-            }
+            Views.finish(chats)
+            TestCore.uninstall()
         }
     }
 

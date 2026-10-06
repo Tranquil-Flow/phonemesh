@@ -53,6 +53,3 @@ object PackMessages {
 
     fun shareProgress(bytes: Long) = UiText(R.string.share_progress, listOf(bytes / 1_000_000))
 }
-
-/** A failure whose message is already a plain-French sentence for the Phase 2 screen (removed with it in Task 14). */
-class ShownError(message: String) : Exception(message)

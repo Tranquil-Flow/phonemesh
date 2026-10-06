@@ -1,76 +1,66 @@
 package org.phonemesh.app
 
-import android.content.Intent
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.DeliveryState
+import org.phonemesh.ble.RadioPeer
 
-/** UI state injection only: no scan, connection, recording, playback or radio sends. */
+/** UI state injection only, through the fake radio: no scan, connection, recording, playback or send. */
 @RunWith(AndroidJUnit4::class)
 class HardeningUiTest {
-    private fun descendants(v:View):List<View> = listOf(v) +
-        if(v is ViewGroup) (0 until v.childCount).flatMap { descendants(v.getChildAt(it)) } else emptyList()
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
-    @Test fun deliveryStatusIsPerPacketAndNeverSaysReadOrPlayed() {
-        val inst=InstrumentationRegistry.getInstrumentation()
-        val activity=inst.startActivitySync(Intent(inst.targetContext,MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+    @After fun tearDown() = TestCore.uninstall()
+
+    @Test fun deliveryStatusIsPerMessageAndNeverSaysReadOrPlayed() {
+        TestCore.install()
+        val core = TestCore.core
+        val radio = TestCore.radio
+        val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        TestCore.onMain { listOf("Un", "Deux", "Trois").forEach { core.setDraft(chat, it); core.send(chat) } }
+        val (one, two, three) = core.history.messages(chat)
+        val (p1, p2, p3) = radio.sent.map { it.packetId }
+        TestCore.onMain {
+            radio.deliver(p1, DeliveryState.QUEUED); radio.deliver(p2, DeliveryState.FAILED); radio.deliver(p1, DeliveryState.ACKNOWLEDGED)
+            radio.deliver(p3, DeliveryState.QUEUED); radio.deliver(p3, DeliveryState.UNCONFIRMED)
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chat))
         try {
-            inst.runOnMainSync {
-                activity.onState(true,"ready")
-                activity.onDelivery(101L,DeliveryState.QUEUED,"queue accepted")
-                activity.onDelivery(102L,DeliveryState.FAILED,"NO_ROUTE")
-                activity.onDelivery(101L,DeliveryState.ACKNOWLEDGED,"peer ACK")
-                val views=descendants(activity.window.decorView)
-                val first=views.firstOrNull { it.contentDescription=="Delivery 101" } as? TextView
-                val second=views.firstOrNull { it.contentDescription=="Delivery 102" } as? TextView
-                assertNotNull("Each packet keeps its own status",first)
-                assertNotNull(second)
-                assertTrue(first!!.text.contains("Accusé de réception de la radio destinataire"))
-                assertTrue(first.text.contains("lecture non confirmée"))
-                assertTrue(second!!.text.contains("Échec"))
-                assertTrue(second.text.contains("NO_ROUTE"))
-                val banner=views.first { it.contentDescription=="Radio connection status" } as TextView
-                assertTrue(banner.text.startsWith("Radio : connectée"))
-                activity.onDelivery(103L,DeliveryState.UNCONFIRMED,"timeout")
-                val unknown=descendants(activity.window.decorView).first { it.contentDescription=="Delivery 103" } as TextView
-                assertTrue(unknown.text.contains("Livraison non confirmée"))
-            }
-        } finally { inst.runOnMainSync { activity.finish() } }
+            assertEquals("Arrivé", Views.tagged(screen, "status:${one.id}")!!.contentDescription)
+            assertNull(Views.tagged(screen, "resend:${one.id}"))
+            assertEquals("Échec", Views.textOf(Views.tagged(screen, "status_label:${two.id}")!!))
+            assertNotNull(Views.tagged(screen, "resend:${two.id}"))
+            assertEquals("Pas confirmé", Views.textOf(Views.tagged(screen, "status_label:${three.id}")!!))
+            assertNotNull(Views.tagged(screen, "resend:${three.id}"))
+            val words = Views.all(screen).filterIsInstance<TextView>().filter { !Ui.isContent(it) }
+                .map { TestCore.onMain { it.text.toString().lowercase() } }
+            val claims = Regex("\\b(lu|écouté|read|played|heard)\\b")
+            words.forEach { assertFalse("claims reading or playing: $it", claims.containsMatchIn(it)) }
+        } finally { Views.finish(screen) }
     }
 
-    @Test fun connectionBannerSurvivesDiagnosticsAndOperationFeedback() {
-        val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val context=instrumentation.targetContext
-        val activity=instrumentation.startActivitySync(Intent(context,MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+    @Test fun radioStatusSurvivesDiagnosticsAndBadMessages() {
+        TestCore.install(connected = false)
+        val core = TestCore.core
+        val chats = Views.start(ChatsActivity::class.java)
         try {
-            instrumentation.runOnMainSync {
-                val views=descendants(activity.window.decorView)
-                val banner=views.firstOrNull { it.contentDescription=="Radio connection status" } as? TextView
-                assertNotNull("Connection needs its own permanent banner",banner)
-                val operation=views.firstOrNull { it.contentDescription=="Operation status" } as? TextView
-                assertNotNull("Operation feedback must be separate",operation)
-                activity.onState(true,"Draining fromRadio (coalesced trigger)")
-                assertTrue(banner!!.text.startsWith("Radio : connectée"))
-                assertFalse(banner.text.contains("Draining"))
-                activity.onText("!12345678","\u0000",0,false)
-                assertTrue(operation!!.text.startsWith("Message non pris en charge"))
-                assertTrue(banner.text.startsWith("Radio : connectée"))
-                assertTrue((views.first { it.contentDescription=="Review and send" } as Button).isEnabled)
-                activity.onState(false,"BLE radio disconnected: status=147")
-                assertTrue(banner.text.startsWith("Radio : déconnectée"))
-                assertFalse((views.first { it.contentDescription=="Review and send" } as Button).isEnabled)
-                assertNotNull(views.firstOrNull { it.contentDescription=="Reconnect last radio" })
-                assertNotNull(views.firstOrNull { it.contentDescription=="Offline model choice" })
-            }
-        } finally { instrumentation.runOnMainSync { activity.finish() } }
+            assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+            assertNotNull(Views.tagged(chats, "card_radio"))
+            TestCore.onMain { TestCore.radio.connected(true) }
+            TestCore.onMain { core.onState(true, "Draining fromRadio (coalesced trigger)") }
+            assertEquals("Radio connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+            assertTrue(Views.all(chats).filterIsInstance<TextView>().none { Views.textOf(it).contains("Draining") })
+            TestCore.onMain { TestCore.radio.receive("!12345678", "\u0000", false) }
+            assertNull(core.history.lastMessage(core.groupChatId()))
+            assertEquals("Radio connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+            TestCore.onMain { TestCore.radio.connected(false) }
+            assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+            assertNotNull(Views.tagged(chats, "card_radio"))
+        } finally { Views.finish(chats) }
     }
 }

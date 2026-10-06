@@ -15,6 +15,7 @@ import org.phonemesh.core.PackRejected
 import org.phonemesh.core.PackStore
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.Locale
 
 /**
@@ -31,7 +32,8 @@ import java.util.Locale
  */
 @SuppressLint("ApplySharedPref")
 class PackDownloads(private val context: Context, private val store: PackStore,
-    private val baseUrl: String = BuildConfig.PACK_BASE_URL) {
+    private val baseUrl: String = BuildConfig.PACK_BASE_URL,
+    private val install: (InputStream) -> PackInfo = { store.install(it) }) {
     private val dm = context.getSystemService(DownloadManager::class.java)
     private val prefs = context.getSharedPreferences("pack-downloads", Context.MODE_PRIVATE)
     private val catalog get() = GeneratedPackCatalog.entries
@@ -42,10 +44,13 @@ class PackDownloads(private val context: Context, private val store: PackStore,
     /**
      * Starts the download if there is room for the ZIP, the unpacked pack and some headroom.
      * Plain free space is deliberate: the check must not count cache the system may never clear.
+     * Only takes [LOCK] briefly: installs run outside it, so this never waits for one.
      */
     @SuppressLint("UsableSpace")
     fun start(entry: CatalogEntry): DownloadDecision = synchronized(LOCK) {
         require(entry in catalog) { "Pack de langue inconnu" }
+        // Its previous download is being installed from the same file name.
+        if (entry.id in installing.keys) throw PackDownloadFailure("Attendez la fin de l'opération.")
         val decision = DownloadPlan.decide(entry, downloadsDir().usableSpace)
         if (decision != DownloadDecision.Start) return@synchronized decision
         pending()[entry.id]?.let { forget(entry.id, it) }
@@ -76,25 +81,46 @@ class PackDownloads(private val context: Context, private val store: PackStore,
 
     /**
      * Installs every successfully finished download once and reports every failed one; running
-     * downloads are left alone. The preference is durably dropped before installing (a download
-     * whose preference cannot be dropped stays pending for the next call), so a crash mid-install
-     * cannot install twice. Every collected download has its ZIP deleted and its system row removed,
-     * and a failure in one download becomes that download's result without stopping the others.
+     * downloads are left alone. Claiming happens under [LOCK]: the preference is durably dropped
+     * before installing (a download whose preference cannot be dropped stays pending for the next
+     * call), so another collector never sees a claimed download and a crash mid-install cannot
+     * install twice. Installing (unzip and hashing, which can take tens of seconds on a slow phone)
+     * runs outside [LOCK], so [start] and [cancel] stay quick. Every collected download has its ZIP
+     * deleted and its system row removed, and a failure in one download becomes that download's
+     * result without stopping the others. Files in the downloads directory that belong to no
+     * pending download (left by a crash mid-install) are deleted.
      */
-    fun collectFinished(): List<Result<PackInfo>> = synchronized(LOCK) {
+    fun collectFinished(): List<Result<PackInfo>> {
         val results = mutableListOf<Result<PackInfo>>()
-        for ((packId, id) in pending()) {
-            try {
-                collect(packId, id)?.let { results += it }
-            } catch (e: Exception) {
-                results += Result.failure(e)
+        val claimed = mutableListOf<Outcome.Claimed>()
+        synchronized(LOCK) {
+            for ((packId, id) in pending()) {
+                try {
+                    when (val outcome = claim(packId, id)) {
+                        is Outcome.Claimed -> { claimed += outcome; installing[packId] = outcome.file?.name }
+                        is Outcome.Done -> results += outcome.result
+                        null -> Unit
+                    }
+                } catch (e: Exception) {
+                    results += Result.failure(e)
+                }
             }
+            runCatching { sweepOrphans() }.onFailure { Log.w(TAG, "could not sweep downloads", it) }
         }
-        results
+        for (claim in claimed) {
+            results += try { installClaimed(claim) } finally { synchronized(LOCK) { installing -= claim.packId } }
+        }
+        return results
     }
 
-    /** One download's result, or null while it is still running or could not be claimed. */
-    private fun collect(packId: String, id: Long): Result<PackInfo>? {
+    private sealed interface Outcome {
+        /** A finished download whose preference has been dropped: only this collector installs it. */
+        class Claimed(val packId: String, val id: Long, val entry: CatalogEntry?, val file: File?) : Outcome
+        class Done(val result: Result<PackInfo>) : Outcome
+    }
+
+    /** What to do with one download, or null while it is still running or could not be claimed. Under [LOCK]. */
+    private fun claim(packId: String, id: Long): Outcome? {
         val row = dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
             if (!c.moveToFirst()) null
             else Triple(c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
@@ -103,38 +129,63 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         }
         if (row == null) {
             forget(packId, id)
-            return Result.failure(PackDownloadFailure("Échec du téléchargement"))
+            return Outcome.Done(Result.failure(PackDownloadFailure("Échec du téléchargement")))
         }
         val (status, reason, localUri) = row
         return when (status) {
             DownloadManager.STATUS_SUCCESSFUL -> {
                 if (!prefs.edit().remove(packId).commit()) return null
                 val entry = catalog.firstOrNull { it.id == packId }
-                var file: File? = null
-                try {
-                    file = downloadedFile(localUri) ?: entry?.let { destination(it) }
-                    when {
-                        entry == null || file == null ->
-                            Result.failure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "Pack de langue inconnu"))
-                        !DownloadPlan.sizeMatches(entry, file.length()) ->
-                            Result.failure(PackRejected(PackRejected.Reason.DAMAGED, "Téléchargement incomplet"))
-                        else -> Result.success(file.inputStream().use { store.install(it) })
-                    }
-                } catch (e: Exception) {
-                    Result.failure(e)
-                } finally {
-                    runCatching { (file ?: entry?.let { destination(it) })?.delete() }
-                    dm.remove(id)
-                }
+                Outcome.Claimed(packId, id, entry, runCatching { downloadedFile(localUri) ?: entry?.let { destination(it) } }.getOrNull())
             }
             DownloadManager.STATUS_FAILED -> {
                 Log.w(TAG, "download of $packId failed, reason $reason")
                 forget(packId, id)
-                Result.failure(PackDownloadFailure(PackDownloadText.failure(reason)))
+                Outcome.Done(Result.failure(PackDownloadFailure(PackDownloadText.failure(reason))))
             }
             else -> null
         }
     }
+
+    private fun installClaimed(claim: Outcome.Claimed): Result<PackInfo> {
+        val (entry, file) = claim.entry to claim.file
+        return try {
+            when {
+                entry == null || file == null ->
+                    Result.failure(PackRejected(PackRejected.Reason.UNKNOWN_PACK, "Pack de langue inconnu"))
+                !DownloadPlan.sizeMatches(entry, file.length()) ->
+                    Result.failure(PackRejected(PackRejected.Reason.DAMAGED, "Téléchargement incomplet"))
+                else -> Result.success(file.inputStream().use { install(it) })
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            runCatching { (file ?: entry?.let { destination(it) })?.delete() }
+            runCatching { dm.remove(claim.id) }
+        }
+    }
+
+    /** Deletes files in the downloads directory that belong to no pending or installing download. Under [LOCK]. */
+    private fun sweepOrphans() {
+        val pending = pending()
+        val keep = HashSet<String>()
+        (pending.keys + installing.keys).forEach { id -> catalog.firstOrNull { it.id == id }?.let { keep += it.fileName } }
+        installing.values.forEach { name -> name?.let { keep += it } }
+        // The file DownloadManager is writing, in case it chose another name than the catalog's.
+        pending.values.forEach { id ->
+            runCatching {
+                dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
+                    if (c.moveToFirst()) downloadedFile(c.getString(c.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI)))?.let { keep += it.name }
+                }
+            }
+        }
+        downloadsDir().listFiles().orEmpty()
+            .filter { file -> keep.none { file.name == it || file.name.endsWith(it) } }
+            .forEach { it.deleteRecursively() }
+    }
+
+    /** Deletes leftover downloads (see [collectFinished]) without collecting anything. */
+    fun sweep(): Unit = synchronized(LOCK) { sweepOrphans() }
 
     /** Whether any pending download has finished (successfully or not) and is waiting to be collected. */
     fun anyFinished(): Boolean = pending().values.any { id ->
@@ -167,6 +218,8 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         const val TAG = "PackDownloads"
         /** Shared by every instance: two instances must never collect the same download. */
         val LOCK = Any()
+        /** Pack id → file name of each download claimed and being installed by some instance; guarded by [LOCK]. */
+        val installing = HashMap<String, String?>()
     }
 }
 

@@ -107,5 +107,5 @@ Remaining: real ASR/all-language speech validation, two-node RF/stock-client tes
 ACK/reconnect UX, microphone/interactive UI, and Android integration. Under-resourced
 phoneme research and its recording/transcription permissions belong to v2.
 
-Licence choice awaits owner confirmation; **AGPL-3.0 is proposed, not yet applied**.
+Licensed under the GNU Affero General Public License v3.0 (see `LICENSE`). Third-party components and model licences are listed in the app's notices and in each pack's `NOTICE.txt`.
 No commits, pushes or staging are performed by this scaffold workflow.

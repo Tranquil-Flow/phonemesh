@@ -193,7 +193,7 @@ internal object PackDownloadText {
     }
 
     fun failure(reason: Int): String = when (reason) {
-        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Pas assez d'espace"
+        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "Pas assez d'espace sur le téléphone."
         DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_UNHANDLED_HTTP_CODE,
         DownloadManager.ERROR_TOO_MANY_REDIRECTS, DownloadManager.ERROR_CANNOT_RESUME,
         in 400..599 -> "Problème de connexion. Réessayez."

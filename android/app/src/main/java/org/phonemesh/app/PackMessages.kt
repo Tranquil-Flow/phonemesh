@@ -7,6 +7,8 @@ import java.io.IOException
 /** Short plain-French sentences for pack failures. Raw exception messages never reach the screen. */
 object PackMessages {
     private const val NO_SPACE = "Pas assez d'espace sur le téléphone."
+    /** A pack could not be removed (never phrased as a download problem). */
+    const val REMOVE_FAILED = "Impossible de retirer le pack."
 
     fun forFailure(error: Throwable): String = when (error) {
         // Already a fixed plain sentence chosen by PackDownloads.

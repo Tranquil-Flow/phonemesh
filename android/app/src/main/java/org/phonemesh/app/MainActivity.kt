@@ -287,8 +287,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         task {
             // Nothing may keep using the files about to be deleted.
             releaseSpeech()
-            val message=try { if(store.remove(row.id)) "Pack retiré : ${row.name}" else "Échec. Réessayez." }
-                catch(error:Exception) { PackMessages.forFailure(error) }
+            val removed=runCatching { store.remove(row.id) }.getOrDefault(false)
+            val message=if(removed) "Pack retiré : ${row.name}" else PackMessages.REMOVE_FAILED
             ui { refreshPacks(); note(message) }
         }
     }

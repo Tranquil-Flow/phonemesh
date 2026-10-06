@@ -70,4 +70,26 @@ class SharedEspeakDataTest {
         SharedEspeakData(dirPath, AtomicBoolean(true)).prepare(fr)
         assertTrue(dirPath.resolve("fr_dict").isFile)
     }
+
+    @Test fun aCorruptedCopyIsRepairedOnTheFirstLoadOfAProcess() {
+        val dirPath = tmp.root.resolve("espeak")
+        val fr = voice("fr", core)
+        SharedEspeakData(dirPath, AtomicBoolean(false)).prepare(fr)
+        dirPath.resolve("fr_dict").writeText("") // truncated by a power loss
+        dirPath.resolve("phontab").writeText("tXb") // same size, wrong bytes
+        val stray = dirPath.resolve(".fr_dict.123e4567-e89b-12d3-a456-426614174000").apply { writeText("partial") }
+        SharedEspeakData(dirPath, AtomicBoolean(false)).prepare(fr)
+        assertEquals("fr", dirPath.resolve("fr_dict").readText())
+        assertEquals("tab", dirPath.resolve("phontab").readText())
+        assertFalse("stray temp file left behind", stray.exists())
+    }
+
+    @Test fun aRunningProcessDoesNotRehash() {
+        val dirPath = tmp.root.resolve("espeak")
+        val fr = voice("fr", core)
+        SharedEspeakData(dirPath, AtomicBoolean(false)).prepare(fr)
+        dirPath.resolve("phontab").writeText("tXb")
+        SharedEspeakData(dirPath, AtomicBoolean(true)).prepare(fr)
+        assertEquals("files espeak-ng already holds are never rewritten", "tXb", dirPath.resolve("phontab").readText())
+    }
 }

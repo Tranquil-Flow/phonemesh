@@ -15,7 +15,7 @@ class PackDownloadTextTest {
     }
 
     @Test fun failureReasonsBecomeShortSentencesWithoutCodes() {
-        assertEquals("Pas assez d'espace", PackDownloadText.failure(DownloadManager.ERROR_INSUFFICIENT_SPACE))
+        assertEquals("Pas assez d'espace sur le téléphone.", PackDownloadText.failure(DownloadManager.ERROR_INSUFFICIENT_SPACE))
         val connection = "Problème de connexion. Réessayez."
         listOf(DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_UNHANDLED_HTTP_CODE,
             DownloadManager.ERROR_TOO_MANY_REDIRECTS, DownloadManager.ERROR_CANNOT_RESUME, 404, 503)

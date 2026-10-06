@@ -25,9 +25,14 @@ class PackMessagesTest {
         assertEquals("Échec du téléchargement. Réessayez.", PackMessages.forFailure(IOException("ENOENT /data/x")))
 
     @Test fun plainDownloadFailuresKeepTheirSentence() {
-        listOf("Pas assez d'espace", "Problème de connexion. Réessayez.", "Échec du téléchargement").forEach {
+        listOf("Pas assez d'espace sur le téléphone.", "Problème de connexion. Réessayez.", "Échec du téléchargement").forEach {
             assertEquals(it, PackMessages.forFailure(PackDownloadFailure(it)))
         }
+    }
+
+    @Test fun removalFailureNeverMentionsDownloading() {
+        assertEquals("Impossible de retirer le pack.", PackMessages.REMOVE_FAILED)
+        assertTrue(!PackMessages.REMOVE_FAILED.contains("téléchargement", ignoreCase = true))
     }
 
     @Test fun rejectionMessagesAreTheFixedSentencesNotTheRawOnes() =

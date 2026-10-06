@@ -103,7 +103,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         }
         if (row == null) {
             forget(packId, id)
-            return Result.failure(IOException("Échec du téléchargement"))
+            return Result.failure(PackDownloadFailure("Échec du téléchargement"))
         }
         val (status, reason, localUri) = row
         return when (status) {
@@ -130,9 +130,17 @@ class PackDownloads(private val context: Context, private val store: PackStore,
             DownloadManager.STATUS_FAILED -> {
                 Log.w(TAG, "download of $packId failed, reason $reason")
                 forget(packId, id)
-                Result.failure(IOException(PackDownloadText.failure(reason)))
+                Result.failure(PackDownloadFailure(PackDownloadText.failure(reason)))
             }
             else -> null
+        }
+    }
+
+    /** Whether any pending download has finished (successfully or not) and is waiting to be collected. */
+    fun anyFinished(): Boolean = pending().values.any { id ->
+        dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
+            !c.moveToFirst() || c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) in
+                setOf(DownloadManager.STATUS_SUCCESSFUL, DownloadManager.STATUS_FAILED)
         }
     }
 
@@ -162,14 +170,26 @@ class PackDownloads(private val context: Context, private val store: PackStore,
     }
 }
 
+/** A download-level failure whose message is already a short plain-French sentence for the screen. */
+class PackDownloadFailure(message: String) : IOException(message)
+
 /** Short plain-French wording for download notifications and failures (no ids or codes). */
 internal object PackDownloadText {
     fun title(entry: CatalogEntry): String = when (entry.kind) {
         PackKind.ENGINE -> "Pack de reconnaissance vocale"
-        PackKind.VOICE -> {
-            val locale = Locale(entry.id.removePrefix("voice-").substringBefore('-'))
-            "Pack de langue " + locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
-        }
+        PackKind.VOICE -> "Pack de langue " + language(entry)
+    }
+
+    /** The pack's name in the pack list: the language in its own words, or the recognition model. */
+    fun name(entry: CatalogEntry): String = when (entry.kind) {
+        PackKind.ENGINE -> "Reconnaissance vocale (" +
+            entry.id.removePrefix("engine-whisper-").replaceFirstChar { it.titlecase(Locale.ROOT) } + ")"
+        PackKind.VOICE -> language(entry)
+    }
+
+    private fun language(entry: CatalogEntry): String {
+        val locale = Locale(entry.id.removePrefix("voice-").substringBefore('-'))
+        return locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
     }
 
     fun failure(reason: Int): String = when (reason) {

@@ -12,9 +12,12 @@ import android.graphics.Color
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.text.InputType
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.WindowInsets
@@ -23,16 +26,21 @@ import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.MessageCodec
 import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackKind
+import org.phonemesh.core.PackRejected
 import org.phonemesh.core.PackStore
 import org.phonemesh.core.Readiness
 import org.phonemesh.core.readiness
 import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.DeliveryState
+import org.phonemesh.speech.AudioPcm
 import org.phonemesh.speech.LocalSpeech
 import org.phonemesh.speech.SharedEspeakData
 import org.phonemesh.speech.SpeechPack
 import java.io.File
+import java.util.Locale
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity(), BleMeshTransport.Listener {
     private val work=Executors.newSingleThreadExecutor()
@@ -42,6 +50,10 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     private var radioAdapter:ArrayAdapter<String>?=null
     private var radioDialog:AlertDialog?=null
     private lateinit var store:PackStore
+    private lateinit var packDownloads:PackDownloads
+    private lateinit var packList:LinearLayout
+    private val downloadPoll=Handler(Looper.getMainLooper())
+    private val pollTick=Runnable { pollDownloads() }
     private lateinit var status:TextView
     private lateinit var operationStatus:TextView
     private lateinit var diagnosticStatus:TextView
@@ -79,6 +91,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         store=PackStore(File(filesDir,"packs"),GeneratedPackCatalog.entries,BuildConfig.ALLOW_UNKNOWN_PACKS)
+        packDownloads=PackDownloads(this,store)
         bridge=BleMeshTransport(this, this)
         val scroll=ScrollView(this)
         scroll.setOnApplyWindowInsetsListener { view, insets ->
@@ -123,7 +136,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         layout.addView(disconnect)
         disconnect.setOnClickListener { bridge.disconnect() }
         label("Déconnectez la radio de l'application Meshtastic avant de la connecter ici.",13f)
-        voiceStatus=label("Voix hors ligne : importer un pack de modèles")
+        voiceStatus=label("Voix hors ligne : importer un pack de modèles").apply { contentDescription="Offline voice status" }
         val import=Button(this).apply { text="Importer un pack de modèles ZIP"; contentDescription="Import offline models" }
         layout.addView(import)
         import.setOnClickListener {
@@ -133,9 +146,11 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                 putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("application/zip","application/octet-stream","application/x-zip-compressed"))
                 // The Downloads provider can omit ZIPs copied over USB; use the filesystem provider.
                 putExtra(DocumentsContract.EXTRA_INITIAL_URI,Uri.parse(
-                    "content://com.android.externalstorage.documents/document/primary%3ADownload%2FPhonemesh"))
+                    "content://com.android.externalstorage.documents/document/primary%3ADownload"))
             },101)
         }
+        packList=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; contentDescription="Language packs" }
+        layout.addView(packList)
         packsSpinner=Spinner(this).apply { contentDescription="Message language" }
         layout.addView(packsSpinner)
         label("Modèle vocal — Tiny : léger ; Base : plus volumineux",13f)
@@ -214,6 +229,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         setContentView(scroll)
         scroll.requestApplyInsets()
         updateControls()
+        if(savedInstanceState==null) openFromIntent(intent)
     }
     private fun refreshPacks() {
         packs=store.list()
@@ -229,6 +245,100 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         currentLanguage=languageChoices[index].first
         packsSpinner.setSelection(index)
         refreshModelChoices()
+        renderPackList()
+    }
+    /** Rebuilds the pack list from the installed packs and the downloads in progress. */
+    private fun renderPackList() {
+        val pending=runCatching { packDownloads.pending() }.getOrDefault(emptyMap())
+        val rows=PackRows.build(GeneratedPackCatalog.entries,packs,
+            pending.keys.associateWith { runCatching { packDownloads.progress(it) }.getOrNull() })
+        packList.removeAllViews()
+        for(row in rows) {
+            val line=LinearLayout(this).apply { orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL }
+            line.addView(TextView(this).apply { text=row.name; textSize=15f },
+                LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f))
+            line.addView(when(val action=row.action) {
+                PackRow.Action.Download -> Button(this).apply {
+                    val entry=checkNotNull(row.entry)
+                    text="Télécharger (${String.format(Locale.ROOT,"%.0f Mo",entry.zipBytes/1e6)})"; isAllCaps=false
+                    contentDescription="Download ${row.id}"
+                    setOnClickListener { download(row) }
+                }
+                is PackRow.Action.Progress -> TextView(this).apply { text=action.text; textSize=15f }
+                PackRow.Action.Remove -> Button(this).apply {
+                    text="Retirer"; isAllCaps=false; contentDescription="Remove ${row.id}"
+                    setOnClickListener { remove(row) }
+                }
+                PackRow.Action.None -> TextView(this).apply { text="Installé"; textSize=15f }
+            })
+            packList.addView(line)
+        }
+    }
+    private fun download(row:PackRow) {
+        try {
+            val decision=packDownloads.start(checkNotNull(row.entry))
+            note(PackMessages.forDecision(decision) ?: "Téléchargement : ${row.name}")
+        } catch(error:Exception) { note(PackMessages.forFailure(error)) }
+        pollDownloads()
+    }
+    private fun remove(row:PackRow) {
+        if(busy || recording) { note("Attendez la fin de l'opération."); return }
+        task {
+            // Nothing may keep using the files about to be deleted.
+            releaseSpeech()
+            val message=try { if(store.remove(row.id)) "Pack retiré : ${row.name}" else "Échec. Réessayez." }
+                catch(error:Exception) { PackMessages.forFailure(error) }
+            ui { refreshPacks(); note(message) }
+        }
+    }
+    /** Shows download progress and installs finished downloads; repeats every second while any is pending. */
+    private fun pollDownloads() {
+        downloadPoll.removeCallbacks(pollTick)
+        if(isDestroyed || !foreground) return
+        renderPackList()
+        if(runCatching { packDownloads.pending() }.getOrDefault(emptyMap()).isEmpty()) return
+        if(!busy && !recording && runCatching { packDownloads.anyFinished() }.getOrDefault(true)) collectDownloads()
+        downloadPoll.postDelayed(pollTick,1000)
+    }
+    private fun collectDownloads() = task {
+        val messages=try {
+            val results=packDownloads.collectFinished()
+            if(results.any { it.isSuccess }) releaseSpeechIfGone()
+            results.map { result -> result.fold({ "Pack installé : ${nameOf(it)}" },{ PackMessages.forFailure(it) }) }
+        } catch(error:Exception) { listOf(PackMessages.forFailure(error)) }
+        ui { refreshPacks(); if(messages.isNotEmpty()) note(messages.joinToString("\n")) }
+    }
+    private fun nameOf(pack:PackInfo) =
+        GeneratedPackCatalog.entries.firstOrNull { it.id==pack.id }?.let { PackDownloadText.name(it) } ?: pack.label
+    /** Installs a ZIP the user picked or opened from another app. */
+    private fun importPack(uri:Uri) = task {
+        try {
+            val input=contentResolver.openInputStream(uri) ?: error("Fichier inaccessible")
+            val installed=input.use { store.install(it) }
+            releaseSpeechIfGone()
+            val preferences=getPreferences(MODE_PRIVATE).edit()
+            if(installed.kind==PackKind.ENGINE) preferences.putString("engine",installed.id)
+            else preferences.putString("language",installed.languageTag)
+            preferences.apply()
+            ui { refreshPacks(); note("Pack importé : ${nameOf(installed)}") }
+        } catch(error:Exception) { ui { note(PackMessages.forFailure(error)) } }
+    }
+    /** A ZIP opened or shared from another app (file manager, browser downloads, messaging). */
+    private fun openFromIntent(intent:Intent?) {
+        if(intent==null || (intent.action!=Intent.ACTION_VIEW && intent.action!=Intent.ACTION_SEND)) return
+        if(busy || recording) { note("Attendez la fin de l'opération."); return }
+        val uri=if(intent.action==Intent.ACTION_SEND) {
+            if(Build.VERSION.SDK_INT>=33) intent.getParcelableExtra(Intent.EXTRA_STREAM,Uri::class.java)
+            else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        } else intent.data
+        // Only content the sender shares with us; a file path could point into this app's own storage.
+        if(uri==null || uri.scheme!="content") { note(PackMessages.forFailure(PackRejected(PackRejected.Reason.UNSAFE,"not content"))); return }
+        importPack(uri)
+    }
+    public override fun onNewIntent(intent:Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openFromIntent(intent)
     }
     private fun engineName(engine:PackInfo) = if(engine.recognizerModel=="whisper-base") "Whisper Base" else "Whisper Tiny"
     private fun refreshModelChoices() {
@@ -310,6 +420,12 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         radioAdapter?.clear()
         radioAdapter?.addAll(radioDevices.map { "${it.value} (${it.key})" })
         radioAdapter?.notifyDataSetChanged()
+    }
+    /** Closes the cached recognizer and voice (one LocalSpeech). Work executor only. */
+    private fun releaseSpeech() { runCatching { engine?.close() }; engine=null; engineRoot=null }
+    /** Drops the cached speech if an install replaced the packs it was loaded from. Work executor only. */
+    private fun releaseSpeechIfGone() {
+        if(engineRoot?.split('|')?.any { !File(it).isDirectory }==true) releaseSpeech()
     }
     private fun speech(pack:Readiness.Ready):LocalSpeech {
         val key="${pack.engine.root.absolutePath}|${pack.voice.root.absolutePath}"
@@ -462,11 +578,11 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         work.execute {
             try { action() }
             catch(error:Exception) {
-                runCatching { engine?.close() }; engine=null; engineRoot=null
+                releaseSpeech()
                 ui { note(error.message ?: "Opération impossible") }
             }
             catch(error:LinkageError) {
-                runCatching { engine?.close() }; engine=null; engineRoot=null
+                releaseSpeech()
                 ui { note("Le moteur vocal natif est indisponible sur cet appareil.") }
             }
             finally { ui { busy=false; updateControls() } }
@@ -488,18 +604,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         if(requestCode==104 && resultCode==RESULT_OK && foreground) {
             if(pendingReconnect) reconnectLastRadio() else chooseRadio()
         }
-        if(requestCode==101 && resultCode==RESULT_OK) {
-            val uri=data?.data ?: return
-            task {
-                val input=contentResolver.openInputStream(uri) ?: error("Fichier inaccessible")
-                val installed=input.use { store.install(it) }
-                val preferences=getPreferences(MODE_PRIVATE).edit()
-                if(installed.kind==PackKind.ENGINE) preferences.putString("engine",installed.id)
-                else preferences.putString("language",installed.languageTag)
-                preferences.apply()
-                ui { refreshPacks(); note("Pack importé : ${installed.label}") }
-            }
-        }
+        if(requestCode==101 && resultCode==RESULT_OK) importPack(data?.data ?: return)
     }
     override fun onRequestPermissionsResult(code:Int,permissions:Array<out String>,results:IntArray) {
         super.onRequestPermissionsResult(code,permissions,results)
@@ -511,7 +616,9 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         else if(code==103) note("Permission Bluetooth refusée — les fonctions vocales locales restent disponibles.")
     }
     override fun onStart() { super.onStart(); foreground=true }
+    override fun onResume() { super.onResume(); pollDownloads() }
     override fun onStop() {
+        downloadPoll.removeCallbacks(pollTick)
         foreground=false; captureEpoch++; playbackEpoch++
         radioDialog?.dismiss(); bridge.stopScan()
         microphone.stop(); recording=false
@@ -523,8 +630,29 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         state.putString("channel",channel.text.toString()); super.onSaveInstanceState(state)
     }
     override fun onDestroy() {
+        downloadPoll.removeCallbacks(pollTick)
         microphone.close(); bridge.close()
         work.execute { engine?.close(); engine=null }; work.shutdown()
         super.onDestroy()
     }
+    // Test hook
+    internal fun refreshPacksForTest() = runOnUiThread { refreshPacks() }
+    // Test hook (posted to the main thread: task() updates the controls)
+    internal fun loadSpeechForTest() = runOnUiThread { (selected as? Readiness.Ready)?.let { ready -> task { speech(ready) } } }
+    // Test hook
+    internal var recordingForTest:Boolean
+        get() = recording
+        set(value) { recording = value }
+    // Test hook: returns once everything queued on the work executor has run.
+    internal fun awaitWorkForTest() { work.submit {}.get(120,TimeUnit.SECONDS) }
+    // Test hook
+    internal fun speechLoadedForTest():Boolean = work.submit(Callable { engine!=null }).get(120,TimeUnit.SECONDS)
+    // Test hook: synthesizes to samples through the cached speech; no playback.
+    internal fun synthesizeForTest(languageTag:String,text:String):AudioPcm = work.submit(Callable {
+        speech(checkNotNull(readyFor(languageTag)) { "No packs for $languageTag" }).synthesize(text)
+    }).get(120,TimeUnit.SECONDS)
+    // Test hook: transcribes samples (e.g. from synthesizeForTest); no microphone.
+    internal fun transcribeForTest(languageTag:String,audio:AudioPcm):String = work.submit(Callable {
+        speech(checkNotNull(readyFor(languageTag)) { "No packs for $languageTag" }).transcribe(audio.samples,audio.sampleRate)
+    }).get(120,TimeUnit.SECONDS)
 }

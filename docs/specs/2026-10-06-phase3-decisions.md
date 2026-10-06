@@ -20,20 +20,21 @@ Every change is judged against three costs, in priority order:
 2. **Low-end phone cost**: RAM, CPU, cold start, battery.
 3. **Radio airtime**: bytes and packets on LoRa.
 
-Quality trades (smaller but lossy models or voices) are adopted only when objective checks pass **and** the owner cannot hear a difference in a blind A/B listening test of the comparison clips.
+Quality trades (smaller but lossy models or voices) are adopted only when objective checks pass **and** the owner signs off: for voices, the owner cannot hear a difference in a blind A/B listening test of the comparison clips; for the recognizer, transcripts of every comparison clip are identical, or the owner reviews a side-by-side diff of every changed transcript and accepts it.
 
-Implementation is framework-only Android: no AndroidX, AppCompat or Compose.
+The app stays framework-only Android (no AndroidX, AppCompat or Compose), as it is today. This is a constraint that keeps size and cold start down, not a new saving; it means the conversation list uses `ListView` and screen state is retained by hand.
 
 ## Network
 
-- The app uses the network **only to download language packs during setup**, through Android's `DownloadManager`. No other network code exists in the app.
+- The app uses the network **only to download language packs during setup**, through Android's `DownloadManager`, which requires the `INTERNET` permission. This replaces the earlier "no Internet permission" constraint.
+- Because that permission is all-or-nothing, the boundary is enforced by convention plus a build check on the compiled app: one class owns all download URLs, and the build fails if networking APIs appear anywhere else. It is a guardrail, not an operating-system sandbox.
 - Packs are hosted in a public Hugging Face model repository, with URLs pinned to a commit. Until publication the base URL is configurable.
 - Backup route: offline sharing of the APK and installed packs from phone to phone through the Android share sheet. Received packs are verified against the same pinned manifests.
 
 ## Messages
 
 - Speech is transcribed locally; text only crosses the radio; audio never does.
-- Maximum message length is about **one minute of speech**, reached through lossless text compression plus up to about three radio parts. The receiver plays a message only when all parts have arrived.
+- **Target** maximum message length is about **one minute of speech**, through lossless text compression plus up to about three radio parts; sub-project 2 measures and validates it. One radio packet holds roughly 16–18 seconds of French speech as text. The receiver plays a message only when all parts have arrived.
 - A ring fills while recording so the length limit is visible without reading.
 - **History is kept on the device indefinitely**, as text only, and never synced. The user can delete one message or all messages.
 

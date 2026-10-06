@@ -17,7 +17,7 @@ class PackRejected(val reason: Reason, message: String) : IllegalArgumentExcepti
 }
 
 /** Format 2 archive layout: which entry paths a pack may contain. */
-internal object PackFormat {
+object PackFormat {
     val ROOT_FILES = setOf("pack.properties", "SHA256SUMS", "NOTICE.txt", "SOURCES.json")
     fun prefixFor(kind: PackKind) = if (kind == PackKind.ENGINE) "whisper/" else "tts/"
     /** Allowed for an archive whose kind is not yet known: root files, or either prefix. */

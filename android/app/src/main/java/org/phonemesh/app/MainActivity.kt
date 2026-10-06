@@ -150,6 +150,16 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
                     "content://com.android.externalstorage.documents/document/primary%3ADownload"))
             },101)
         }
+        val shareApp=Button(this).apply { text="Partager l'application"; contentDescription="Share app" }
+        layout.addView(shareApp)
+        shareApp.setOnClickListener {
+            task {
+                try {
+                    val uris=PackSharing.prepare(this,store)
+                    ui { startActivity(Intent.createChooser(PackSharing.shareIntent(this,uris),null)) }
+                } catch(error:Exception) { ui { note(PackMessages.forFailure(error)) } }
+            }
+        }
         packList=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; contentDescription="Language packs" }
         layout.addView(packList)
         packsSpinner=Spinner(this).apply { contentDescription="Message language" }

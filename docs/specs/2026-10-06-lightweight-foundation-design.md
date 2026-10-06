@@ -57,7 +57,7 @@ Each step is a separate commit with size measured before and after.
 |---|---|
 | **Engine** `phonemesh-engine-whisper-tiny-<version>.zip` | `whisper/encoder.int8.onnx`, `whisper/decoder.int8.onnx`, `whisper/tokens.txt` |
 | **Engine (optional)** `phonemesh-engine-whisper-base-<version>.zip` | same layout, Whisper Base |
-| **Voice** `phonemesh-voice-<lang>-<voice>-<version>.zip` | `tts/model.onnx`, `tts/tokens.txt`, `tts/espeak-ng-data/` trimmed to the shared core files plus that language's dictionary |
+| **Voice** `phonemesh-voice-<lang>-<voice>-<version>.zip` | `tts/model.onnx`, `tts/tokens.txt`, `tts/espeak-ng-data/` trimmed to the shared core files plus the dictionary and language file of every catalog language (see espeak-ng trimming) |
 
 Every pack also contains `pack.properties`, `SHA256SUMS`, `NOTICE.txt` and `SOURCES.json`.
 
@@ -89,7 +89,7 @@ Today a pack is accepted if its own `SHA256SUMS` matches its files, so any self-
 - The app contains a **built-in catalog**: for each known pack, its `id`, `version`, `kind`, download URL, ZIP size, and the **SHA-256 of its `SHA256SUMS` file**.
 - On install, the `SHA256SUMS` hash must match the catalog entry for that pack `id` and `version`; then every file is checked against `SHA256SUMS`, as today.
 - **Strict path allowlist, enforced before any file is written:** every archive entry must be `pack.properties`, `SHA256SUMS`, `NOTICE.txt`, `SOURCES.json`, or under `whisper/` (engine packs only) or `tts/` (voice packs only). Any other entry rejects the whole archive. Today's code extracts every entry and hashes only a subset; this closes that gap. `SHA256SUMS` must list every allowlisted file except itself.
-- **Size:** a download must match the catalog ZIP size exactly. An imported or shared ZIP is not size-matched (it was rebuilt), only capped at the catalog size plus a small margin; integrity comes from the manifest.
+- **Size:** a download must match the catalog ZIP size exactly. An imported or shared ZIP is not size-matched (it was rebuilt), only capped at the catalog size plus a small margin (implemented as the largest catalog ZIP plus an eighth, from rebuilt packs measured up to 8.2 % larger); integrity comes from the manifest.
 - **Downgrades:** installing a pack whose `version` is older than the installed pack with the same `id` is rejected.
 - Unknown packs (not in the catalog) are rejected. Development builds may enable a flag to accept them; release builds cannot, and a test asserts the flag is off in release.
 
@@ -101,7 +101,7 @@ The existing archive safety checks (entry count, path depth, traversal, duplicat
 
 - separate pack records for engines (`recognizerModel`) and voices (`languageTag`, `whisperLanguage`);
 - a store-level readiness check: exactly one active engine and at least one voice installed, with a distinct error for each missing part;
-- a voice/engine check: the voice's `whisperLanguage` must be a language the installed engine supports (present in its `tokens.txt` language tokens).
+- a voice/engine check: the voice's `whisperLanguage` must be a language the installed engine supports (present in its `tokens.txt` language tokens). A `tokens.txt` with no `<|xx|>` language lines means every Whisper language: the sherpa-onnx Whisper exports keep the language tokens in the model metadata, and every accepted `recognizerModel` is multilingual. (Amended: real engines have no language lines, so they support every language.)
 
 ### Decoder re-quantization spike
 
@@ -119,9 +119,9 @@ The same procedure applies to the optional Base engine.
 
 ### espeak-ng trimming
 
-The pack build keeps only the espeak-ng files needed for the voice's language: the shared phoneme tables (`phontab`, `phonindex`, `phondata`, `intonations`) plus that language's dictionary and any voice file it references. Two required checks:
+The pack build keeps only the espeak-ng files needed for the catalog's languages: the shared phoneme tables (`phontab`, `phonindex`, `phondata`, `intonations`) plus each catalog language's dictionary and language file. Every voice pack carries this same union, because sherpa-onnx sets up espeak-ng once per process from the first voice loaded, and the app keeps one shared copy of it (amended: the first design trimmed each voice to its own language). Two required checks:
 
-- **Native (gate):** an emulator instrumentation test synthesizes fixed EN/FR sentences through sherpa-onnx (whose espeak-ng is compiled into `libsherpa-onnx-jni.so`) with the trimmed and the full data, and requires identical output samples.
+- **Native (gate):** an emulator instrumentation test synthesizes fixed EN/FR sentences through sherpa-onnx (whose espeak-ng is compiled into `libsherpa-onnx-jni.so`) with the trimmed and the full data, one process per variant, and requires identical output samples.
 - **Build-time:** the pack script fails if the trimmed set omits a file the full set's language entry references.
 
 ### Lossy candidates

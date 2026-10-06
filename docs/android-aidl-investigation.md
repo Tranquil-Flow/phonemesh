@@ -1,5 +1,7 @@
 # Phonemesh Android Meshtastic mesh bridge
 
+> Historical record; the `android/mesh-bridge` module has been removed.
+
 `android/mesh-bridge` is an isolated Android library module with namespace `org.phonemesh.mesh`, `compileSdk = 35`, and `minSdk = 26`.
 
 ## Public seam

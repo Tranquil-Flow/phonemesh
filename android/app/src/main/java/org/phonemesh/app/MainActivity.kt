@@ -49,6 +49,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     private val radioDevices=linkedMapOf<String,String>()
     private var radioAdapter:ArrayAdapter<String>?=null
     private var radioDialog:AlertDialog?=null
+    private var importDialog:AlertDialog?=null
     private lateinit var store:PackStore
     private lateinit var packDownloads:PackDownloads
     private lateinit var packList:LinearLayout
@@ -323,9 +324,16 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
             ui { refreshPacks(); note("Pack importé : ${nameOf(installed)}") }
         } catch(error:Exception) { ui { note(PackMessages.forFailure(error)) } }
     }
-    /** A ZIP opened or shared from another app (file manager, browser downloads, messaging). */
+    /**
+     * A ZIP opened or shared from another app (file manager, browser downloads, messaging). Any app
+     * can send one, so nothing is installed until the user confirms.
+     */
     private fun openFromIntent(intent:Intent?) {
         if(intent==null || (intent.action!=Intent.ACTION_VIEW && intent.action!=Intent.ACTION_SEND)) return
+        // Handle each intent once: forget it so this activity cannot replay it.
+        setIntent(Intent(this,MainActivity::class.java))
+        // Reopening the app from Recents redelivers the original intent with this flag.
+        if(intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY!=0) return
         if(busy || recording) { note("Attendez la fin de l'opération."); return }
         val uri=if(intent.action==Intent.ACTION_SEND) {
             if(Build.VERSION.SDK_INT>=33) intent.getParcelableExtra(Intent.EXTRA_STREAM,Uri::class.java)
@@ -333,11 +341,17 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
         } else intent.data
         // Only content the sender shares with us; a file path could point into this app's own storage.
         if(uri==null || uri.scheme!="content") { note(PackMessages.forFailure(PackRejected(PackRejected.Reason.UNSAFE,"not content"))); return }
-        importPack(uri)
+        importDialog?.dismiss()
+        val dialog=AlertDialog.Builder(this).setTitle("Installer ce pack de langue ?")
+            .setPositiveButton("Installer") { _,_ -> importPack(uri) }
+            .setNegativeButton("Annuler",null)
+            .create()
+        dialog.setOnDismissListener { if(importDialog===dialog) importDialog=null }
+        importDialog=dialog
+        dialog.show()
     }
     public override fun onNewIntent(intent:Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
         openFromIntent(intent)
     }
     private fun engineName(engine:PackInfo) = if(engine.recognizerModel=="whisper-base") "Whisper Base" else "Whisper Tiny"
@@ -631,6 +645,7 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     }
     override fun onDestroy() {
         downloadPoll.removeCallbacks(pollTick)
+        importDialog?.dismiss() // a pending import is dropped, never installed
         microphone.close(); bridge.close()
         work.execute { engine?.close(); engine=null }; work.shutdown()
         super.onDestroy()
@@ -639,6 +654,8 @@ class MainActivity : Activity(), BleMeshTransport.Listener {
     internal fun refreshPacksForTest() = runOnUiThread { refreshPacks() }
     // Test hook (posted to the main thread: task() updates the controls)
     internal fun loadSpeechForTest() = runOnUiThread { (selected as? Readiness.Ready)?.let { ready -> task { speech(ready) } } }
+    // Test hook
+    internal val importDialogForTest:AlertDialog? get() = importDialog?.takeIf { it.isShowing }
     // Test hook
     internal var recordingForTest:Boolean
         get() = recording

@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Test APK only: serves a fixture pack ZIP over content:// so the app can be tested like
+             a file manager or messaging app opening it. -->
+        <provider android:name="org.phonemesh.app.FixturePackProvider"
+            android:authorities="org.phonemesh.app.test.fixtures" android:exported="true" />
+    </application>
+</manifest>

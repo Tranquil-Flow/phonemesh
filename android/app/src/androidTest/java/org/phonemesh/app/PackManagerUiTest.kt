@@ -141,17 +141,63 @@ class PackManagerUiTest {
         assertTrue(PackStore(packDir, GeneratedPackCatalog.entries).list().none { it.id == "voice-fr-siwis" })
     }
 
+    private fun installedIds() = PackStore(packDir, GeneratedPackCatalog.entries, allowUnknown = true).list().map { it.id }
+    private fun view() = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(FixturePackProvider.VOICE), "application/zip")
+    private fun share() = Intent(Intent.ACTION_SEND).setType("application/zip")
+        .putExtra(Intent.EXTRA_STREAM, Uri.parse(FixturePackProvider.VOICE))
+    private fun deliver(intent: Intent) {
+        inst.runOnMainSync { activity!!.onNewIntent(intent) }
+        settle()
+    }
+    private fun pressDialog(which: Int) {
+        val dialog = checkNotNull(activity!!.importDialogForTest) { "no confirmation shown" }
+        inst.runOnMainSync { dialog.getButton(which).performClick() }
+        settle()
+    }
+
     @Test fun aPackOpenedWhileRecordingIsRefused() {
         val activity = launch()
-        val zip = File(checkNotNull(context.getExternalFilesDir(null)), "phonemesh-voice-fr-siwis-1.zip")
-        inst.runOnMainSync {
-            activity.recordingForTest = true
-            activity.onNewIntent(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.fromFile(zip), "application/zip"))
-        }
-        settle()
+        inst.runOnMainSync { activity.recordingForTest = true }
+        deliver(view())
         assertEquals("Attendez la fin de l'opération.", textOf("Operation status"))
+        assertNull(activity.importDialogForTest)
         inst.runOnMainSync { activity.recordingForTest = false }
-        assertTrue(PackStore(packDir, GeneratedPackCatalog.entries, allowUnknown = true).list().isEmpty())
+        assertTrue(installedIds().isEmpty())
+    }
+
+    @Test fun aPackFromAnotherAppIsInstalledOnlyAfterConfirmation() {
+        val activity = launch()
+        deliver(view())
+        assertNotNull("no confirmation shown", activity.importDialogForTest)
+        assertTrue("installed before confirming", installedIds().isEmpty())
+        assertNull("the handled intent is forgotten", activity.intent.data)
+        pressDialog(android.content.DialogInterface.BUTTON_POSITIVE)
+        assertEquals(listOf("voice-fr-siwis"), installedIds())
+        assertEquals("Pack importé : Français", textOf("Operation status"))
+        assertNotNull(described("Remove voice-fr-siwis"))
+    }
+
+    @Test fun decliningAPackFromAnotherAppInstallsNothing() {
+        val activity = launch()
+        deliver(view())
+        pressDialog(android.content.DialogInterface.BUTTON_NEGATIVE)
+        assertNull(activity.importDialogForTest)
+        deliver(share())
+        val dialog = checkNotNull(activity.importDialogForTest) { "no confirmation for a shared ZIP" }
+        inst.runOnMainSync { dialog.cancel() } // back button or tap outside
+        settle()
+        assertNull(activity.importDialogForTest)
+        assertTrue(installedIds().isEmpty())
+        assertEquals("Prêt. Aucun envoi automatique.", textOf("Operation status"))
+    }
+
+    @Test fun reopeningFromRecentsDoesNotImportAgain() {
+        activity = inst.startActivitySync(view().setClass(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)) as MainActivity
+        settle()
+        assertNull("asked again after a Recents relaunch", activity!!.importDialogForTest)
+        assertEquals("Prêt. Aucun envoi automatique.", textOf("Operation status"))
+        assertTrue(installedIds().isEmpty())
     }
 
     /**

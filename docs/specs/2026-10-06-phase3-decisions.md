@@ -4,7 +4,7 @@
 **Status:** agreed with the project owner
 **Applies to:** sub-projects 1 (lightweight foundation), 2 (wire v2), 3 (UI rebuild)
 
-This records the product decisions that shape Phase 3. Each sub-project has its own design spec; this document is the shared starting point.
+This records the product decisions that shape Phase 3. Amended by `docs/specs/2026-10-06-ui-core-loop-design.md` (sub-project 3a): the UI rebuild now comes before wire v2, languages are an extensible list, the app opens on a chats list with groups and private chats, and named groups form a later stage. Each sub-project has its own design spec; this document is the shared starting point.
 
 ## Context
 

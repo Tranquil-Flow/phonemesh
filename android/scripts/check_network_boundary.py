@@ -11,9 +11,16 @@ from pathlib import Path
 
 API_PATTERNS = [
     "Ljava/net/Socket;",
+    "Ljava/net/DatagramSocket;",
+    "Ljava/net/ServerSocket;",
+    "Ljava/nio/channels/SocketChannel;",
+    "Ljava/nio/channels/DatagramChannel;",
+    "Ljava/nio/channels/ServerSocketChannel;",
     "Ljava/net/URL;.openConnection",
     "Ljava/net/URL;.openStream",
+    "Ljava/net/URLConnection;",
     "Ljava/net/HttpURLConnection;",
+    "Ljavax/net/SocketFactory;",
     "Ljavax/net/ssl/",
     "Landroid/webkit/WebView;",
     "Landroid/app/DownloadManager;.enqueue",
@@ -68,6 +75,21 @@ def check_scanned(dump: str, required: list[str]) -> None:
         raise ScanError(f"required class missing from the scanned dex: {', '.join(missing)}")
 
 
+def check_positive_control(dump: str, classes: list[str]) -> None:
+    """Each named class (or its nested classes) must show at least one API pattern, so a change in
+    the dexdump format cannot make every pattern miss and the scan pass blind."""
+    for wanted in classes:
+        caller, hit = "", False
+        for line in dump.splitlines():
+            if DESCRIPTOR_MARKER in line:
+                caller = line.split("'")[1]
+            elif caller_allowed(caller, {wanted}) and any(p in line for p in API_PATTERNS):
+                hit = True
+                break
+        if not hit:
+            raise ScanError(f"no networking API found inside {wanted}; the scan may be blind")
+
+
 def dump_apk(apk: Path, dexdump: str) -> str:
     parts = []
     with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(apk) as z:
@@ -89,10 +111,18 @@ def main() -> int:
     ap.add_argument("--allowlist", type=Path, required=True)
     ap.add_argument("--dexdump", required=True)
     ap.add_argument("--require-class", action="append", default=[], metavar="DESCRIPTOR")
+    ap.add_argument(
+        "--require-api-in",
+        action="append",
+        default=[],
+        metavar="DESCRIPTOR",
+        help="positive control: this class must show at least one networking API",
+    )
     args = ap.parse_args()
     try:
         dump = dump_apk(args.apk, args.dexdump)
         check_scanned(dump, args.require_class)
+        check_positive_control(dump, args.require_api_in)
     except ScanError as e:
         print(f"NETWORK_BOUNDARY_SCAN_FAILED: {e}", file=sys.stderr)
         return 1

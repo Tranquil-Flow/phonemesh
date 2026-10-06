@@ -41,7 +41,11 @@ def test_only_packdownloads_may_use_network_apis():
 def test_reviewed_library_reference_can_be_allowlisted():
     allow = {"Lcom/k2fsa/sherpa/onnx/Foo; Ljava/net/Socket;"}
     found = nb.violations(DUMP, allowed_callers=PACK, allowlist=allow)
-    assert found == [("Lorg/phonemesh/app/MainActivity;", "Ljava/net/URL;.openConnection")]
+    # openConnection's return type also matches the URLConnection pattern.
+    assert found == [
+        ("Lorg/phonemesh/app/MainActivity;", "Ljava/net/URL;.openConnection"),
+        ("Lorg/phonemesh/app/MainActivity;", "Ljava/net/URLConnection;"),
+    ]
 
 
 def _dump_for(caller):
@@ -95,3 +99,35 @@ def test_required_class_missing_fails_and_present_passes():
     with pytest.raises(nb.ScanError):
         nb.check_scanned(DUMP, ["Lorg/phonemesh/app/Nope;"])
     nb.check_scanned(DUMP, ["Lorg/phonemesh/app/PackDownloads;"])
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        "Ljava/net/DatagramSocket;",
+        "Ljava/net/ServerSocket;",
+        "Ljava/nio/channels/SocketChannel;",
+        "Ljava/nio/channels/DatagramChannel;",
+        "Ljava/nio/channels/ServerSocketChannel;",
+        "Ljava/net/URLConnection;",
+        "Ljavax/net/SocketFactory;",
+    ],
+)
+def test_other_socket_and_connection_apis_are_caught(api):
+    dump = f"""Class #0            -
+  Class descriptor  : 'Lorg/phonemesh/app/MainActivity;'
+      0000: invoke-virtual {{v0}}, {api}.close:()V
+"""
+    found = nb.violations(dump, allowed_callers=PACK, allowlist=set())
+    assert found and all(c == "Lorg/phonemesh/app/MainActivity;" for c, _ in found)
+
+
+def test_positive_control_needs_a_network_api_inside_the_named_class():
+    nb.check_positive_control(DUMP, ["Lorg/phonemesh/app/PackDownloads;"])
+    nested = _dump_for("Lorg/phonemesh/app/PackDownloads$start$1;")
+    nb.check_positive_control(nested, ["Lorg/phonemesh/app/PackDownloads;"])
+    blind = DUMP.replace(
+        "Landroid/app/DownloadManager;.enqueue", "Landroid/app/DownloadManager;.query"
+    )
+    with pytest.raises(nb.ScanError):
+        nb.check_positive_control(blind, ["Lorg/phonemesh/app/PackDownloads;"])

@@ -114,6 +114,7 @@ val checkNetworkBoundary by tasks.registering(Exec::class) {
             "--allowlist", "$rootPath/network-boundary-allowlist.txt",
             "--dexdump", dexdump.absolutePath,
             "--require-class", "Lorg/phonemesh/app/PackDownloads;",
+            "--require-api-in", "Lorg/phonemesh/app/PackDownloads;",
         )
     }
 }

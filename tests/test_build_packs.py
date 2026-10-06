@@ -112,7 +112,7 @@ def test_pack_properties_engine_and_voice():
     assert "languageTag=fr" in voice and "recognizerModel" not in voice
 
 
-def _voice_tar(tmp_path):
+def _voice_tar(tmp_path, overrides=None):
     import io
     import json
     import tarfile
@@ -124,6 +124,7 @@ def _voice_tar(tmp_path):
         "v/tokens.txt": b"t",
     }
     members.update({"v/espeak-ng-data/" + n: b"x" for n in FULL})
+    members.update({"v/espeak-ng-data/" + n: d for n, d in (overrides or {}).items()})
     with tarfile.open(path, "w:bz2") as archive:
         for name, data in members.items():
             info = tarfile.TarInfo(name)
@@ -140,3 +141,38 @@ def test_voice_files_trims_by_default_and_keeps_everything_for_full(tmp_path):
     assert kept == CORE | {"fr_dict", "lang/roa/fr", "en_dict", "lang/gmw/en"}
     full, _ = bp.voice_files(tar, trim=False)
     assert {n.removeprefix("tts/espeak-ng-data/") for n in full if "espeak-ng-data" in n} == FULL
+
+
+def test_language_file_references_its_dictionary():
+    assert bp.espeak_references(b"name French\nlanguage fr-fr\nlanguage fr\ndictrules 1\n") == {
+        "fr_dict"
+    }
+    assert bp.espeak_references(b"name X\nlanguage en-us 2\nphonemes en-us\n") == {"en_dict"}
+    assert bp.espeak_references(b"name Y\nlanguage sr\ndictionary hbs\n") == {"hbs_dict"}
+    assert bp.espeak_references(b"// comment\nname Z\n") == set()
+
+
+def test_trimmed_set_missing_a_referenced_file_fails_the_build(tmp_path):
+    tar = _voice_tar(
+        tmp_path, {"lang/roa/fr": b"name French\nlanguage fr\ndictionary frx\n", "frx_dict": b"x"}
+    )
+    with pytest.raises(ValueError, match="frx_dict"):
+        bp.voice_files(tar, CATALOG_VOICES)
+    # The untrimmed set holds it, so the full build passes.
+    full, _ = bp.voice_files(tar, trim=False)
+    assert "tts/espeak-ng-data/frx_dict" in full
+
+
+def test_custom_out_needs_an_explicit_catalog_out(tmp_path):
+    with pytest.raises(SystemExit, match="--catalog-out"):
+        bp.main(["--out", str(tmp_path / "candidate")])
+    assert not (tmp_path / "candidate").exists()
+
+
+def test_catalog_out_defaults_only_with_the_default_out(tmp_path):
+    parse = bp.parser().parse_args
+    assert bp.catalog_target(parse([])) == bp.CORE_CATALOG
+    target = tmp_path / "Catalog.kt"
+    assert (
+        bp.catalog_target(parse(["--out", str(tmp_path), "--catalog-out", str(target)])) == target
+    )

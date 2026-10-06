@@ -128,6 +128,32 @@ def espeak_keep(names: set[str], voice: str, union: tuple[str, ...] = ()) -> set
     return keep
 
 
+def espeak_references(lang_file: bytes) -> set[str]:
+    """Files an espeak-ng language file needs besides the core tables: its dictionary, named by a
+    `dictionary` directive or else by the first `language` code (`fr-fr` -> `fr_dict`). The
+    `phonemes` and `tunes` directives name entries inside the core `phontab` and `intonations`."""
+    dictionary, language = None, None
+    for raw in lang_file.decode("utf-8", errors="replace").splitlines():
+        fields = raw.split("//", 1)[0].split()
+        if len(fields) < 2:
+            continue
+        if fields[0] == "dictionary":
+            dictionary = fields[1]
+        elif fields[0] == "language" and language is None:
+            language = fields[1].split("-")[0]
+    name = dictionary or language
+    return {f"{name}_dict"} if name else set()
+
+
+def check_espeak_references(kept: dict[str, bytes]) -> None:
+    """Fails the build if a kept language file references a file the kept set omits."""
+    for name, data in sorted(kept.items()):
+        if name.startswith("lang/"):
+            missing = sorted(espeak_references(data) - set(kept))
+            if missing:
+                raise ValueError(f"espeak-ng {name} references {missing}, not in the pack")
+
+
 def manifest(files: dict[str, bytes]) -> bytes:
     rows = sorted((n, hashlib.sha256(d).hexdigest()) for n, d in files.items() if n != "SHA256SUMS")
     return "".join(f"{h}  {n}\n" for n, h in rows).encode()
@@ -264,8 +290,12 @@ def voice_files(
     if model is None or tokens is None or voice is None:
         raise ValueError(f"{tar_path.name}: missing model, tokens or .onnx.json")
     files = {"model.onnx": model, "tokens.txt": tokens}
-    for name in sorted(espeak_keep(set(espeak), voice, union) if trim else espeak):
-        files["espeak-ng-data/" + name] = espeak[name]
+    kept = {
+        n: espeak[n] for n in sorted(espeak_keep(set(espeak), voice, union) if trim else espeak)
+    }
+    check_espeak_references(kept)
+    for name, data in kept.items():
+        files["espeak-ng-data/" + name] = data
     return {"tts/" + k: v for k, v in files.items()}, voice
 
 
@@ -330,19 +360,39 @@ def catalog_kotlin(entries: list[dict]) -> str:
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--decoder", choices=["original", "requant"], default="original")
-    parser.add_argument("--out", type=Path, default=OUT)
-    parser.add_argument("--catalog-out", type=Path, default=CORE_CATALOG)
-    parser.add_argument("--catalog-include", action="append", default=[])
-    parser.add_argument(
+def parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--decoder", choices=["original", "requant"], default="original")
+    p.add_argument("--out", type=Path, default=OUT)
+    p.add_argument(
+        "--catalog-out",
+        type=Path,
+        help="where to write the generated Kotlin catalog; defaults to the checked-in core "
+        "catalog, and must be given explicitly with a non-default --out",
+    )
+    p.add_argument("--catalog-include", action="append", default=[])
+    p.add_argument(
         "--reference",
         action="store_true",
         help="also build the never-cataloged reference engine (original decoder) and "
         "untrimmed '-full' voices used by the emulator equivalence gates",
     )
-    args = parser.parse_args()
+    return p
+
+
+def catalog_target(args: argparse.Namespace) -> Path:
+    """The checked-in catalog is rewritten only for the published packs: a candidate build to
+    another directory must name its own catalog file."""
+    if args.catalog_out is not None:
+        return args.catalog_out
+    if args.out.resolve() != OUT.resolve():
+        raise SystemExit("--out other than android/model-packs needs an explicit --catalog-out")
+    return CORE_CATALOG
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parser().parse_args(argv)
+    catalog_out = catalog_target(args)
     args.out.mkdir(parents=True, exist_ok=True)
     wanted = set(DEFAULT_CATALOG) | set(args.catalog_include)
 
@@ -425,8 +475,8 @@ def main() -> None:
     if unknown:
         raise SystemExit(f"unknown catalog ids: {sorted(unknown)}")
     chosen = [e for e in built if e["id"] in wanted]
-    args.catalog_out.parent.mkdir(parents=True, exist_ok=True)
-    args.catalog_out.write_text(catalog_kotlin(chosen))
+    catalog_out.parent.mkdir(parents=True, exist_ok=True)
+    catalog_out.write_text(catalog_kotlin(chosen))
 
 
 if __name__ == "__main__":

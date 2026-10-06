@@ -239,7 +239,9 @@ def espeak_voice(tar_path: Path) -> str:
     raise ValueError(f"{tar_path.name}: missing .onnx.json")
 
 
-def voice_files(tar_path: Path, union: tuple[str, ...] = ()) -> tuple[dict[str, bytes], str]:
+def voice_files(
+    tar_path: Path, union: tuple[str, ...] = (), trim: bool = True
+) -> tuple[dict[str, bytes], str]:
     model, tokens, espeak, voice = None, None, {}, None
     with tarfile.open(tar_path, "r:bz2") as archive:
         members = archive.getmembers()
@@ -262,7 +264,7 @@ def voice_files(tar_path: Path, union: tuple[str, ...] = ()) -> tuple[dict[str, 
     if model is None or tokens is None or voice is None:
         raise ValueError(f"{tar_path.name}: missing model, tokens or .onnx.json")
     files = {"model.onnx": model, "tokens.txt": tokens}
-    for name in sorted(espeak_keep(set(espeak), voice, union)):
+    for name in sorted(espeak_keep(set(espeak), voice, union) if trim else espeak):
         files["espeak-ng-data/" + name] = espeak[name]
     return {"tts/" + k: v for k, v in files.items()}, voice
 
@@ -334,6 +336,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=OUT)
     parser.add_argument("--catalog-out", type=Path, default=CORE_CATALOG)
     parser.add_argument("--catalog-include", action="append", default=[])
+    parser.add_argument(
+        "--reference",
+        action="store_true",
+        help="also build the never-cataloged reference engine (original decoder) and "
+        "untrimmed '-full' voices used by the emulator equivalence gates",
+    )
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     wanted = set(DEFAULT_CATALOG) | set(args.catalog_include)
@@ -389,6 +397,29 @@ def main() -> None:
         name = f"phonemesh-{pack_id}-{VERSION}.zip"
         record(pack_id, "voice", write_pack(args.out, name, files, "voice", pack_id, [receipt]))
         print(json.dumps({"id": pack_id, "espeak_voice": voice, "union": union}), flush=True)
+
+    if args.reference:
+        files = {"whisper/" + k: v for k, v in whisper_tiny_files(tiny_path, "original").items()}
+        pack_id = "engine-whisper-tiny-reference"
+        files["pack.properties"] = pack_properties(
+            kind="engine",
+            id=pack_id,
+            version=VERSION,
+            label="Whisper Tiny (reference)",
+            recognizerModel="whisper-tiny",
+        )
+        name = f"phonemesh-{pack_id}-{VERSION}.zip"
+        write_pack(args.out, name, files, "engine", "whisper-tiny", [tiny_receipt])
+        for key in ("voice-fr-siwis", "voice-en-US-ljspeech"):
+            path, receipt = fetch(key)
+            files, _ = voice_files(path, trim=False)
+            pack_id = f"{key}-full"
+            files["pack.properties"] = pack_properties(
+                kind="voice", id=pack_id, version=VERSION, **VOICES[key]
+            )
+            name = f"phonemesh-{pack_id}-{VERSION}.zip"
+            write_pack(args.out, name, files, "voice", key, [receipt])
+            print(json.dumps({"reference": pack_id, "fileName": name}), flush=True)
 
     unknown = wanted - {e["id"] for e in built}
     if unknown:

@@ -110,3 +110,33 @@ def test_pack_properties_engine_and_voice():
         whisperLanguage="fr",
     ).decode()
     assert "languageTag=fr" in voice and "recognizerModel" not in voice
+
+
+def _voice_tar(tmp_path):
+    import io
+    import json
+    import tarfile
+
+    path = tmp_path / "v.tar.bz2"
+    members = {
+        "v/m.onnx": b"model",
+        "v/m.onnx.json": json.dumps({"espeak": {"voice": "fr"}}).encode(),
+        "v/tokens.txt": b"t",
+    }
+    members.update({"v/espeak-ng-data/" + n: b"x" for n in FULL})
+    with tarfile.open(path, "w:bz2") as archive:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    return path
+
+
+def test_voice_files_trims_by_default_and_keeps_everything_for_full(tmp_path):
+    tar = _voice_tar(tmp_path)
+    trimmed, voice = bp.voice_files(tar, CATALOG_VOICES)
+    assert voice == "fr"
+    kept = {n.removeprefix("tts/espeak-ng-data/") for n in trimmed if "espeak-ng-data" in n}
+    assert kept == CORE | {"fr_dict", "lang/roa/fr", "en_dict", "lang/gmw/en"}
+    full, _ = bp.voice_files(tar, trim=False)
+    assert {n.removeprefix("tts/espeak-ng-data/") for n in full if "espeak-ng-data" in n} == FULL

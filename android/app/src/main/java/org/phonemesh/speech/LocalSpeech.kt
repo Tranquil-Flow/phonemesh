@@ -31,7 +31,13 @@ data class SpeechPack(
     val voiceRoot: File,
     val languageTag: String,
     val whisperLanguage: String,
+    /** VITS sampling noise; the defaults are production values. Tests pass 0 for determinism. */
+    val noiseScale: Float = DEFAULT_NOISE_SCALE,
+    val noiseScaleW: Float = DEFAULT_NOISE_SCALE_W,
 )
+
+private const val DEFAULT_NOISE_SCALE: Float = 0.667f
+private const val DEFAULT_NOISE_SCALE_W: Float = 0.8f
 
 /** Mono floating-point PCM samples normalized to [-1, 1]. */
 data class AudioPcm(
@@ -59,7 +65,7 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
             )
             tts = OfflineTts(
                 assetManager = null,
-                config = piperTtsConfig(packPaths),
+                config = piperTtsConfig(packPaths, pack.noiseScale, pack.noiseScaleW),
             )
         } catch (t: Throwable) {
             val closeFailure = closeInternal(markClosed = true)
@@ -342,7 +348,7 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
             )
         }
 
-        private fun piperTtsConfig(paths: PackPaths): OfflineTtsConfig {
+        private fun piperTtsConfig(paths: PackPaths, noiseScale: Float, noiseScaleW: Float): OfflineTtsConfig {
             return OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
@@ -351,8 +357,8 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
                         tokens = paths.ttsTokens.path,
                         dataDir = paths.espeakData.path,
                         dictDir = "",
-                        noiseScale = 0.667f,
-                        noiseScaleW = 0.8f,
+                        noiseScale = noiseScale,
+                        noiseScaleW = noiseScaleW,
                         lengthScale = 1.0f,
                     ),
                     numThreads = SHERPA_NUM_THREADS,

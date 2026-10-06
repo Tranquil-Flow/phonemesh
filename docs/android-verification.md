@@ -89,3 +89,24 @@ The Phonemesh emulator was shut down. The phone's instrumentation-only APK and b
 armeabi-v7a decode time: unmeasured (no 32-bit device); v7a APK not distributed until measured.
 
 The `minifiedDebug` build keeps only the specific `kotlin.*` stdlib classes the androidx.test runner and the test sources reference (`android/app/proguard-minified-debug.pro`); new test code that uses other stdlib classes needs an entry there.
+
+## Task 9 gates: espeak trimming and decoder requantization
+
+Emulator `Phonemesh_API_35` (arm64), `PackEquivalenceTest`, 2/2 pass.
+
+**Trimmed espeak data.** With VITS `noiseScale = 0` and `noiseScaleW = 0`, full-vs-full synthesis of each sentence is bit-identical (determinism guard), and trimmed-vs-full synthesis is bit-identical for all four sentences in fr and en-US. Trimmed means the core files plus `fr_dict`, `lang/roa/fr`, `en_dict`, `lang/gmw/en`; full means the untrimmed upstream `espeak-ng-data`. Voice pack sizes, trimmed vs full: fr-siwis 6334594 vs 14876735 bytes, en-US-ljspeech 13979221 vs 22521362 bytes.
+
+**Requantized Whisper Tiny decoder: not adopted, owner decision needed.** Sizes: engine ZIP 60136101 bytes (original decoder) vs 31153380 bytes (requantized). 2 of 8 clips transcribe differently (both fr, same sentence), and the total decode-time ratio candidate/reference is 1.281 (adoption requires all identical and a ratio of at most 1.05). Differences are in `.local/receipts/decoder-diff.md`. RAM was not measured.
+
+| tag | variant | identical | reference s | candidate s |
+| --- | --- | --- | --- | --- |
+| en-US | normal | yes | 0.154 | 0.219 |
+| en-US | quiet | yes | 0.144 | 0.211 |
+| en-US | normal | yes | 0.151 | 0.197 |
+| en-US | quiet | yes | 0.151 | 0.221 |
+| fr | normal | yes | 0.119 | 0.162 |
+| fr | quiet | yes | 0.116 | 0.160 |
+| fr | normal | NO | 0.157 | 0.236 |
+| fr | quiet | NO | 0.304 | 0.253 |
+
+Totals: reference 1.296 s, candidate 1.659 s, ratio 1.281.

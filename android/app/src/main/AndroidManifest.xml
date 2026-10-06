@@ -20,6 +20,7 @@
                 <data android:mimeType="application/zip" />
             </intent-filter>
         </activity>
+        <activity android:name=".LanguageActivity" android:exported="false" />
         <provider android:name=".ShareProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true" />
     </application>

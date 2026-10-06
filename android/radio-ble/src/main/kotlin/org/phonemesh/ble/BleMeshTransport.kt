@@ -275,17 +275,17 @@ class BleMeshTransport(
         require(normalized.isNotEmpty()) { "address must not be blank" }
         val missing = missingConnectPermission()
         if (missing != null) {
-            workHandler.post { disconnectAndCleanup("Missing permission for BLE connect: $missing") }
+            workHandler.post { disconnectAndCleanup("Missing permission for BLE connect: $missing"); postConnectFailed() }
             return
         }
         stopScan()
         val adapter = adapter
         if (adapter == null || !adapter.isEnabled) {
-            workHandler.post { disconnectAndCleanup("Bluetooth is disabled or unavailable") }
+            workHandler.post { disconnectAndCleanup("Bluetooth is disabled or unavailable"); postConnectFailed() }
             return
         }
         workHandler.post {
-            disconnectAndCleanup("Starting new BLE connection")
+            disconnectAndCleanup("Starting new BLE connection", announceFailure = false)
             try {
                 val device = adapter.getRemoteDevice(normalized)
                 post(this@BleMeshTransport.status.connecting("Connecting to Meshtastic BLE radio $normalized"))
@@ -297,7 +297,7 @@ class BleMeshTransport(
                 }
                 session.replace(gatt)
                 val target = gatt
-                if (target == null) postState(false, "Android returned null BluetoothGatt for $normalized")
+                if (target == null) { postState(false, "Android returned null BluetoothGatt for $normalized"); postConnectFailed() }
                 else {
                     val deadline = Runnable {
                         if (acceptsCallback(target) && !ready) disconnectAndCleanup("Radio connection/config timed out; disconnect the other app and retry")
@@ -307,10 +307,13 @@ class BleMeshTransport(
                 }
             } catch (security: SecurityException) {
                 postState(false, "BLE connect denied: ${security.message}")
+                postConnectFailed()
             } catch (bad: IllegalArgumentException) {
                 postState(false, "Invalid BLE device address: $normalized")
+                postConnectFailed()
             } catch (runtime: RuntimeException) {
                 postState(false, "BLE connect failed: ${runtime.message}")
+                postConnectFailed()
             }
         }
     }
@@ -320,7 +323,7 @@ class BleMeshTransport(
     override fun disconnect() {
         checkOpen()
         stopScan()
-        workHandler.post { disconnectAndCleanup("Disconnected by user") }
+        workHandler.post { disconnectAndCleanup("Disconnected by user", announceFailure = false) }
     }
 
     /**
@@ -375,7 +378,7 @@ class BleMeshTransport(
         if (!closed.compareAndSet(false, true)) return
         stopScan()
         workHandler.post {
-            disconnectAndCleanup("BleMeshTransport closed")
+            disconnectAndCleanup("BleMeshTransport closed", announceFailure = false)
             workThread.quitSafely()
         }
     }
@@ -644,7 +647,8 @@ class BleMeshTransport(
         if (delivery.size > 0) scheduleExpiry()
     }
 
-    private fun disconnectAndCleanup(detail: String) {
+    private fun disconnectAndCleanup(detail: String, announceFailure: Boolean = true) {
+        val wasReady = ready
         ready = false
         session.replace(null)
         expiryTick?.let { workHandler.removeCallbacks(it) }
@@ -681,6 +685,7 @@ class BleMeshTransport(
             }
         }
         post(status.connectionLost(detail))
+        if (announceFailure && !wasReady) postConnectFailed()
     }
 
     private fun maxWriteBytes(): Int = (negotiatedMtu - ATT_HEADER_BYTES).coerceAtLeast(DEFAULT_ATT_MTU - ATT_HEADER_BYTES)
@@ -711,6 +716,10 @@ class BleMeshTransport(
 
     private fun acceptsCallback(candidate: BluetoothGatt): Boolean = !closed.get() && session.accepts(candidate)
     private fun checkOpen() = check(!closed.get()) { "BleMeshTransport is closed" }
+
+    private fun postConnectFailed() {
+        mainHandler.post { if (!closed.get()) listener.onConnectFailed() }
+    }
 
     private fun postState(connected: Boolean, detail: String) {
         mainHandler.post { if (!closed.get()) listener.onState(connected, detail) }

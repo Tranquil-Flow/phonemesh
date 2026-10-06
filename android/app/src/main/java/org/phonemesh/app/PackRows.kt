@@ -36,7 +36,7 @@ object PackRows {
         return known + extra
     }
 
-    private fun percent(progress: Pair<Long, Long>?): Int {
+    internal fun percent(progress: Pair<Long, Long>?): Int {
         val (done, total) = progress ?: return 0
         return if (total > 0) (done * 100 / total).toInt().coerceIn(0, 100) else 0
     }

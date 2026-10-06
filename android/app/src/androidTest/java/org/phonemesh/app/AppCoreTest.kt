@@ -1,0 +1,258 @@
+package org.phonemesh.app
+
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.phonemesh.ble.DeliveryState
+import org.phonemesh.ble.RadioPeer
+import org.phonemesh.core.DeliveryStatus
+import org.phonemesh.core.DraftFit
+
+/** AppCore with a fake radio and fake speech: nothing records, plays or transmits. */
+@RunWith(AndroidJUnit4::class)
+class AppCoreTest {
+    private val core get() = TestCore.core
+    private val radio get() = TestCore.radio
+    private val speech get() = TestCore.speech
+    private fun <T> main(block: () -> T): T = TestCore.onMain(block)
+    private fun sendIn(chatId: Long, text: String): Message = main {
+        core.setDraft(chatId, text)
+        assertTrue(core.send(chatId))
+        checkNotNull(core.history.lastMessage(chatId))
+    }
+
+    @After fun tearDown() = TestCore.uninstall()
+
+    @Test fun groupMessagesGoToTheGroupAndPrivateOnesToTheirChat() {
+        TestCore.install()
+        main {
+            radio.receive("!0000aaaa", "[pm1:fr] Bonjour le groupe", direct = false)
+            radio.receive("!0000bbbb", "[pm1:fr] Salut toi", direct = true)
+        }
+        val group = core.groupChatId()
+        assertEquals("Bonjour le groupe", core.history.lastMessage(group)!!.text)
+        val direct = core.history.chats().single { it.kind == ChatKind.DIRECT }
+        assertEquals("!0000bbbb", direct.address)
+        assertEquals("Salut toi", core.history.lastMessage(direct.id)!!.text)
+        sendIn(group, "Pour tous")
+        sendIn(direct.id, "Pour toi")
+        assertEquals(listOf("^all", "!0000bbbb"), radio.sent.map { it.destinationId })
+        assertEquals(listOf("[pm1:fr] Pour tous", "[pm1:fr] Pour toi"), radio.sent.map { it.text })
+        assertEquals(listOf(0, 0), radio.sent.map { it.channel })
+    }
+
+    @Test fun otherChannelsAndBrokenTextAreIgnored() {
+        TestCore.install()
+        main {
+            radio.receive("!0000aaaa", "[pm1:fr] Canal deux", direct = false, channel = 2)
+            radio.receive("!0000aaaa", "\u0000", direct = false)
+        }
+        assertNull(core.history.lastMessage(core.groupChatId()))
+    }
+
+    @Test fun groupShowsSentAndOnlyPrivateGetsATick() {
+        TestCore.install()
+        val group = core.groupChatId()
+        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val inGroup = sendIn(group, "Au groupe")
+        val inPrivate = sendIn(direct, "A Kofi")
+        val (groupPacket, privatePacket) = radio.sent.map { it.packetId }
+        main {
+            radio.deliver(groupPacket, DeliveryState.SUBMITTING); radio.deliver(groupPacket, DeliveryState.QUEUED)
+            radio.deliver(privatePacket, DeliveryState.SUBMITTING); radio.deliver(privatePacket, DeliveryState.QUEUED)
+        }
+        assertEquals(DeliveryStatus.SENT, core.history.message(inGroup.id)!!.status)
+        assertEquals(DeliveryStatus.WAITING, core.history.message(inPrivate.id)!!.status)
+        main {
+            radio.deliver(groupPacket, DeliveryState.ACKNOWLEDGED); radio.deliver(groupPacket, DeliveryState.UNCONFIRMED)
+            radio.deliver(privatePacket, DeliveryState.ACKNOWLEDGED)
+        }
+        assertEquals(DeliveryStatus.SENT, core.history.message(inGroup.id)!!.status)
+        assertEquals(DeliveryStatus.DELIVERED, core.history.message(inPrivate.id)!!.status)
+    }
+
+    /** Review Focus 1. */
+    @Test fun aRadioThatIsNotReadyMakesAFailureThatCanBeResent() {
+        TestCore.install()
+        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        main { radio.connected(false) }
+        val failed = sendIn(direct, "Tu es là ?")
+        assertEquals(DeliveryStatus.FAILED, failed.status)
+        assertTrue(radio.sent.isEmpty())
+        main { radio.connected(true) }
+        assertTrue(main { core.resend(failed.id) })
+        val packet = radio.sent.single().packetId
+        assertEquals(DeliveryStatus.WAITING, core.history.message(failed.id)!!.status)
+        assertEquals(packet, core.history.message(failed.id)!!.packetId)
+        // Lost after the radio took it: unconfirmed, resend gets a new packet, the old one's late report changes nothing.
+        main { radio.deliver(packet, DeliveryState.QUEUED); radio.deliver(packet, DeliveryState.UNCONFIRMED) }
+        assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(failed.id)!!.status)
+        assertTrue(main { core.resend(failed.id) })
+        val second = radio.sent.last().packetId
+        assertNotEquals(packet, second)
+        main { radio.deliver(packet, DeliveryState.FAILED); radio.deliver(second, DeliveryState.ACKNOWLEDGED) }
+        assertEquals(DeliveryStatus.DELIVERED, core.history.message(failed.id)!!.status)
+        assertEquals(1, core.history.messages(direct).size)
+    }
+
+    /** Review Focus 2. */
+    @Test fun aStrangerGetsAPrivateChatThatTakesTheirNameLater() {
+        TestCore.install()
+        main { radio.receive("!0bad4a2f", "[pm1:fr] Qui suis-je ?", direct = true) }
+        val chat = core.history.chats().single { it.kind == ChatKind.DIRECT }
+        assertEquals("Radio 4a2f", main { core.chatTitle(chat) })
+        assertEquals(1, chat.unread)
+        main { radio.setPeers(listOf(RadioPeer("!0bad4a2f", "Kofi"))) }
+        assertEquals("Kofi", main { core.chatTitle(core.history.chat(chat.id)!!) })
+        main { radio.receive("!0bad4a2f", "[pm1:fr] C'est Kofi", direct = true) }
+        assertEquals(1, core.history.chats().count { it.kind == ChatKind.DIRECT })
+        assertEquals(2, core.history.messages(chat.id).size)
+    }
+
+    /** Review Focus 3, and the history surviving a restart. */
+    @Test fun waitingMessagesBecomeUnconfirmedAfterARestart() {
+        TestCore.install()
+        val group = core.groupChatId()
+        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val privateWaiting = sendIn(direct, "Privé")
+        val groupSent = sendIn(group, "Parti")
+        main { radio.deliver(radio.sent.last().packetId, DeliveryState.QUEUED) }
+        val groupWaiting = sendIn(group, "Pas encore parti")
+        TestCore.restart()
+        assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(privateWaiting.id)!!.status)
+        assertEquals(DeliveryStatus.SENT, core.history.message(groupSent.id)!!.status)
+        assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(groupWaiting.id)!!.status)
+        assertEquals(listOf("Parti", "Pas encore parti"), core.history.messages(group).map { it.text })
+        assertTrue(core.history.message(privateWaiting.id)!!.status!!.canResend)
+    }
+
+    @Test fun unreadCountsOnlyWhileTheChatIsClosed() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { radio.receive("!0000aaaa", "[pm1:fr] Un", false); radio.receive("!0000aaaa", "[pm1:fr] Deux", false) }
+        assertEquals(2, core.history.chat(group)!!.unread)
+        main { core.openChat(group) }
+        assertEquals(0, core.history.chat(group)!!.unread)
+        main { radio.receive("!0000aaaa", "[pm1:fr] Vu", false) }
+        assertEquals(0, core.history.chat(group)!!.unread)
+        main { core.closeChat(group); radio.receive("!0000aaaa", "[pm1:fr] Trois", false) }
+        assertEquals(1, core.history.chat(group)!!.unread)
+    }
+
+    @Test fun onlyOneMessagePlaysAtATime() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { radio.receive("!0000aaaa", "[pm1:fr] Premier", false); radio.receive("!0000aaaa", "[pm1:fr] Second", false) }
+        val (first, second) = core.history.messages(group)
+        main { core.play(first.id) }
+        assertEquals(first.id, core.playingId)
+        main { core.play(second.id) }
+        assertEquals(second.id, core.playingId)
+        assertEquals(listOf("Premier", "Second"), speech.spoken)
+        main { core.play(second.id) } // tapping the playing one stops it
+        assertNull(core.playingId)
+        assertFalse(speech.playing)
+    }
+
+    @Test fun aMissingVoiceFallsBackToMineWithANote() {
+        TestCore.install()
+        main { radio.receive("!0000aaaa", "[pm1:en-US] Hello there", false) }
+        val message = core.history.lastMessage(core.groupChatId())!!
+        main { core.play(message.id) }
+        assertEquals(listOf("Hello there"), speech.spoken)
+        assertEquals(UiText(R.string.voice_fallback, listOf("English")), core.lastNote)
+    }
+
+    @Test fun recordingMakesADraftAndNothingIsSentOrPlayed() {
+        TestCore.install()
+        val group = core.groupChatId()
+        assertTrue(main { core.startRecording(group) })
+        assertTrue(speech.recording)
+        assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+        main { core.finishRecording() }
+        assertEquals("Bonjour à tous", core.draft(group))
+        assertEquals(AppCore.RecordState.IDLE, core.recordState)
+        assertTrue(radio.sent.isEmpty())
+        assertTrue(speech.spoken.isEmpty())
+    }
+
+    @Test fun cancellingDropsTheRecording() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { core.startRecording(group); core.cancelRecording() }
+        assertNull(core.draft(group))
+        assertEquals(AppCore.RecordState.IDLE, core.recordState)
+        assertFalse(speech.recording)
+    }
+
+    @Test fun recordingStopsByItselfAtTheLimit() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { core.recordLimitMs = 200; core.startRecording(group) }
+        Thread.sleep(800)
+        assertEquals(AppCore.RecordState.IDLE, main { core.recordState })
+        assertEquals("Bonjour à tous", core.draft(group))
+    }
+
+    @Test fun aTooLongDraftCannotBeSent() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { core.setDraft(group, "a".repeat(195)) }
+        assertEquals(DraftFit.TOO_LONG, core.draftFit(group))
+        assertFalse(main { core.send(group) })
+        assertTrue(radio.sent.isEmpty())
+        assertEquals("a".repeat(195), core.draft(group))
+    }
+
+    @Test fun theRememberedRadioReconnectsByItself() {
+        TestCore.install(connected = false)
+        main { core.settings.radioAddress = "AA:BB:CC:DD:EE:01"; core.settings.radioName = "Kofi" }
+        TestCore.access.radioMissing = listOf("android.permission.BLUETOOTH_CONNECT")
+        assertFalse(main { core.autoReconnect() })
+        TestCore.access.radioMissing = emptyList()
+        main { core.activityStarted() }
+        assertEquals(listOf("AA:BB:CC:DD:EE:01"), radio.connects)
+        main { core.activityStopped() }
+    }
+
+    @Test fun progressReportsDuringAConnectDoNotEndTheWait() {
+        TestCore.install(connected = false)
+        main {
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            radio.connected(false)
+            radio.connected(false)
+        }
+        assertTrue(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+    }
+
+    @Test fun aConnectionThatFailsEndsTheWaitAndTellsTheScreen() {
+        TestCore.install(connected = false)
+        val changes = mutableListOf<AppCore.Change>()
+        main {
+            core.observe { changes += it }
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            assertTrue(core.isConnecting("AA:BB:CC:DD:EE:01"))
+            changes.clear()
+            radio.failConnect()
+        }
+        assertTrue(changes.contains(AppCore.Change.RADIO))
+        assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+    }
+
+    @Test fun aWaitThatRunsOutTellsTheScreen() {
+        TestCore.install(connected = false)
+        val changes = java.util.Collections.synchronizedList(mutableListOf<AppCore.Change>())
+        main {
+            core.connectWaitMs = 100
+            core.observe { changes += it }
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            changes.clear()
+        }
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline && !changes.contains(AppCore.Change.RADIO)) Thread.sleep(20)
+        assertTrue(changes.contains(AppCore.Change.RADIO))
+        assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+    }
+}

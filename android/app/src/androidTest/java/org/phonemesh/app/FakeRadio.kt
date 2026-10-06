@@ -41,6 +41,7 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
         ready = on
         listener.onState(on, if (on) "ready" else "lost")
     }
+    fun failConnect() = listener.onConnectFailed()
     fun receive(sender: String, text: String, direct: Boolean, channel: Int = 0) = listener.onText(sender, text, channel, direct)
     fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")
     fun found(address: String, name: String, rssi: Int) = listener.onDevice(address, name, rssi)

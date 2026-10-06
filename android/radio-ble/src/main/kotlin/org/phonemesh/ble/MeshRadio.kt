@@ -8,6 +8,13 @@ interface MeshRadio : AutoCloseable {
     interface Listener {
         fun onState(connected: Boolean, detail: String)
 
+        /**
+         * A connection the caller asked for ended before the radio became ready (no permission, Bluetooth off,
+         * a bad address, a refused or timed-out connection). Progress reports stay on [onState]; a ready
+         * connection that drops is [onState] with false.
+         */
+        fun onConnectFailed() {}
+
         /** [direct] is true when the message was addressed to this radio, false for a broadcast. */
         fun onText(sender: String, text: String, channel: Int, direct: Boolean)
 

@@ -45,6 +45,6 @@ class Settings(context: Context, name: String = PREFS) {
         private const val ENGINE = "engine"
         private const val RADIO_ADDRESS = "radioAddress"
         private const val RADIO_NAME = "radioName"
-        private const val MIGRATED = "migrated"
+        internal const val MIGRATED = "migrated"
     }
 }

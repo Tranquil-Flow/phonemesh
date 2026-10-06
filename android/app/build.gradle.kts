@@ -35,15 +35,15 @@ android {
     }
     testBuildType = "minifiedDebug"
     packaging {
-        jniLibs { useLegacyPackaging = false }
+        jniLibs { useLegacyPackaging = true }
         resources { excludes += setOf("**/*.proto") }
     }
     splits {
         abi {
             isEnable=true
             reset()
-            include("arm64-v8a","armeabi-v7a","x86","x86_64")
-            isUniversalApk=true
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
     testOptions { unitTests.isReturnDefaultValues = true }
@@ -55,4 +55,17 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+}
+
+val checkApkSize by tasks.registering {
+    dependsOn("assembleRelease")
+    doLast {
+        val dir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        listOf("arm64-v8a", "armeabi-v7a").forEach { abi ->
+            val apk = dir.listFiles().orEmpty().single { it.name.contains(abi) && it.extension == "apk" }
+            val limit = (project.findProperty("phonemesh.maxApkBytes.$abi") as String).toLong()
+            check(apk.length() <= limit) { "${apk.name} is ${apk.length()} B, over the $limit B budget" }
+            println("APK_SIZE $abi ${apk.length()}")
+        }
+    }
 }

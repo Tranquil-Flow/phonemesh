@@ -1,3 +1,28 @@
-# The androidTest APK relies on the app for the Kotlin stdlib that androidx.test uses;
-# keep it whole in the instrumented build only (release shrinks it).
--keep class kotlin.** { *; }
+# The androidTest APK has no Kotlin stdlib of its own; it loads these classes from the app.
+# Keep just the ones androidx.test and the test sources reference (release shrinks the rest).
+-keep class kotlin.Lazy { *; }
+-keep class kotlin.LazyKt { *; }
+-keep class kotlin.ExceptionsKt { *; }
+-keep class kotlin.KotlinVersion { *; }
+-keep class kotlin.Pair { *; }
+-keep class kotlin.Result { *; }
+-keep class kotlin.ResultKt { *; }
+-keep class kotlin.TuplesKt { *; }
+-keep class kotlin.Unit { *; }
+-keep class kotlin.collections.ArrayDeque { *; }
+-keep class kotlin.collections.ArraysKt { *; }
+-keep class kotlin.collections.CollectionsKt { *; }
+-keep class kotlin.collections.MapsKt { *; }
+-keep class kotlin.concurrent.ThreadsKt { *; }
+-keep class kotlin.io.ByteStreamsKt { *; }
+-keep class kotlin.io.CloseableKt { *; }
+-keep class kotlin.io.FilesKt { *; }
+-keep class kotlin.jvm.internal.Lambda { *; }
+-keep class kotlin.jvm.JvmClassMappingKt { *; }
+-keep class kotlin.random.Random { *; }
+-keep class kotlin.ranges.RangesKt { *; }
+-keep class kotlin.sequences.SequencesKt { *; }
+-keep class kotlin.text.Charsets { *; }
+-keep class kotlin.text.Regex { *; }
+-keep class kotlin.text.StringsKt { *; }
+-keep class kotlin.time.DurationKt { *; }

@@ -9,5 +9,5 @@ uv run pytest -q
 cd android
 JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ./gradlew --no-daemon --console plain \
   :core:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest \
-  :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest
+  :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest :app:checkApkSize
 echo CHECK_OK

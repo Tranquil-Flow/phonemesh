@@ -4,7 +4,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONArray
 import org.json.JSONObject
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -20,8 +19,12 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 
-/** Gates for trimmed espeak data and the requantized Whisper Tiny decoder. Packs are built with
- *  `build_packs.py --reference` and pushed to the app's external files dir. */
+/**
+ * Gated measurements for trimmed espeak data and the requantized Whisper Tiny decoder; both skip in
+ * the normal suite. Packs are built with `build_packs.py --reference` and pushed to the app's
+ * external files dir. The trimmed-vs-full espeak gate needs one process per variant
+ * (`android/scripts/compare_espeak_variants.py` runs [singleVariantSynthesis] four times).
+ */
 @RunWith(AndroidJUnit4::class)
 class PackEquivalenceTest {
     private val sentences = listOf(
@@ -43,25 +46,14 @@ class PackEquivalenceTest {
         File(ctx.getExternalFilesDir(null), name).also { assertTrue("missing $name", it.isFile) }
             .inputStream().use { store.install(it) }
 
-    @Test fun trimmedEspeakSynthesizesIdenticalSamples() {
-        val store = freshStore()
-        val engine = install(store, "phonemesh-engine-whisper-tiny-1.zip")
-        for ((tag, voiceName) in listOf("fr" to "fr-siwis", "en-US" to "en-US-ljspeech")) {
-            val trimmed = install(store, "phonemesh-voice-$voiceName-1.zip")
-            val full = install(store, "phonemesh-voice-$voiceName-full-1.zip")
-            fun synth(voice: PackInfo, text: String): FloatArray =
-                LocalSpeech(SpeechPack(engine.root, voice.root, tag, tag.substringBefore('-'), noiseScale = 0f, noiseScaleW = 0f))
-                    .use { it.synthesize(text).samples }
-            for ((_, text) in sentences.filter { it.first == tag }) {
-                val full1 = synth(full, text)
-                val full2 = synth(full, text)
-                assertArrayEquals("synthesis is not deterministic (full vs full) for: $text", full1, full2, 0f)
-                assertArrayEquals("espeak trimming changed audio for: $text", full1, synth(trimmed, text), 0f)
-            }
-        }
-    }
-
+    /**
+     * Gated (`-e decoder 1`), a measurement harness rather than a check: with the normal pushed
+     * packs the "candidate" is the catalog engine itself. Build a candidate engine (for example
+     * `build_packs.py --decoder requant`), push it under the catalog name with the reference
+     * engine next to it, and run this alone to write `pack-equivalence.json`.
+     */
     @Test fun candidateDecoderTranscriptsAndTiming() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("decoder") == "1")
         val store = freshStore()
         val candidate = install(store, "phonemesh-engine-whisper-tiny-1.zip")
         val reference = install(store, "phonemesh-engine-whisper-tiny-reference-1.zip")

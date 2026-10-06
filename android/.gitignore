@@ -1,0 +1,7 @@
+.gradle/
+**/build/
+local.properties
+libs/*.aar
+model-packs/
+*.jks
+.kotlin/

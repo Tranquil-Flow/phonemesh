@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phonemesh"
+version = "0.1.0"
+description = "Local multilingual speech-to-text messaging over Meshtastic"
+requires-python = ">=3.11,<3.14"
+readme = "README.md"
+dependencies = []
+
+[project.optional-dependencies]
+radio = ["meshtastic==2.7.11"]
+speech = ["faster-whisper==1.2.1", "kokoro==0.9.4", "misaki[en,ja,zh]==0.9.4", "soundfile>=0.13,<0.14"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.16.9"]
+
+[project.scripts]
+phonemesh = "phonemesh.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

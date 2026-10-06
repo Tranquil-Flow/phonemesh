@@ -11,3 +11,4 @@ recordings/
 *.mp3
 .DS_Store
 docs/handover-*.md
+.superpowers/

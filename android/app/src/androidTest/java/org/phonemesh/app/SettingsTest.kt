@@ -21,6 +21,8 @@ class SettingsTest {
     }
 
     @After fun tearDown() {
+        // Drain apply() writes before deleting the fixture; otherwise they can recreate a migrated file.
+        context.getSharedPreferences(NAME, Context.MODE_PRIVATE).edit().clear().commit()
         context.deleteSharedPreferences(NAME)
         old.edit().also { e -> saved.forEach { (k, v) -> if (v == null) e.remove(k) else e.putString(k, v) } }.commit()
     }
@@ -58,6 +60,20 @@ class SettingsTest {
         assertEquals("fr", Locales.wrap(context, "fr").resources.configuration.locales[0].language)
         assertEquals("en", Locales.wrap(context, "en-US").resources.configuration.locales[0].language)
         assertSame(context, Locales.wrap(context, null))
+    }
+
+    @Test fun appearanceAndSetupFlagsPersist() {
+        val first = Settings(context, NAME)
+        assertEquals(ThemeMode.AUTO, first.theme)
+        assertFalse(first.firstMessageSent)
+        assertFalse(first.setupFinished)
+        first.theme = ThemeMode.DARK
+        first.firstMessageSent = true
+        first.setupFinished = true
+        val again = Settings(context, NAME)
+        assertEquals(ThemeMode.DARK, again.theme)
+        assertTrue(again.firstMessageSent)
+        assertTrue(again.setupFinished)
     }
 
     private companion object { const val NAME = "settings-test" }

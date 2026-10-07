@@ -413,6 +413,8 @@ class AppCore private constructor(
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
         val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis())
         drafts.remove(chatId)
+        // Before any notification: observers read setup state from this flag while they render.
+        settings.firstMessageSent = true
         transmit(message.id, text, language, chat)
         changed(Change.MESSAGES)
         return true

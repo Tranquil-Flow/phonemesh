@@ -291,4 +291,32 @@ class AppCoreTest {
         assertFalse(main { core.scanning })
         assertTrue(radio.stopScans >= 1)
     }
+
+    @Test fun theFirstSentMessageIsRemembered() {
+        val core = TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        assertFalse(core.settings.firstMessageSent)
+        TestCore.onMain { core.setDraft(group, "Ceci est un très long message ".repeat(8).trim()) }
+        assertFalse(TestCore.onMain { core.send(group) })
+        assertFalse(core.settings.firstMessageSent)
+        TestCore.onMain { core.setDraft(group, "Bonjour") }
+        assertTrue(TestCore.onMain { core.send(group) })
+        assertTrue(core.settings.firstMessageSent)
+        assertTrue(TestCore.restart().settings.firstMessageSent)
+    }
+
+    /** Observers render from this flag; AppCore.changed notifies synchronously, so it must already be set. */
+    @Test fun theFirstMessageFlagIsSetBeforeScreensAreNotified() {
+        val core = TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        var seenDuringNotification: Boolean? = null
+        TestCore.onMain {
+            core.observe { change ->
+                if (change == AppCore.Change.MESSAGES) seenDuringNotification = core.settings.firstMessageSent
+            }
+            core.setDraft(group, "Bonjour")
+            assertTrue(core.send(group))
+        }
+        assertEquals(true, seenDuringNotification)
+    }
 }

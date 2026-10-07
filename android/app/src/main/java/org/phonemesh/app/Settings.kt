@@ -27,6 +27,21 @@ class Settings(context: Context, name: String = PREFS) {
         get() = prefs.getString(RADIO_NAME, null)
         set(value) { prefs.edit().putString(RADIO_NAME, value).apply() }
 
+    /** Auto, Light or Dark (Settings → Appearance). */
+    var theme: ThemeMode
+        get() = ThemeMode.of(prefs.getString(THEME, null))
+        set(value) { prefs.edit().putString(THEME, value.key).apply() }
+
+    /** True once any message was sent: setup step 3 is done and the "Hold to talk" hint stops. */
+    var firstMessageSent: Boolean
+        get() = prefs.getBoolean(FIRST_MESSAGE_SENT, false)
+        set(value) { prefs.edit().putBoolean(FIRST_MESSAGE_SENT, value).apply() }
+
+    /** True once the setup guide folded away; it never returns. */
+    var setupFinished: Boolean
+        get() = prefs.getBoolean(SETUP_FINISHED, false)
+        set(value) { prefs.edit().putBoolean(SETUP_FINISHED, value).apply() }
+
     /** Keeps the engine and radio chosen in the Phase 2 screen, whose preferences were named "MainActivity". */
     private fun migrate(context: Context) {
         if (prefs.getBoolean(MIGRATED, false)) return
@@ -45,6 +60,9 @@ class Settings(context: Context, name: String = PREFS) {
         private const val ENGINE = "engine"
         private const val RADIO_ADDRESS = "radioAddress"
         private const val RADIO_NAME = "radioName"
+        private const val THEME = "theme"
+        private const val FIRST_MESSAGE_SENT = "firstMessageSent"
+        private const val SETUP_FINISHED = "setupFinished"
         internal const val MIGRATED = "migrated"
     }
 }

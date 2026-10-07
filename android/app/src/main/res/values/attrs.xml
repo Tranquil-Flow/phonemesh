@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme colours; 3b's dark theme defines the same attributes with other values. -->
+    <!-- Theme colours; values-night defines the same attributes for the dark theme. -->
     <attr name="pmBackground" format="color" />
     <attr name="pmSurface" format="color" />
     <attr name="pmText" format="color" />
@@ -9,5 +9,6 @@
     <attr name="pmGood" format="color" />
     <attr name="pmBad" format="color" />
     <attr name="pmAccent" format="color" />
+    <attr name="pmOnAccent" format="color" />
     <attr name="pmSent" format="color" />
 </resources>

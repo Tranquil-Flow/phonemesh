@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark from API 27: the navigation bar is dark with light icons too. -->
+    <style name="Theme.Phonemesh" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="pmBackground">#FF121212</item>
+        <item name="pmSurface">#FF23272B</item>
+        <item name="pmText">#FFF5F5F5</item>
+        <item name="pmMuted">#FFB9C0C8</item>
+        <item name="pmOutline">#FFF5F5F5</item>
+        <item name="pmGood">#FF6BD68A</item>
+        <item name="pmBad">#FFFF8A80</item>
+        <item name="pmAccent">#FFFFD54F</item>
+        <item name="pmOnAccent">#FF111111</item>
+        <item name="pmSent">#FF1E3A27</item>
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="android:colorAccent">#FF6BD68A</item>
+        <item name="android:statusBarColor">#FF121212</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">#FF121212</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

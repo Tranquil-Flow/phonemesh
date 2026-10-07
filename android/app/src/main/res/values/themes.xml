@@ -10,6 +10,7 @@
         <item name="pmGood">#FF0B6E2C</item>
         <item name="pmBad">#FFB3261E</item>
         <item name="pmAccent">#FFFFD54F</item>
+        <item name="pmOnAccent">#FF111111</item>
         <item name="pmSent">#FFE2F2E3</item>
         <item name="android:windowBackground">@android:color/white</item>
         <item name="android:colorAccent">#FF0B6E2C</item>

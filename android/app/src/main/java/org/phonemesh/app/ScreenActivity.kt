@@ -8,22 +8,26 @@ import android.view.WindowManager
 import android.widget.TextView
 
 /**
- * Every screen: the chosen language (not the phone's), FLAG_SECURE, insets, and AppCore observed
- * between onStart and onStop. A screen whose language changed while it was hidden recreates itself.
+ * Every screen: the chosen language and appearance (not the phone's), FLAG_SECURE, insets, and
+ * AppCore observed between onStart and onStop. A screen whose language or appearance changed
+ * while it was hidden recreates itself.
  */
 abstract class ScreenActivity : Activity(), AppCore.Observer {
     protected val core: AppCore get() = AppCore.get(this)
     protected lateinit var palette: Palette
         private set
     private var appliedLanguage: String? = null
+    private var appliedTheme: ThemeMode? = null
     /** The AppCore this screen subscribed to; onStop releases that same one. */
     private var observed: AppCore? = null
     private var noteView: TextView? = null
     private val hideNote = Runnable { noteView?.visibility = View.GONE }
 
     override fun attachBaseContext(newBase: Context) {
-        appliedLanguage = AppCore.get(newBase).settings.language
-        super.attachBaseContext(Locales.wrap(newBase, appliedLanguage))
+        val settings = AppCore.get(newBase).settings
+        appliedLanguage = settings.language
+        appliedTheme = settings.theme
+        super.attachBaseContext(Themes.wrap(Locales.wrap(newBase, appliedLanguage), settings.theme))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +56,7 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     override fun onStart() {
         super.onStart()
         val current = core
-        if (current.settings.language != appliedLanguage) {
+        if (current.settings.language != appliedLanguage || current.settings.theme != appliedTheme) {
             recreate()
             return
         }

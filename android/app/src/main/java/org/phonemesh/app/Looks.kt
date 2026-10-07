@@ -29,7 +29,8 @@ object Looks {
         background = if (kind == ChatKind.GROUP) Ui.outline(context, palette.accent, palette.outline, radiusDp = sizeDp / 4)
         else Ui.circle(palette.surface).apply { setStroke(Ui.dp(context, 2), palette.outline) }
         val icon = Ui.dp(context, sizeDp / 2)
-        addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person, palette.text, sizeDp / 2),
+        addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person,
+            if (kind == ChatKind.GROUP) palette.onAccent else palette.text, sizeDp / 2),
             FrameLayout.LayoutParams(icon, icon, Gravity.CENTER))
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }

@@ -1,7 +1,7 @@
 # Sub-project 3a-2: visual guide
 
 **Date:** 2026-10-07
-**Status:** design agreed with the project owner from mockups; awaiting written-spec review
+**Status:** approved by the project owner (2026-10-07)
 **Read with:** `docs/specs/2026-10-06-ui-core-loop-design.md` (3a) and `docs/specs/2026-10-06-phase3-decisions.md`
 **Follows:** 3a (core loop). The owner tried 3a on the Pixel and found it "not nearly visual enough". This spec reworks the first launch, the setup on the chats screen and the settings screen, and fixes the defects found in that session. It pulls two items forward from 3b: the dark theme with Auto, and the microphone hint.
 
@@ -22,7 +22,7 @@ Root causes found in the code: `ic_gear.xml` draws a sun (a circle with eight ra
 
 ## Screens
 
-The owner chose each design from mockups (artifact "Phonemesh Visual Guide Options", rounds 1 to 5).
+The owner chose each design from mockups (artifact "Phonemesh Visual Guide Options", rounds 1 to 6).
 
 ### Welcome and language (A1-c, style S3 "wax-print")
 
@@ -42,7 +42,7 @@ Top to bottom:
 | 3–4.6 s | 2 Text | the sound bars fade as "Bonjour" types out letter by letter in a bubble | "Her voice becomes text" |
 | 4.6–6.2 s | 3 Radio | the bubble shrinks into her radio; her radio's light blinks and rings spread out from its antenna; the bubble travels along a dashed arc; rings close in on his radio and its light blinks | "The radio sends the text far away" |
 | 6.2–7.2 s | 4 Text | camera moves to him; the bubble rises to his phone, which he holds to his ear | "His phone turns the text back into voice" |
-| 7.2–9.5 s | 5 Listen | the letters disappear as sound waves come from his phone | "He hears her message" |
+| 7.2–9.5 s | 5 Listen | the bubble fades out by 7.6 s; sound waves come from his phone until 9.5 s | "He hears her message" |
 | 9.5–10 s | closing | camera pulls back out | opening caption |
 
 The scene, in the wax-print style: a warm sky fading from orange to pale yellow, a sun drawn as three rings (yellow, bright yellow, orange) high in the middle, two green hills, two small houses with brown roofs, terracotta ground with a zigzag band (dark brown, yellow and red triangles) along the bottom edge. Outlines are dark brown rather than black. She wears an indigo dress printed with orange and yellow rings and an orange-red headwrap; he wears a kente-striped shirt (yellow, green, red and dark brown) with a yellow collar and a dark cap. Each holds the phone with a drawn arm. The radios are amber with a small screen, a knob and a status light that blinks bright green. There are no palm trees, no phone mast and no distance marker. Nobody blinks.
@@ -131,4 +131,76 @@ Budget: no more than 150 KB added to the APK for all drawings, clips and code to
 
 - The other art styles shown in the mockups (sunny day, sunlight poster, soft flat, night village, chalkboard). The drawing code keeps its colours and patterns in one place so the style can be changed later.
 - Long-press to hear any control, "stay listening", and message deletion stay in 3b.
-- No animation anywhere other than the welcome picture.
+- Animations other than the welcome picture and the how-to pictures below.
+
+## Addendum: how-to pictures (owner, 2026-10-07)
+
+The owner asked that every step and every problem shows, with a moving picture, what to do. The choices come from the artifact "Phonemesh How-To Pictures" (rounds 7 and 8). The region cards are specified in `docs/specs/2026-10-07-radio-region-design.md` and use the same pictures.
+
+### Rules for every picture
+
+- **Same world as the story:** wax-print colours, dark-brown outlines, the story's phone, radio and bubble.
+- **Drawn finger (H1)** shows every press, hold or slide.
+- **Loops while visible (M2):** each picture repeats every 5 to 8 seconds while it is on screen and stops when the screen stops. When animations are off, it shows one still frame chosen per scene, the one that shows the action.
+- **One sentence** beside each picture, read aloud by its speaker button. No technical names (no "Whisper", no "BLE").
+- The pictures replace the three still step drawings.
+
+### Scenes
+
+| Scene | Where | Sentence (EN) | What moves |
+|---|---|---|---|
+| download | step 1 | Download the French voice. One time only. | A phone mast sends Wi-Fi waves; dots travel into the phone, which fills; green check. |
+| friend | step 1, File button | No internet? A friend can send you the voice by Bluetooth. | The voice (orange box with sound bars) hops from the friend's phone to yours, with the Bluetooth sign between them. |
+| power | step 2, part 1 | Turn on the radio. | A finger presses the button; the light blinks. |
+| close | step 2, part 2 | Keep the radio close to the phone. | The radio moves next to the phone. |
+| search | step 2, part 3 | Tap "Find radio". | The phone sends rings until it finds the radio, then they link. |
+| pair | step 2, only if asked | Type the number shown on the radio. | The code on the radio's screen is typed into the phone. Kept only if the real-radio test shows the V4 asks for a code. |
+| region cards | step 2, part 4 | see the region spec | The flag appears on the radio's screen (R2). |
+| hello | step 3 | Hold the yellow button and say hello. | Hold, talk, let go; words appear as text. |
+| cancel | tip, first recording | Changed your mind? Slide left. | Finger slides to the bin while holding. |
+| lock | tip, first recording | Long message? Slide up to lock. | Finger slides up to the lock, lets go; tap the square to stop. |
+| listen | tip, first draft | Listen to it, then send. | Listen plays; finger taps the green arrow. |
+| delivery | tip, first message sent | Watch the small sign. | Clock, then arrow, then green check. |
+| failed | tip, first failed message | Not sent? Tap "Send again". | Red sign, tap, clock, green check. |
+| arrive | tip, first message received | A message came by radio. Tap to hear it. | The radio pulses, the message slides in, the phone reads it. |
+| lost | problem card | Turn on the radio and come closer. | Finger presses the radio button; the radio comes close. |
+| bt | problem card | Turn on Bluetooth. | The switch turns blue. |
+| short | problem card | Hold the button while you talk. | A quick tap does nothing; holding records. |
+| notheard | problem card | Hold the phone close and speak again. | The phone comes close to the mouth; the voice bars grow. |
+| mic | problem card | You can still type. | The keyboard is shown as the other way to write. |
+| allow | Bluetooth or microphone refused | Tap "Allow" so the phone can find the radio. | The phone's own question with the right button lit. |
+| dlfail | download failed | No signal. Try again. | The mast's waves break; finger taps the round arrow; the download goes on. |
+| damaged | damaged file | Download it again. | The broken box shakes away; a new one comes in. |
+| refused | wrong, unknown or unsafe file | This file was refused. | The grey box goes from the sender's phone and bounces off the receiver's phone; a green shield. |
+| older | a newer version is installed | You already have a newer one. | Box 1 from the sender's phone bounces off because box 2 is already inside. |
+| space | not enough space | Remove something to make room. | One thing goes to the bin, then the voice fits. |
+| wait | another task running | Wait until this is done. | The bar fills, then the button wakes up. |
+| toolong | message reached the limit | The message stops at the time limit. | A clock runs while the person talks; at the red line, scissors cut the rest off. |
+| playfail | cannot play | The text is still there to read. | The speaker fails; an arrow points at the words. |
+
+### Tips and the Help page (T1)
+
+- Each tip shows once, in the chat, above the microphone, the first time its moment happens (first recording, first draft, first send, first failure, first received message). It closes with a tap or after the person does the action. Shown tips are stored and never come back on their own.
+- A **"?"** button in the chats top bar, beside the gear, opens a **Help** page with every scene above, grouped as Setup, Talking, Problems and Rare problems. Each row plays its picture and its sentence.
+
+### Too long: cut off, not condensed (behaviour change)
+
+- While recording, a clock ring fills around the microphone button. At the limit (15 s, which fits one radio part for normal French speech) the recording stops by itself, as if the person let go.
+- If the transcribed text still does not fit, the draft keeps the longest run of whole words that fits (`DraftRules.trimToFit(text, languageTag)`) and shows the toolong picture with "The end was cut off." The draft can still be listened to, cleared or sent.
+- Typed text cannot go past the limit: the text box stops taking characters once `DraftRules.fit` would be `TOO_LONG`.
+- The 15 s limit is a constant in one place; a later wire format with bigger messages raises it.
+
+### Architecture additions
+
+- **`HowToScene`** (pure Kotlin): a scene's name, length, still-frame time and its parts' timings, like `StoryTimeline`. Unit-tested: every scene loops back to its first frame and its still frame shows the action.
+- **`HowToView`** (a `View`): draws one scene from shared drawing parts (phone, radio with screen, finger, mast, box, flags, clock), using the same frame callback and visibility rules as `StoryView`.
+- **`Tips`** (pure Kotlin): which tip to show from the moments seen and tips stored. Unit-tested.
+- **`HelpActivity`**: the Help page.
+- **`Settings`** gains `tipsShown`.
+- **Speaking the sentences:** the two step 1 scenes (download, friend) get recorded clips per language, since the voice is not downloaded yet. Every other sentence is read by the app's own downloaded voice, the one that reads messages, so it costs no APK space.
+
+### Size and testing
+
+- The 150 KB budget now covers the how-to pictures, the four extra clips and the Help page too.
+- The screenshot build adds every scene's still frame, in light and dark, and the Help page.
+- On the Fairphone 3, `dumpsys gfxinfo` shows the Help page holds its frame rate with several pictures visible.

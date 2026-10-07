@@ -24,7 +24,7 @@ Root causes found in the code: `ic_gear.xml` draws a sun (a circle with eight ra
 
 The owner chose each design from mockups (artifact "Phonemesh Visual Guide Options", rounds 1 to 5).
 
-### Welcome and language (A1-c, style S1 "sunny day")
+### Welcome and language (A1-c, style S3 "wax-print")
 
 Top to bottom:
 
@@ -45,7 +45,7 @@ Top to bottom:
 | 7.2–9.5 s | 5 Listen | the letters disappear as sound waves come from his phone | "He hears her message" |
 | 9.5–10 s | closing | camera pulls back out | opening caption |
 
-The scene: sky fading to warm yellow, sun, two clouds, two hills, two small houses, a palm at each edge, earth-coloured ground. She wears a blue wax-print dress with yellow dots and an orange headwrap; he wears a green shirt with a white collar and a red cap. Each holds the phone with a drawn arm. The radios are yellow with a small screen, a knob and a status light. There is no phone mast and no distance marker. Nobody blinks.
+The scene, in the wax-print style: a warm sky fading from orange to pale yellow, a sun drawn as three rings (yellow, bright yellow, orange) high in the middle, two green hills, two small houses with brown roofs, terracotta ground with a zigzag band (dark brown, yellow and red triangles) along the bottom edge. Outlines are dark brown rather than black. She wears an indigo dress printed with orange and yellow rings and an orange-red headwrap; he wears a kente-striped shirt (yellow, green, red and dark brown) with a yellow collar and a dark cap. Each holds the phone with a drawn arm. The radios are amber with a small screen, a knob and a status light that blinks bright green. There are no palm trees, no phone mast and no distance marker. Nobody blinks.
 
 The rings are small: at most about a third of the radio-to-radio distance.
 
@@ -129,6 +129,6 @@ Budget: no more than 150 KB added to the APK for all drawings, clips and code to
 
 ## Non-goals
 
-- The other art styles shown in the mockups (wax-print, soft flat, night village, chalkboard). S1 is "for now"; the drawing code keeps its colours in one place so a style can be changed later.
+- The other art styles shown in the mockups (sunny day, sunlight poster, soft flat, night village, chalkboard). The drawing code keeps its colours and patterns in one place so the style can be changed later.
 - Long-press to hear any control, "stay listening", and message deletion stay in 3b.
 - No animation anywhere other than the welcome picture.

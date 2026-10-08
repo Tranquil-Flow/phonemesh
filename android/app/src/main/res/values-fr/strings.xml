@@ -115,4 +115,15 @@
     <string name="pack_remove_cd">Retirer %1$s</string>
     <string name="pack_installed_label">Installé</string>
     <string name="share_choose">Choisissez l\'application pour partager.</string>
+    <!-- How-to pictures -->
+    <string name="howto_part">Partie %1$d</string>
+    <string name="howto_download">Téléchargez la voix française. Une seule fois.</string>
+    <string name="howto_friend">Pas d\'internet ? Un ami envoie la voix.</string>
+    <string name="howto_power">Allumez la radio.</string>
+    <string name="howto_close">Gardez la radio près du téléphone.</string>
+    <string name="howto_search">Touchez « Trouver la radio ».</string>
+    <string name="howto_pair">Tapez le numéro affiché sur la radio.</string>
+    <string name="howto_hello">Maintenez le micro et dites bonjour.</string>
+    <string name="howto_lost">Allumez la radio et approchez-vous.</string>
+    <string name="howto_on">ON</string>
 </resources>

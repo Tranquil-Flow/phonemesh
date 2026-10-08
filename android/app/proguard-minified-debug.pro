@@ -19,6 +19,7 @@
 -keep class kotlin.io.CloseableKt { *; }
 -keep class kotlin.io.FilesKt { *; }
 -keep class kotlin.jvm.internal.Lambda { *; }
+-keep class kotlin.jvm.internal.Ref$IntRef { *; }
 -keep class kotlin.jvm.JvmClassMappingKt { *; }
 -keep class kotlin.random.Random { *; }
 -keep class kotlin.ranges.RangesKt { *; }

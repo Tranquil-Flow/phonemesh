@@ -28,6 +28,7 @@ object TestCore {
 
     fun install(language: String? = "fr", voices: List<String> = listOf("fr"), connected: Boolean = true, realSpeech: Boolean = false): AppCore {
         onMain {
+            StoryView.animationsEnabled = { false }
             AppCore.replaceForTest(null)
             context.deleteDatabase(HISTORY)
             clearPrefs()
@@ -60,7 +61,10 @@ object TestCore {
     }
 
     fun uninstall() {
-        onMain { AppCore.replaceForTest(null) }
+        onMain {
+            StoryView.animationsEnabled = StoryView.systemAnimations
+            AppCore.replaceForTest(null)
+        }
         context.deleteDatabase(HISTORY)
         clearPrefs()
         clearPacks()

@@ -59,7 +59,7 @@ object Looks {
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
-    /** Radio status: green circle when connected, grey diamond when not. */
+    /** Radio status: a radio with a green filled dot when connected, a grey hollow dot when not. */
     fun radio(image: ImageView, palette: Palette, connected: Boolean) {
         image.setImageResource(if (connected) R.drawable.ic_radio_on else R.drawable.ic_radio_off)
         image.imageTintList = ColorStateList.valueOf(if (connected) palette.good else palette.muted)

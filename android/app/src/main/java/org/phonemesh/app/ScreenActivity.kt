@@ -3,8 +3,11 @@ package org.phonemesh.app
 import android.app.Activity
 import android.content.Context
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
@@ -38,6 +41,23 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     }
 
     protected fun pad(): Int = Ui.dp(this, 16)
+
+    /** The top bar's back arrow: the same as the system back. */
+    protected fun backButton(): ImageButton = Ui.iconButton(this, palette, R.drawable.ic_back, getString(R.string.back)).apply {
+        tag = "back"
+        @Suppress("DEPRECATION")
+        setOnClickListener { onBackPressed() }
+    }
+
+    /** A top bar: back arrow, then [title] in large bold text (none when null). */
+    protected fun backBar(title: String?): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = Ui.dp(this@ScreenActivity, 64)
+        addView(backButton())
+        if (title != null) addView(Ui.text(this@ScreenActivity, title, palette.text, 24f, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() / 2 })
+    }
 
     /** Sets [content] as the screen, with system bars and keyboard as padding. */
     protected fun show(content: View) {

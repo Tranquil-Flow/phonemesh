@@ -27,7 +27,7 @@ class SettingsActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), pad(), pad(), pad())
         }
-        column.addView(Ui.text(this, getString(R.string.settings), palette.text, 24f, bold = true))
+        column.addView(backBar(getString(R.string.settings)))
         column.addView(noteLine())
         val languageRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

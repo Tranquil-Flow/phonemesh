@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:pathData="M12,8.5a3.5,3.5 0,1 1,0 7a3.5,3.5 0,1 1,0 -7zM12,2.5v3M12,18.5v3M2.5,12h3M18.5,12h3M5.3,5.3l2.1,2.1M16.6,16.6l2.1,2.1M5.3,18.7l2.1,-2.1M16.6,7.4l2.1,-2.1"
-        android:fillColor="#00000000" android:strokeColor="#FF000000" android:strokeWidth="2.2"
-        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <!-- Eight square teeth around a ring: a gear, not a sun. -->
+    <path android:pathData="M10.4,1.8h3.2v4.4h-3.2zM10.4,17.8h3.2v4.4h-3.2zM1.8,10.4h4.4v3.2h-4.4zM17.8,10.4h4.4v3.2h-4.4z"
+        android:fillColor="#FF000000" />
+    <group android:rotation="45" android:pivotX="12" android:pivotY="12">
+        <path android:pathData="M10.4,1.8h3.2v4.4h-3.2zM10.4,17.8h3.2v4.4h-3.2zM1.8,10.4h4.4v3.2h-4.4zM17.8,10.4h4.4v3.2h-4.4z"
+            android:fillColor="#FF000000" />
+    </group>
+    <path android:pathData="M12,4.5a7.5,7.5 0,1 1,0 15a7.5,7.5 0,1 1,0 -15zM12,8.8a3.2,3.2 0,1 0,0 6.4a3.2,3.2 0,1 0,0 -6.4z"
+        android:fillColor="#FF000000" android:fillType="evenOdd" />
 </vector>

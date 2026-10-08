@@ -37,7 +37,7 @@ class RadioActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), pad(), pad(), pad())
         }
-        root.addView(Ui.text(this, getString(R.string.radio_title), palette.text, 24f, bold = true))
+        root.addView(backBar(getString(R.string.radio_title)))
         root.addView(noteLine())
         state = Ui.text(this, "", palette.text, bold = true).apply { tag = "radio_state" }
         root.addView(state)

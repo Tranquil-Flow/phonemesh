@@ -31,6 +31,16 @@ class SettingsActivityTest {
         TestCore.uninstall()
     }
 
+    @Test fun theBackArrowLeavesTheScreen() {
+        TestCore.install()
+        activity = Views.start(SettingsActivity::class.java)
+        assertEquals("Retour", Views.tagged(activity!!, "back")!!.contentDescription)
+        Views.tap(activity!!, "back")
+        // System back asks Android to finish asynchronously.
+        Views.waitUntil { activity!!.isFinishing }
+        assertTrue(activity!!.isFinishing)
+    }
+
     @Test fun theLanguageRowShowsTheChoiceAndOpensTheList() {
         TestCore.install()
         activity = Views.start(SettingsActivity::class.java)

@@ -35,7 +35,7 @@ object Ui {
     fun ripple(content: android.graphics.drawable.Drawable, pressed: Int) =
         RippleDrawable(ColorStateList.valueOf(pressed), content, content)
 
-    private fun pressedOf(color: Int) = (color and 0x00FFFFFF) or (0x33 shl 24)
+    fun pressedOf(color: Int) = (color and 0x00FFFFFF) or (0x33 shl 24)
 
     fun circle(fill: Int) = GradientDrawable().apply {
         shape = GradientDrawable.OVAL
@@ -127,10 +127,12 @@ object Ui {
 /** Every icon the UI draws (ThemeTest loads each one). */
 object Icons {
     val all = listOf(
-        R.drawable.ic_chat, R.drawable.ic_check, R.drawable.ic_clock, R.drawable.ic_close, R.drawable.ic_download,
-        R.drawable.ic_folder, R.drawable.ic_gear, R.drawable.ic_globe, R.drawable.ic_group, R.drawable.ic_keyboard,
-        R.drawable.ic_lock, R.drawable.ic_mic, R.drawable.ic_pause, R.drawable.ic_person, R.drawable.ic_play,
+        R.drawable.ic_auto, R.drawable.ic_back, R.drawable.ic_chat, R.drawable.ic_check, R.drawable.ic_chevron,
+        R.drawable.ic_clock, R.drawable.ic_close, R.drawable.ic_download, R.drawable.ic_folder, R.drawable.ic_gear,
+        R.drawable.ic_globe, R.drawable.ic_group, R.drawable.ic_keyboard, R.drawable.ic_lock, R.drawable.ic_mic,
+        R.drawable.ic_moon, R.drawable.ic_no_signal, R.drawable.ic_pause, R.drawable.ic_person, R.drawable.ic_play,
         R.drawable.ic_plus, R.drawable.ic_radio_off, R.drawable.ic_radio_on, R.drawable.ic_retry, R.drawable.ic_search,
-        R.drawable.ic_send, R.drawable.ic_sent, R.drawable.ic_speaker, R.drawable.ic_stop, R.drawable.ic_warning,
+        R.drawable.ic_send, R.drawable.ic_sent, R.drawable.ic_speaker, R.drawable.ic_stop, R.drawable.ic_sun,
+        R.drawable.ic_warning,
     )
 }

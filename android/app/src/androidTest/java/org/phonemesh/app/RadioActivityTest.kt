@@ -18,6 +18,16 @@ class RadioActivityTest {
         TestCore.uninstall()
     }
 
+    @Test fun theBackArrowLeavesTheScreen() {
+        TestCore.install()
+        activity = Views.start(RadioActivity::class.java)
+        assertEquals("Retour", Views.tagged(activity!!, "back")!!.contentDescription)
+        Views.tap(activity!!, "back")
+        // System back asks Android to finish asynchronously.
+        Views.waitUntil { activity!!.isFinishing }
+        assertTrue(activity!!.isFinishing)
+    }
+
     @Test fun searchStartsAndNearbyRadiosShowWithSignalBars() {
         TestCore.install(connected = false)
         activity = Views.start(RadioActivity::class.java)

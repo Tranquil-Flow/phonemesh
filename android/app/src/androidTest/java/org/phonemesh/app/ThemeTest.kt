@@ -23,8 +23,14 @@ class ThemeTest {
     }
 
     @Test fun everyIconLoadsAt24dp() {
-        assertEquals(25, Icons.all.size)
+        assertEquals(31, Icons.all.size)
         Icons.all.forEach { assertEquals(Ui.dp(context, 24), checkNotNull(context.getDrawable(it)).intrinsicWidth) }
+    }
+
+    /** Pins the declared helper type that later screens consume. */
+    @Test fun backButtonExposesAnImageButton() {
+        assertEquals(android.widget.ImageButton::class.java,
+            ScreenActivity::class.java.getDeclaredMethod("backButton").returnType)
     }
 
     @Test fun controlsAreAtLeast48dpAndDescribed() {

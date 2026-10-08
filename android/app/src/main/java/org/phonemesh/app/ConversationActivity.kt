@@ -92,9 +92,12 @@ class ConversationActivity : ScreenActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = Ui.dp(this@ConversationActivity, 64)
-            setPadding(pad(), 0, pad() / 2, 0)
+            setPadding(pad() / 4, 0, pad() / 2, 0)
         }
-        bar.addView(Looks.avatar(this, palette, chat.kind, 40))
+        bar.addView(backButton())
+        bar.addView(Looks.avatar(this, palette, chat.kind, 40).apply {
+            (layoutParams as LinearLayout.LayoutParams).marginStart = pad() / 4
+        })
         title = Ui.content(Ui.text(this, "", palette.text, 20f, bold = true).apply {
             tag = "title"
             maxLines = 1

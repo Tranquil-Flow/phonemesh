@@ -6,6 +6,7 @@
 
     <string name="chats_title">Discussions</string>
     <string name="settings">Réglages</string>
+    <string name="back">Retour</string>
     <string name="setup_voice_title">Voix française</string>
     <string name="setup_voice_card">%1$s · %2$d Mo · une seule fois</string>
     <string name="setup_download">Télécharger</string>

@@ -35,6 +35,17 @@ class ConversationActivityTest {
     private fun open(chatId: Long): ConversationActivity =
         Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId)).also { activity = it }
 
+    @Test fun theBackArrowLeavesTheScreen() {
+        TestCore.install()
+        activity = Views.launch<ConversationActivity>(
+            ConversationActivity.intent(context, TestCore.onMain { TestCore.core.groupChatId() }))
+        assertEquals("Retour", Views.tagged(activity!!, "back")!!.contentDescription)
+        Views.tap(activity!!, "back")
+        // System back asks Android to finish asynchronously.
+        Views.waitUntil { activity!!.isFinishing }
+        assertTrue((activity as Activity).isFinishing)
+    }
+
     /** A touch on the microphone [dxDp], [dyDp] from where it went down, at [atMs] after touch-down. */
     private fun touch(a: Activity, action: Int, dxDp: Float = 0f, dyDp: Float = 0f, atMs: Long = 0) {
         val mic = checkNotNull(Views.tagged(a, "mic"))

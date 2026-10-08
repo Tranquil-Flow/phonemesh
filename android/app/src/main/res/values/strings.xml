@@ -9,6 +9,7 @@
 
     <string name="chats_title">Chats</string>
     <string name="settings">Settings</string>
+    <string name="back">Back</string>
     <string name="setup_voice_title">English voice</string>
     <string name="setup_voice_card">%1$s · %2$d MB · one time only</string>
     <string name="setup_download">Download</string>

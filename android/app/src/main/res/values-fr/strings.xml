@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="language_title">Choisissez votre langue</string>
+    <string name="tagline">Parler · envoyer par radio · entendre la réponse</string>
+    <string name="caption_opening">Pas d\'internet. Pas de réseau. Seulement la radio.</string>
+    <string name="caption_speak">Elle parle dans son téléphone</string>
+    <string name="caption_text">Sa voix devient du texte</string>
+    <string name="caption_radio">La radio envoie le texte très loin</string>
+    <string name="caption_voice">Son téléphone transforme le texte en voix</string>
+    <string name="caption_listen">Il entend son message</string>
+    <string name="read_aloud">Lire à voix haute</string>
+    <string name="hear_name">Écouter %1$s</string>
     <string name="radio_connected">Radio connectée</string>
     <string name="radio_not_connected">Radio non connectée</string>
 

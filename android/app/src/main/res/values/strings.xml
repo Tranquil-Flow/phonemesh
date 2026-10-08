@@ -4,6 +4,15 @@
     <string name="plain" translatable="false">%1$s</string>
 
     <string name="language_title">Choose your language</string>
+    <string name="tagline">Speak · send by radio · hear the reply</string>
+    <string name="caption_opening">No internet. No phone signal. Only radio.</string>
+    <string name="caption_speak">She speaks into her phone</string>
+    <string name="caption_text">Her voice becomes text</string>
+    <string name="caption_radio">The radio sends the text far away</string>
+    <string name="caption_voice">His phone turns the text back into voice</string>
+    <string name="caption_listen">He hears her message</string>
+    <string name="read_aloud">Read aloud</string>
+    <string name="hear_name">Hear %1$s</string>
     <string name="radio_connected">Radio connected</string>
     <string name="radio_not_connected">Radio not connected</string>
 

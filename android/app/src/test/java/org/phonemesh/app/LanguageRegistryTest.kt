@@ -34,6 +34,16 @@ class LanguageRegistryTest {
         assertNull(LanguageRegistry.forMessage("!!"))
     }
 
+    @Test fun captionsFollowTheChoiceThenThePhoneThenEnglish() {
+        assertEquals("fr", LanguageRegistry.forCaptions("fr", java.util.Locale.ENGLISH).tag)
+        assertEquals("en-US", LanguageRegistry.forCaptions("en-US", java.util.Locale.FRENCH).tag)
+        assertEquals("fr", LanguageRegistry.forCaptions(null, java.util.Locale.CANADA_FRENCH).tag)
+        assertEquals("en-US", LanguageRegistry.forCaptions(null, java.util.Locale.GERMAN).tag)
+        assertEquals("en-US", LanguageRegistry.forCaptions("xx", java.util.Locale.GERMAN).tag)
+        assertEquals("fr", LanguageRegistry.forCaptions("xx", java.util.Locale.FRENCH).tag)
+        assertEquals("en-US", LanguageRegistry.forCaptions(null, java.util.Locale.CANADA).tag)
+    }
+
     @Test fun everyLanguageHasASmallNameClip() {
         assertEquals(LanguageRegistry.all.size, LanguageRegistry.all.map { it.clip }.toSet().size)
         LanguageRegistry.all.forEach { language ->

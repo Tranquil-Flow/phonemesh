@@ -25,6 +25,42 @@ class AppCoreTest {
 
     @After fun tearDown() = TestCore.uninstall()
 
+    @Test fun aLongTranscriptIsCutAtAWordAndMarked() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        speech.nextTranscript = "mot ".repeat(80).trim()
+        var cutSeenByScreen = false
+        main {
+            core.observe { change ->
+                if (change == AppCore.Change.RECORDING && core.recordState == AppCore.RecordState.IDLE) {
+                    cutSeenByScreen = core.draftWasCut(group)
+                }
+            }
+        }
+        main { core.startRecording(group); core.finishRecording() }
+        val draft = checkNotNull(core.draft(group))
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+        assertTrue(draft.endsWith("mot"))
+        assertTrue(core.draftWasCut(group))
+        assertTrue("the mark is published before synchronous observers", cutSeenByScreen)
+        assertTrue(radio.sent.isEmpty())
+        assertTrue(speech.spoken.isEmpty())
+        main { core.setDraft(group, "Bonjour") }
+        assertFalse("an edit clears the mark", core.draftWasCut(group))
+        main { core.startRecording(group); core.finishRecording(); core.setDraft(group, null) }
+        assertFalse("clearing clears the mark", core.draftWasCut(group))
+        main { core.startRecording(group); core.finishRecording(); assertTrue(core.send(group)) }
+        assertFalse("sending clears the mark", core.draftWasCut(group))
+        speech.nextTranscript = "Bonjour"
+        main { core.startRecording(group); core.finishRecording() }
+        assertFalse("a fitting transcript is not marked", core.draftWasCut(group))
+    }
+
+    @Test fun theRecordingLimitDefaultsToFifteenSeconds() {
+        TestCore.install()
+        assertEquals(15_000L, main { core.recordLimitMs })
+    }
+
     @Test fun groupMessagesGoToTheGroupAndPrivateOnesToTheirChat() {
         TestCore.install()
         main {

@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import org.phonemesh.core.HowToScene
 import org.phonemesh.core.HowToScenes
+import org.phonemesh.core.Readiness
 
 /**
  * Every screen: the chosen language and appearance (not the phone's), FLAG_SECURE, insets, and
@@ -113,8 +114,8 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     protected fun howTo(vararg scenes: String, compact: Boolean = false, sentence: ((HowToScene) -> String)? = null): HowToPanel =
         HowToPanel(this, palette, scenes.map { HowToScenes.get(it) },
             sentence = sentence ?: { scene -> getString(HowTo.sentence(scene.name)) },
-            canSay = { scene -> core.canSayHowTo(scene.name) },
-            say = { scene -> core.sayHowTo(scene.name) },
+            canSay = { scene -> if (sentence == null) core.canSayHowTo(scene.name) else core.readiness() is Readiness.Ready },
+            say = { scene -> core.sayHowTo(scene.name, sentence?.invoke(scene)) },
             compact = compact)
 
     override fun onStart() {

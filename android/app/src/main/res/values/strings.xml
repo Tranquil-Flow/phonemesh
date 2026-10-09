@@ -59,6 +59,7 @@
     <string name="send">Send</string>
     <string name="draft_hint">Type here</string>
     <string name="too_long">Too long. Make it shorter.</string>
+    <string name="draft_cut">The end was cut off.</string>
     <string name="status_waiting">Waiting</string>
     <string name="status_sent">Sent</string>
     <string name="status_delivered">Delivered</string>

@@ -2,6 +2,9 @@ package org.phonemesh.app
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -20,6 +23,7 @@ import org.junit.runner.RunWith
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.RadioPeer
 import org.phonemesh.core.DeliveryStatus
+import org.phonemesh.core.DraftFit
 
 /** Fake speech and radio: gestures are synthetic touch events; nothing records, plays or transmits. */
 @RunWith(AndroidJUnit4::class)
@@ -37,6 +41,296 @@ class ConversationActivityTest {
 
     private fun open(chatId: Long): ConversationActivity =
         Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId)).also { activity = it }
+
+    @Test fun aCutDraftSaysSoAndCanStillBeSent() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        val a = open(group)
+        Views.tap(a, "mic")
+        Views.tap(a, "mic")
+        assertNotNull(Views.tagged(a, "draft_cut"))
+        assertNotNull(Views.withText(a, "La fin a été coupée."))
+        assertNotNull(Views.tagged(a, "howto:toolong"))
+        assertNull(Views.tagged(a, "too_long"))
+        assertTrue(Views.tagged(a, "draft_send")!!.isEnabled)
+        assertTrue(TestCore.speech.spoken.isEmpty())
+        assertTrue(TestCore.radio.sent.isEmpty())
+        Views.tap(a, "draft_play")
+        assertEquals(listOf(core.draft(group)), TestCore.speech.spoken)
+        Views.tap(a, "draft_send")
+        assertEquals(1, TestCore.radio.sent.size)
+        assertNull(Views.tagged(a, "draft_cut"))
+    }
+
+    @Test fun aCutDraftKeepsItsMarkWhenTheEditorIsOnlyOpenedAndClosed() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        val a = open(group)
+        makeCutDraft(a)
+        val kept = core.draft(group)
+        assertTrue(core.draftWasCut(group))
+        Views.tap(a, "draft_text")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        assertEquals(kept, TestCore.onMain { edit.text.toString() })
+        assertTrue("opening the editor is not an edit", core.draftWasCut(group))
+        TestCore.onMain { edit.onEditorAction(EditorInfo.IME_ACTION_DONE) }
+        inst.waitForIdleSync()
+        assertEquals(kept, core.draft(group))
+        assertNotNull(Views.tagged(a, "draft_cut"))
+        assertTrue(Views.tagged(a, "draft_send")!!.isEnabled)
+        Views.finish(a)
+        val again = open(group)
+        assertNotNull("reopening keeps the cut disclosure", Views.tagged(again, "draft_cut"))
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertTrue(TestCore.speech.spoken.isEmpty())
+    }
+
+    @Test fun aCutDraftKeepsItsMarkWhenTheEditorIsRecreated() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        var a: Activity = open(group)
+        makeCutDraft(a)
+        val kept = core.draft(group)
+        Views.tap(a, "draft_text")
+        a = rotate(a, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        assertEquals(kept, TestCore.onMain { edit.text.toString() })
+        assertTrue("restoring the editor is not an edit", core.draftWasCut(group))
+        TestCore.onMain { edit.onEditorAction(EditorInfo.IME_ACTION_DONE) }
+        inst.waitForIdleSync()
+        assertNotNull(Views.tagged(a, "draft_cut"))
+        assertTrue(Views.tagged(a, "draft_send")!!.isEnabled)
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertTrue(TestCore.speech.spoken.isEmpty())
+    }
+
+    @Test fun editingACutDraftRetiresItsMark() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        val a = open(group)
+        makeCutDraft(a)
+        val kept = checkNotNull(core.draft(group))
+        Views.tap(a, "draft_text")
+        assertTrue("only a changed value retires the mark", core.draftWasCut(group))
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        TestCore.onMain { edit.text.delete(0, 4) }
+        assertEquals(kept.drop(4), core.draft(group))
+        assertFalse("a real edit clears the mark", core.draftWasCut(group))
+        TestCore.onMain { edit.onEditorAction(EditorInfo.IME_ACTION_DONE) }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(a, "draft_cut"))
+        assertTrue(Views.tagged(a, "draft_send")!!.isEnabled)
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertTrue(TestCore.speech.spoken.isEmpty())
+    }
+
+    @Test fun theFrenchCutNoticeSpeakerReadsItsDisplayedSentence() {
+        cutNoticeSpeakerReadsItsDisplayedSentence("fr", "La fin a été coupée.")
+    }
+
+    @Test fun theEnglishCutNoticeSpeakerReadsItsDisplayedSentence() {
+        cutNoticeSpeakerReadsItsDisplayedSentence("en-US", "The end was cut off.")
+    }
+
+    @Test fun theFrenchCutNoticeSpeakerBecomesAvailableWithoutReopening() {
+        cutNoticeSpeakerBecomesAvailableWithoutReopening("fr", "La fin a été coupée.")
+    }
+
+    @Test fun theEnglishCutNoticeSpeakerBecomesAvailableWithoutReopening() {
+        cutNoticeSpeakerBecomesAvailableWithoutReopening("en-US", "The end was cut off.")
+    }
+
+    private fun cutNoticeSpeakerBecomesAvailableWithoutReopening(language: String, expected: String) {
+        TestCore.install(language = language, voices = emptyList())
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        // The panel is built before the missing voice is installed, even while its notice is hidden.
+        val notice = TestCore.onMain { Views.descendants(a.window.decorView).single { it.tag == "draft_cut" } }
+        val panel = TestCore.onMain { Views.descendants(notice).filterIsInstance<HowToPanel>().single() }
+        val picture = TestCore.onMain { Views.descendants(panel).filterIsInstance<HowToView>().single() }
+        val speaker = TestCore.onMain { Views.descendants(panel).single { it.tag == "howto_say" } }
+        assertEquals(View.GONE, TestCore.onMain { speaker.visibility })
+        assertFalse(TestCore.onMain { core.canTalk() })
+        assertEquals(0, TestCore.speech.recordings)
+        TestCore.onMain {
+            Fixtures.installReady(context, listOf(language))
+            // Disk-only fixture installation does not emit the production PACKS notification.
+            a.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertSame("the conversation must not be reopened", a, Views.resumed())
+        assertTrue(TestCore.onMain { core.canTalk() })
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        makeCutDraft(a)
+        assertSame(notice, Views.tagged(a, "draft_cut"))
+        assertSame(picture, Views.tagged(a, "howto:toolong"))
+        assertEquals(expected, Views.textOf(TestCore.onMain { Views.descendants(panel).single { it.tag == "howto_sentence" } }))
+        assertTrue("a newly available voice must reveal the cut-notice speaker", TestCore.onMain { speaker.isShown })
+        TestCore.onMain {
+            a.onCoreChange(AppCore.Change.PEERS)
+            a.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertSame("ordinary renders keep the existing panel", panel,
+            TestCore.onMain { Views.descendants(notice).filterIsInstance<HowToPanel>().single() })
+        assertSame("ordinary renders keep the existing picture", picture, Views.tagged(a, "howto:toolong"))
+        assertTrue(TestCore.onMain { speaker.isShown })
+        assertEquals(1, TestCore.speech.recordings)
+        assertTrue("no automatic speech", TestCore.speech.spoken.isEmpty())
+        assertTrue(TestCore.speech.clips.isEmpty())
+        assertTrue("no automatic transmission", TestCore.radio.sent.isEmpty())
+        TestCore.onMain { speaker.performClick() }
+        inst.waitForIdleSync()
+        assertEquals("the speaker reads exactly the displayed localized notice", listOf(expected), TestCore.speech.spoken)
+        assertEquals(AppCore.HOWTO_PLAYBACK, core.playingId)
+        assertTrue(core.draftWasCut(group))
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    /** Drive both real UI callbacks before idle waits can reach the automatic recording limit. */
+    private fun makeCutDraft(a: Activity) {
+        val mic = checkNotNull(Views.tagged(a, "mic"))
+        TestCore.onMain {
+            mic.performClick()
+            assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+            mic.performClick()
+            assertEquals(AppCore.RecordState.IDLE, core.recordState)
+        }
+        inst.waitForIdleSync()
+    }
+
+    private fun cutNoticeSpeakerReadsItsDisplayedSentence(language: String, expected: String) {
+        TestCore.install(language = language, voices = listOf(language))
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        val a = open(group)
+        makeCutDraft(a)
+        val notice = checkNotNull(Views.tagged(a, "draft_cut"))
+        val sentence = TestCore.onMain { Views.descendants(notice).single { it.tag == "howto_sentence" } }
+        assertEquals(expected, Views.textOf(sentence))
+        val speaker = TestCore.onMain { Views.descendants(notice).single { it.tag == "howto_say" } }
+        assertTrue(TestCore.onMain { speaker.isShown })
+        assertTrue(TestCore.speech.spoken.isEmpty())
+        TestCore.onMain { speaker.performClick() }
+        inst.waitForIdleSync()
+        assertEquals("the speaker must read the displayed cut notice", listOf(expected), TestCore.speech.spoken)
+        assertEquals(AppCore.HOWTO_PLAYBACK, core.playingId)
+        TestCore.onMain { TestCore.speech.finishPlayback(); core.sayHowTo("toolong") }
+        assertEquals("the normal scene keeps its own sentence", listOf(expected, a.getString(R.string.howto_toolong)), TestCore.speech.spoken)
+        assertTrue(core.draftWasCut(group))
+        assertTrue(TestCore.speech.clips.isEmpty())
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun typingStopsAtTheLimit() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        Views.tap(a, "keyboard")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        TestCore.onMain { edit.setText("a".repeat(300)) }
+        assertEquals(191, TestCore.onMain { edit.text.length })
+        TestCore.onMain { edit.append("bbb") }
+        assertEquals(191, TestCore.onMain { edit.text.length })
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+        TestCore.onMain { edit.text.delete(0, 10) }
+        assertEquals("deleting is always allowed", 181, TestCore.onMain { edit.text.length })
+    }
+
+    @Test fun pastingRespectsUtf8AndNeverSplitsAnEmoji() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        Views.tap(a, "keyboard")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        TestCore.onMain { edit.setText("😀".repeat(100)) }
+        assertEquals("😀".repeat(47), TestCore.onMain { edit.text.toString() })
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+        TestCore.onMain { edit.text.replace(0, 2, "é".repeat(100)) }
+        assertEquals("ééé" + "😀".repeat(46), TestCore.onMain { edit.text.toString() })
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+    }
+
+    /** The clock must not starve idle observers until the automatic stop fires. */
+    @Test fun theRecordingClockLetsTheMainQueueIdleBeforeTheLimit() {
+        TestCore.install()
+        val a = open(TestCore.onMain { core.groupChatId() })
+        val mic = checkNotNull(Views.tagged(a, "mic"))
+        TestCore.onMain { mic.performClick() }
+        val idle = java.util.concurrent.CountDownLatch(1)
+        inst.waitForIdle { idle.countDown() }
+        try {
+            val idledWhileVisible = idle.await(2, java.util.concurrent.TimeUnit.SECONDS)
+            // A hidden-clock control isolates redraws from the real recording timer and fake speech.
+            TestCore.onMain { Views.descendants(mic).single { it is RecordRing }.visibility = View.INVISIBLE }
+            val hiddenIdle = java.util.concurrent.CountDownLatch(1)
+            inst.waitForIdle { hiddenIdle.countDown() }
+            assertTrue("recording itself must not starve idle", hiddenIdle.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals("the control must keep recording active", AppCore.RecordState.RECORDING, TestCore.onMain { core.recordState })
+            assertTrue("the visible recording clock must allow idle within two seconds", idledWhileVisible)
+            assertEquals("idle must arrive before the real 15-second limit", AppCore.RecordState.RECORDING, TestCore.onMain { core.recordState })
+            assertTrue(TestCore.speech.recording)
+            assertNull(core.draft(core.groupChatId()))
+        } finally {
+            TestCore.onMain { core.cancelRecording() }
+        }
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertTrue(TestCore.speech.spoken.isEmpty())
+    }
+
+    @Test fun theRecordingRingHasClockMarksAndHidesWhenIdle() {
+        TestCore.install()
+        TestCore.onMain {
+            val ring = RecordRing(context, Color.RED)
+            ring.layout(0, 0, 200, 200)
+            val bitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
+            ring.draw(Canvas(bitmap))
+            assertEquals(Color.TRANSPARENT, bitmap.getPixel(32, 100))
+            ring.startedAt = SystemClock.elapsedRealtime()
+            ring.draw(Canvas(bitmap))
+            assertTrue("the nine-o'clock mark lies inside the ring", Color.alpha(bitmap.getPixel(32, 100)) > 0)
+            bitmap.recycle()
+        }
+    }
+
+    @Test fun anOddEmojiPasteCannotUseInvalidHalfCharactersToPassTheLimit() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        Views.tap(a, "keyboard")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        TestCore.onMain { edit.setText("😀".repeat(99)) }
+        assertEquals("😀".repeat(47), TestCore.onMain { edit.text.toString() })
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+    }
+
+    @Test fun anOldOversizedDraftStaysIntactUntilDeleted() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val old = "a".repeat(300)
+        TestCore.onMain { core.setDraft(group, old) }
+        var a: Activity = open(group)
+        Views.tap(a, "draft_text")
+        var edit = Views.tagged(a, "draft_edit") as EditText
+        assertEquals(old, TestCore.onMain { edit.text.toString() })
+        assertEquals(old, core.draft(group))
+        assertNotNull(Views.tagged(a, "too_long"))
+        assertFalse(Views.tagged(a, "draft_send")!!.isEnabled)
+        a = rotate(a, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+        edit = Views.tagged(a, "draft_edit") as EditText
+        assertEquals(old, TestCore.onMain { edit.text.toString() })
+        TestCore.onMain { edit.append("b") }
+        assertEquals(old, TestCore.onMain { edit.text.toString() })
+        TestCore.onMain { edit.text.delete(0, 10) }
+        assertEquals(290, TestCore.onMain { edit.text.length })
+        assertEquals(DraftFit.TOO_LONG, core.draftFit(group))
+        TestCore.onMain { edit.text.delete(0, 100) }
+        assertEquals(190, TestCore.onMain { edit.text.length })
+        assertEquals(DraftFit.FITS, core.draftFit(group))
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
 
     @Test fun theBackArrowLeavesTheScreen() {
         TestCore.install()

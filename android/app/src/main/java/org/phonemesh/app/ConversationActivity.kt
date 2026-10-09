@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.text.Editable
+import android.text.InputFilter
 import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
@@ -28,6 +29,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import org.phonemesh.core.DraftFit
+import org.phonemesh.core.DraftRules
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.RecordGesture
 import org.phonemesh.core.Tip
@@ -54,6 +56,8 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var draftText: TextView
     private lateinit var draftEdit: EditText
     private lateinit var tooLong: TextView
+    private lateinit var cutNotice: View
+    private lateinit var cutPanel: HowToPanel
     private lateinit var micBar: LinearLayout
     private lateinit var mic: FrameLayout
     private lateinit var micIcon: ImageView
@@ -68,6 +72,30 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var send: Button
     private lateinit var tipBox: FrameLayout
     private var tip: Tip? = null
+
+    /** Typing and pasting stop at one radio part; deleting is always allowed. */
+    private val fitFilter = InputFilter { source, start, end, dest, dstart, dend ->
+        if (end == start) return@InputFilter null
+        val tag = core.currentLanguage().tag
+        val before = dest.subSequence(0, dstart).toString()
+        val after = dest.subSequence(dend, dest.length).toString()
+        fun fits(count: Int): Boolean {
+            // An invalid half-surrogate is not evidence that a longer valid prefix fits.
+            val boundary = if (count > 0 && Character.isHighSurrogate(source[start + count - 1])) count - 1 else count
+            return DraftRules.fit(
+                (before + source.subSequence(start, start + boundary) + after).replace('\n', ' '), tag,
+            ) != DraftFit.TOO_LONG
+        }
+        if (fits(end - start)) return@InputFilter null
+        var low = 0
+        var high = end - start
+        while (low < high) {
+            val mid = (low + high + 1) / 2
+            if (fits(mid)) low = mid else high = mid - 1
+        }
+        if (low > 0 && Character.isHighSurrogate(source[start + low - 1])) low--
+        source.subSequence(start, start + low)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,7 +124,7 @@ class ConversationActivity : ScreenActivity() {
         root.addView(draftBarView())
         show(root)
         built = true
-        if (editing) draftEdit.setText(core.draft(chatId).orEmpty())
+        if (editing) loadDraftForEditing()
     }
 
     private fun topBar(chat: Chat): View {
@@ -149,11 +177,13 @@ class ConversationActivity : ScreenActivity() {
             imeOptions = EditorInfo.IME_ACTION_DONE
             setHorizontallyScrolling(false)
             maxLines = 5
+            filters = arrayOf(fitFilter)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
                 override fun afterTextChanged(s: Editable?) {
-                    if (!editing) return
+                    // Loading or restoring unchanged text is not a user edit.
+                    if (!editing || s?.toString().orEmpty() == core.draft(chatId).orEmpty()) return
                     core.setDraft(chatId, s?.toString()?.replace('\n', ' '))
                     render()
                 }
@@ -169,6 +199,13 @@ class ConversationActivity : ScreenActivity() {
         draftBox.addView(draftText)
         draftBox.addView(draftEdit)
         draftBox.addView(tooLong)
+        cutPanel = howTo("toolong", compact = true) { getString(R.string.draft_cut) }
+        cutNotice = FrameLayout(this).apply {
+            tag = "draft_cut"
+            visibility = View.GONE
+            addView(cutPanel)
+        }
+        draftBox.addView(cutNotice)
         return draftBox
     }
 
@@ -340,10 +377,20 @@ class ConversationActivity : ScreenActivity() {
     private fun startEditing() {
         editing = true
         render()
-        draftEdit.setText(core.draft(chatId).orEmpty())
+        loadDraftForEditing()
         draftEdit.setSelection(draftEdit.text.length)
         draftEdit.requestFocus()
         getSystemService(InputMethodManager::class.java)?.showSoftInput(draftEdit, 0)
+    }
+
+    /** An existing oversized draft must survive opening the editor and rotation, until the user edits it. */
+    private fun loadDraftForEditing() {
+        draftEdit.filters = emptyArray()
+        try {
+            draftEdit.setText(core.draft(chatId).orEmpty())
+        } finally {
+            draftEdit.filters = arrayOf(fitFilter)
+        }
     }
 
     private fun stopEditing() {
@@ -456,6 +503,8 @@ class ConversationActivity : ScreenActivity() {
         val fit = core.draftFit(chatId)
         val tooLongNow = fit == DraftFit.TOO_LONG
         tooLong.visibility = if (tooLongNow) View.VISIBLE else View.GONE
+        cutPanel.update()
+        cutNotice.visibility = if (core.draftWasCut(chatId) && !editing) View.VISIBLE else View.GONE
         draftBox.background = Ui.outline(this, palette.background, if (tooLongNow) palette.bad else palette.outline,
             strokeDp = if (tooLongNow) 3 else 2, dashed = true)
         Ui.enable(send, fit == DraftFit.FITS)

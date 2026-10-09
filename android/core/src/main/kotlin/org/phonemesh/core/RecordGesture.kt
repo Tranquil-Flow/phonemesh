@@ -12,8 +12,8 @@ object RecordGesture {
     const val SLOP_DP = 12f
     const val TAP_MS = 300L
 
-    /** About one radio part of speech (200 bytes, about 18 s); recording stops by itself here. */
-    const val LIMIT_MS = 18_000L
+    /** About one radio part of normal French speech; recording stops by itself here (one constant; a bigger wire format raises it). */
+    const val LIMIT_MS = 15_000L
 
     enum class Phase { HOLDING, LOCKED, CANCELLED, FINISHED }
 

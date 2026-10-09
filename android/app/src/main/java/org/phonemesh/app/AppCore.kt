@@ -82,6 +82,7 @@ class AppCore private constructor(
     var openChatId: Long? = null
         private set
     private val drafts = HashMap<Long, String>()
+    private val cutDrafts = HashSet<Long>()
     var recordState = RecordState.IDLE
         private set
     var recordingChatId: Long? = null
@@ -330,7 +331,11 @@ class AppCore private constructor(
 
     fun draft(chatId: Long): String? = drafts[chatId]
 
+    /** The draft was cut at the one-part limit and has not been edited since. */
+    fun draftWasCut(chatId: Long): Boolean = chatId in cutDrafts
+
     fun setDraft(chatId: Long, text: String?) {
+        cutDrafts.remove(chatId)
         if (text.isNullOrEmpty()) drafts.remove(chatId) else drafts[chatId] = text
     }
 
@@ -366,7 +371,14 @@ class AppCore private constructor(
             speech.transcribe(pack, samples) heard@{ text ->
                 if (epoch != recordEpoch) return@heard
                 endRecording()
-                if (text.isNullOrBlank()) note(UiText(R.string.transcribe_failed)) else setDraft(chatId, text.trim())
+                if (text.isNullOrBlank()) {
+                    note(UiText(R.string.transcribe_failed))
+                } else {
+                    val heard = text.trim()
+                    val kept = DraftRules.trimToFit(heard, currentLanguage().tag)
+                    setDraft(chatId, kept)
+                    if (kept != heard) cutDrafts += chatId
+                }
                 changed(Change.RECORDING)
             }
         }
@@ -413,6 +425,7 @@ class AppCore private constructor(
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
         val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis())
         drafts.remove(chatId)
+        cutDrafts.remove(chatId)
         // Before any notification: observers read setup state from this flag while they render.
         settings.firstMessageSent = true
         transmit(message.id, text, language, chat)
@@ -460,15 +473,15 @@ class AppCore private constructor(
     /** A how-to sentence can be read: it has a recorded clip, or the voice is ready. */
     fun canSayHowTo(scene: String): Boolean = currentLanguage().howToClips[scene] != null || readiness() is Readiness.Ready
 
-    /** Reads a picture's recorded step 1 clip, else its sentence with the app's own voice. */
-    fun sayHowTo(scene: String) {
-        currentLanguage().howToClips[scene]?.let { clip ->
+    /** Reads the scene's clip or sentence; an overridden sentence uses the downloaded voice. */
+    fun sayHowTo(scene: String, sentence: String? = null) {
+        if (sentence == null) currentLanguage().howToClips[scene]?.let { clip ->
             stopPlayback()
             speech.playClip(clip) {}
             return
         }
         if (readiness() !is Readiness.Ready) return
-        speakAs(HOWTO_PLAYBACK, text(UiText(HowTo.sentence(scene))), currentLanguage().tag)
+        speakAs(HOWTO_PLAYBACK, sentence ?: text(UiText(HowTo.sentence(scene))), currentLanguage().tag)
     }
 
     /** The voice for the message's language; when it is missing, the user's own voice and a small note. */

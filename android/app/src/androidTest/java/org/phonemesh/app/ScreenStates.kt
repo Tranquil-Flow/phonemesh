@@ -60,6 +60,17 @@ object ScreenStates {
         return screen
     }
 
+    fun draftCut(): Activity {
+        TestCore.install()
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        TestCore.speech.nextTranscript = "Ceci est un très long message ".repeat(8).trim()
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        Views.tap(screen, "mic")
+        Views.tap(screen, "mic")
+        expect(Views.tagged(screen, "draft_cut") != null, "the cut-off notice")
+        return screen
+    }
+
     fun recordingLocked(): Activity {
         TestCore.install()
         val group = TestCore.onMain { TestCore.core.groupChatId() }
@@ -120,5 +131,6 @@ object ScreenStates {
         "07-recording" to { recordingLocked() },
         "08-radio" to { radio() },
         "09-settings" to { settings() },
+        "10-draft-cut" to { draftCut() },
     )
 }

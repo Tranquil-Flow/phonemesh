@@ -56,6 +56,7 @@
     <string name="send">Envoyer</string>
     <string name="draft_hint">Écrivez ici</string>
     <string name="too_long">Trop long. Raccourcissez.</string>
+    <string name="draft_cut">La fin a été coupée.</string>
     <string name="status_waiting">En attente</string>
     <string name="status_sent">parti</string>
     <string name="status_delivered">Arrivé</string>

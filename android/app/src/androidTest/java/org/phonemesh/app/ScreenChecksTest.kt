@@ -37,6 +37,7 @@ class ScreenChecksTest {
     @Test fun chatsInEnglish() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows("en-US") }
     @Test fun conversation() = check(minTargets = 6, minRows = 4) { ScreenStates.conversation() }
     @Test fun draftTooLong() = check(minTargets = 3) { ScreenStates.draftTooLong() }
+    @Test fun draftCut() = check(minTargets = 4) { ScreenStates.draftCut() }
     @Test fun recordingLocked() = check(minTargets = 2) { ScreenStates.recordingLocked() }
     @Test fun radio() = check(minTargets = 3, minRows = 2) { ScreenStates.radio() }
     @Test fun settings() = check(minTargets = 3) { ScreenStates.settings() }

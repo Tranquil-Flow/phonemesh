@@ -28,7 +28,8 @@ class RecordGestureTest {
     }
     @Test fun theRingFillsOverOneRadioPart() {
         assertEquals(0f, RecordGesture.ringFraction(0), 0.001f)
-        assertEquals(0.5f, RecordGesture.ringFraction(9_000), 0.001f)
+        assertEquals(0.5f, RecordGesture.ringFraction(7_500), 0.001f)
+        assertEquals(1f, RecordGesture.ringFraction(15_000), 0.001f)
         assertEquals(1f, RecordGesture.ringFraction(40_000), 0.001f)
     }
 }

@@ -9,6 +9,8 @@ import android.view.WindowManager
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.phonemesh.core.HowToScene
+import org.phonemesh.core.HowToScenes
 
 /**
  * Every screen: the chosen language and appearance (not the phone's), FLAG_SECURE, insets, and
@@ -72,6 +74,14 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
         visibility = View.GONE
         setPadding(pad(), pad() / 2, pad(), pad() / 2)
     }.also { noteView = it }
+
+    /** A panel for [scenes] in turn, read aloud with the recorded clip or the app's voice. */
+    protected fun howTo(vararg scenes: String, compact: Boolean = false, sentence: ((HowToScene) -> String)? = null): HowToPanel =
+        HowToPanel(this, palette, scenes.map { HowToScenes.get(it) },
+            sentence = sentence ?: { scene -> getString(HowTo.sentence(scene.name)) },
+            canSay = { scene -> core.canSayHowTo(scene.name) },
+            say = { scene -> core.sayHowTo(scene.name) },
+            compact = compact)
 
     override fun onStart() {
         super.onStart()

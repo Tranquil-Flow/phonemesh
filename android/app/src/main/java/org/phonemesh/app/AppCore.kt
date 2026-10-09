@@ -457,6 +457,20 @@ class AppCore private constructor(
         speakAs(DRAFT_PLAYBACK, text, currentLanguage().tag)
     }
 
+    /** A how-to sentence can be read: it has a recorded clip, or the voice is ready. */
+    fun canSayHowTo(scene: String): Boolean = currentLanguage().howToClips[scene] != null || readiness() is Readiness.Ready
+
+    /** Reads a picture's recorded step 1 clip, else its sentence with the app's own voice. */
+    fun sayHowTo(scene: String) {
+        currentLanguage().howToClips[scene]?.let { clip ->
+            stopPlayback()
+            speech.playClip(clip) {}
+            return
+        }
+        if (readiness() !is Readiness.Ready) return
+        speakAs(HOWTO_PLAYBACK, text(UiText(HowTo.sentence(scene))), currentLanguage().tag)
+    }
+
     /** The voice for the message's language; when it is missing, the user's own voice and a small note. */
     private fun speakAs(id: Long, text: String, languageTag: String?) {
         if (recordState != RecordState.IDLE) return
@@ -635,6 +649,7 @@ class AppCore private constructor(
     companion object {
         const val PRIMARY_CHANNEL = 0
         const val DRAFT_PLAYBACK = -1L
+        const val HOWTO_PLAYBACK = -2L
         const val BROADCAST = "^all"
         const val BACKGROUND_GRACE_MS = 60_000L
         const val CONNECT_WAIT_MS = 35_000L

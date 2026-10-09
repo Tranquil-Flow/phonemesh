@@ -305,6 +305,51 @@ class AppCoreTest {
         assertTrue(TestCore.restart().settings.firstMessageSent)
     }
 
+    @Test fun howToSentencesUseTheirClipOrTheVoice() {
+        TestCore.install(voices = emptyList())
+        assertTrue(main { core.canSayHowTo("download") })
+        assertTrue(main { core.canSayHowTo("friend") })
+        assertFalse("no voice yet, no clip", main { core.canSayHowTo("power") })
+        main { core.sayHowTo("power") }
+        assertTrue(speech.spoken.isEmpty())
+        main { core.sayHowTo("download"); core.sayHowTo("friend") }
+        assertEquals(listOf(R.raw.howto_fr_download, R.raw.howto_fr_friend), speech.clips)
+        assertTrue(speech.spoken.isEmpty())
+
+        TestCore.install()
+        assertTrue(main { core.canSayHowTo("power") })
+        main { core.sayHowTo("power") }
+        assertEquals(listOf("Allumez la radio."), speech.spoken)
+        assertEquals(AppCore.HOWTO_PLAYBACK, core.playingId)
+        main { speech.finishPlayback() }
+        assertNull(core.playingId)
+        assertTrue(radio.sent.isEmpty())
+    }
+
+    @Test fun howToClipsFollowTheChosenLanguageEvenWithAVoice() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        main { core.sayHowTo("download"); core.sayHowTo("friend") }
+        assertEquals(listOf(R.raw.howto_en_download, R.raw.howto_en_friend), speech.clips)
+        assertTrue(speech.spoken.isEmpty())
+        main { core.sayHowTo("power") }
+        assertEquals(listOf("Turn on the radio."), speech.spoken)
+        assertEquals(AppCore.HOWTO_PLAYBACK, core.playingId)
+        main { core.stopPlayback() }
+        assertNull(core.playingId)
+        assertFalse(speech.playing)
+    }
+
+    @Test fun aHowToClipStopsTheDraftVoice() {
+        TestCore.install()
+        val group = core.groupChatId()
+        main { core.setDraft(group, "Bonjour"); core.playDraft(group) }
+        assertEquals(AppCore.DRAFT_PLAYBACK, core.playingId)
+        main { core.sayHowTo("download") }
+        assertNull(core.playingId)
+        assertFalse(speech.playing)
+        assertEquals(listOf(R.raw.howto_fr_download), speech.clips)
+    }
+
     /** Observers render from this flag; AppCore.changed notifies synchronously, so it must already be set. */
     @Test fun theFirstMessageFlagIsSetBeforeScreensAreNotified() {
         val core = TestCore.install()

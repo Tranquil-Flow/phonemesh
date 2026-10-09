@@ -167,6 +167,11 @@ class HowToViewTest {
         Thread.sleep(1_300)
         TestCore.onMain { scroll.scrollTo(0, 900) }
         Views.waitUntil { !view.getGlobalVisibleRect(Rect()) }
+        // scrollTo() flips geometric visibility immediately, but the scroll change reaches the
+        // tree observer (and the next frame callback) on a later traversal, which is what calls
+        // updateRunning() to drop the frame callbacks. Wait for that stop with a bound that still
+        // fails if a frame callback survives off-screen.
+        Views.waitUntil(1_000) { !view.isRunning }
         assertFalse("off-screen must remove frame callbacks, not just skip drawing", TestCore.onMain { view.isRunning })
         val paused = picture(view)
         val part = TestCore.onMain { panel.part }

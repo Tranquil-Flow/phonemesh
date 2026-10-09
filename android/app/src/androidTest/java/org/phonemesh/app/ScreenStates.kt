@@ -24,13 +24,14 @@ object ScreenStates {
         TestCore.install(voices = emptyList(), connected = false)
         val screen = Views.start(ChatsActivity::class.java)
         expect(Views.tagged(screen, "card_voice") != null, "voice setup card")
-        expect(Views.tagged(screen, "card_radio") != null, "radio setup card")
+        expect(Views.tagged(screen, "step_row:2") != null, "radio step row")
         return screen
     }
 
     fun chatsRows(language: String = "fr"): Activity {
         TestCore.install(language = language)
         seedChats()
+        TestCore.onMain { TestCore.core.settings.setupFinished = true }
         val screen = Views.start(ChatsActivity::class.java)
         val expected = TestCore.onMain { TestCore.core.chatRows().size }
         expect(expected >= 2, "group and private chat seeded")

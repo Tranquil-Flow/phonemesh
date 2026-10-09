@@ -21,14 +21,19 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import org.phonemesh.core.CatalogEntry
+import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.PackRejected
 import org.phonemesh.core.Readiness
 import org.phonemesh.core.SetupPlan
+import org.phonemesh.core.SetupStep
+import org.phonemesh.core.SetupSteps
+import org.phonemesh.core.SetupView
 import java.util.Date
 
-/** Home: radio status, setup cards while something is missing, every chat, ➕ for a private chat. */
+/** Home: radio status, the numbered setup guide with how-to pictures (then single problem cards), every chat, ➕ for a private chat. */
 class ChatsActivity : ScreenActivity() {
     private lateinit var radioStatus: ImageView
     private lateinit var cards: LinearLayout
@@ -41,10 +46,9 @@ class ChatsActivity : ScreenActivity() {
     /** First launch: a pack intent is waiting for the language to be chosen, so the recreate after it must replay it. */
     private var importWaitsForLanguage = false
     private var peerDialog: AlertDialog? = null
-    private var showedVoiceCard = false
-    private var showedRadioCard = false
-    private var voiceDoneUntil = 0L
-    private var radioDoneUntil = 0L
+    private var doneUntil = 0L
+    /** One panel per step or problem, kept so renders never restart a picture. */
+    private val panels = HashMap<String, HowToPanel>()
     private val rerender = Runnable { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,7 +60,18 @@ class ChatsActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), 0)
         }
-        root.addView(cards)
+        // A tall guide must not squeeze the chats to zero. Its pictures and later steps remain scrollable.
+        val setupScroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val height = if (View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.UNSPECIFIED) heightMeasureSpec
+                else View.MeasureSpec.makeMeasureSpec(View.MeasureSpec.getSize(heightMeasureSpec) * 3 / 4, View.MeasureSpec.AT_MOST)
+                super.onMeasure(widthMeasureSpec, height)
+            }
+        }.apply {
+            tag = "setup_scroll"
+            addView(cards)
+        }
+        root.addView(setupScroll)
         val frame = FrameLayout(this)
         val list = ListView(this).apply {
             tag = "chats"
@@ -145,89 +160,125 @@ class ChatsActivity : ScreenActivity() {
         emptyHint.visibility = if (data.all { it.last == null }) View.VISIBLE else View.GONE
     }
 
-    /** Cards show while something is missing, turn green with ✓ for two seconds when fixed, and return if it breaks again. */
+    /** Three numbered steps, then two seconds of green; afterwards only lost-voice/radio cards. */
     private fun renderCards() {
         cards.removeAllViews()
         cards.removeCallbacks(rerender)
         val now = SystemClock.uptimeMillis()
         val missing = core.missingVoicePacks()
-        val voiceNeeded = missing.isNotEmpty() || core.readiness() !is Readiness.Ready
-        if (voiceNeeded) cards.addView(voiceCard(missing)) else if (showedVoiceCard) voiceDoneUntil = now + DONE_MS
-        showedVoiceCard = voiceNeeded
-        if (!voiceNeeded && now < voiceDoneUntil) cards.addView(doneCard("card_voice_done"))
-        val radioNeeded = !core.connected
-        if (radioNeeded) cards.addView(radioCard()) else if (showedRadioCard) radioDoneUntil = now + DONE_MS
-        showedRadioCard = radioNeeded
-        if (!radioNeeded && now < radioDoneUntil) cards.addView(doneCard("card_radio_done"))
-        listOf(voiceDoneUntil, radioDoneUntil).filter { it > now }.minOrNull()?.let { cards.postDelayed(rerender, it - now) }
+        val voiceReady = missing.isEmpty() && core.readiness() is Readiness.Ready
+        val settings = core.settings
+        when (val view = SetupSteps.of(voiceReady, core.connected, settings.firstMessageSent, settings.setupFinished)) {
+            is SetupView.Guide -> {
+                cards.addView(StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current),
+                    panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing)))
+                SetupSteps.ORDER.filter { it != view.current }.forEach { step ->
+                    val done = step in view.done
+                    cards.addView(StepCard.row(this, palette, step, done, stepTitle(step), if (done) doneDetail(step) else stepHint(step, missing)))
+                }
+            }
+            SetupView.Complete -> {
+                settings.setupFinished = true
+                doneUntil = now + DONE_MS
+            }
+            is SetupView.Problems -> view.lost.forEach { step ->
+                cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))), stepActions(step, missing)))
+            }
+            SetupView.Hidden -> Unit
+        }
+        if (now < doneUntil) {
+            cards.addView(doneCard())
+            cards.postDelayed(rerender, doneUntil - now)
+        }
     }
 
-    private fun card(name: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        tag = name
-        setPadding(pad(), pad(), pad(), pad())
-        background = Ui.outline(this@ChatsActivity, palette.surface, palette.outline)
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            .apply { topMargin = pad() / 2 }
+    /** Reuse each panel and refresh its speaker when a voice arrives. */
+    private fun panel(scenes: List<String>): HowToPanel =
+        panels.getOrPut(scenes.joinToString(",")) { howTo(*scenes.toTypedArray()) }.also { it.update() }
+
+    private fun stepTitle(step: SetupStep) = getString(when (step) {
+        SetupStep.VOICE -> R.string.step_voice
+        SetupStep.RADIO -> R.string.setup_radio_title
+        SetupStep.HELLO -> R.string.step_hello
+    })
+
+    private fun stepDetail(step: SetupStep, missing: List<CatalogEntry>): String? =
+        if (step == SetupStep.VOICE && missing.isNotEmpty()) {
+            getString(R.string.setup_voice_card, getString(R.string.setup_voice_title), SetupPlan.megabytes(missing))
+        } else {
+            null
+        }
+
+    private fun stepHint(step: SetupStep, missing: List<CatalogEntry>) = when (step) {
+        SetupStep.VOICE -> stepDetail(step, missing) ?: getString(R.string.setup_voice_title)
+        SetupStep.RADIO -> getString(R.string.setup_radio_hint)
+        SetupStep.HELLO -> getString(R.string.step_hello_hint)
     }
 
-    private fun cardTitle(icon: Int, title: String, color: Int = palette.text) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        addView(Ui.icon(this@ChatsActivity, icon, color, 32))
-        addView(Ui.text(this@ChatsActivity, title, color, bold = true).apply { setPadding(pad() / 2, 0, 0, 0) })
+    private fun doneDetail(step: SetupStep) = when (step) {
+        SetupStep.VOICE -> GeneratedPackCatalog.entries.firstOrNull { it.id == core.currentLanguage().voicePackId }
+            ?.let { getString(R.string.step_voice_done, getString(R.string.setup_voice_title), SetupPlan.megabytes(listOf(it))) }
+            ?: getString(R.string.setup_voice_title)
+        SetupStep.RADIO -> getString(R.string.radio_connected)
+        SetupStep.HELLO -> getString(R.string.step_hello_done)
     }
 
-    private fun voiceCard(missing: List<CatalogEntry>): View {
-        val card = card("card_voice")
-        val title = if (missing.isEmpty()) getString(R.string.setup_voice_title)
-        else getString(R.string.setup_voice_card, getString(R.string.setup_voice_title), SetupPlan.megabytes(missing))
-        card.addView(cardTitle(R.drawable.ic_download, title))
+    private fun stepActions(step: SetupStep, missing: List<CatalogEntry>): View = when (step) {
+        SetupStep.VOICE -> voiceActions(missing)
+        SetupStep.RADIO -> Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search, filled = true).apply {
+            tag = "radio_search"
+            setOnClickListener { openRadio() }
+        }.let { padded(it) }
+        SetupStep.HELLO -> Ui.button(this, palette, getString(R.string.step_hello_button), R.drawable.ic_mic, filled = true).apply {
+            tag = "hello_try"
+            setOnClickListener { openChat(core.groupChatId()) }
+        }.let { padded(it) }
+    }
+
+    /** Download progress, or the existing Download and File actions. */
+    private fun voiceActions(missing: List<CatalogEntry>): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
+        val full = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT) }
         val percent = core.voiceDownloadPercent()
         if (percent != null) {
-            card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            box.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
                 tag = "voice_bar"
                 max = 100
                 progress = percent
                 progressTintList = ColorStateList.valueOf(palette.text)
-            })
-            card.addView(Ui.text(this, getString(R.string.progress_percent, percent), palette.text, bold = true).apply { tag = "voice_progress" })
-            return card
+            }, full())
+            box.addView(Ui.text(this, getString(R.string.progress_percent, percent), palette.text, bold = true).apply { tag = "voice_progress" })
+            return box
         }
-        val buttons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
-        val full = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT) }
         if (missing.isNotEmpty()) {
-            buttons.addView(Ui.button(this, palette, getString(R.string.setup_download), R.drawable.ic_download, filled = true).apply {
+            box.addView(Ui.button(this, palette, getString(R.string.setup_download), R.drawable.ic_download, filled = true).apply {
                 tag = "voice_download"
                 setOnClickListener { core.downloadVoice(); render() }
             }, full())
         }
-        buttons.addView(Ui.button(this, palette, getString(R.string.setup_file), R.drawable.ic_folder).apply {
+        box.addView(Ui.button(this, palette, getString(R.string.setup_file), R.drawable.ic_folder).apply {
             tag = "voice_file"
             setOnClickListener { pickFile() }
         }, full().apply { if (missing.isNotEmpty()) topMargin = pad() / 2 })
-        card.addView(buttons)
-        return card
+        return box
     }
 
-    private fun radioCard(): View {
-        val card = card("card_radio").apply {
-            isClickable = true
-            contentDescription = getString(R.string.setup_radio_title)
-            setOnClickListener { openRadio() }
-        }
-        card.addView(cardTitle(R.drawable.ic_radio_off, getString(R.string.setup_radio_title)))
-        card.addView(Ui.text(this, getString(R.string.setup_radio_hint), palette.text))
-        card.addView(Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search, filled = true).apply {
-            tag = "radio_search"
-            setOnClickListener { openRadio() }
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
-        return card
+    private fun padded(button: View): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(0, pad() / 2, 0, 0)
+        addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     }
 
-    private fun doneCard(name: String) = card(name).apply {
+    private fun doneCard() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        tag = "setup_done"
+        setPadding(pad(), pad(), pad(), pad())
         background = Ui.outline(this@ChatsActivity, palette.background, palette.good, strokeDp = 3)
-        addView(cardTitle(R.drawable.ic_check, getString(R.string.setup_done), palette.good))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = pad() / 2 }
+        addView(Ui.icon(this@ChatsActivity, R.drawable.ic_check, palette.good, 32))
+        addView(Ui.text(this@ChatsActivity, getString(R.string.setup_done), palette.good, bold = true).apply { setPadding(pad() / 2, 0, 0, 0) })
     }
 
     private inner class ChatAdapter : BaseAdapter() {

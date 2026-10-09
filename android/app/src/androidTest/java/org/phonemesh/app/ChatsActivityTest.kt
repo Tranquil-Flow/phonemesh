@@ -3,8 +3,13 @@ package org.phonemesh.app
 import android.app.Activity
 import android.content.DialogInterface
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.net.Uri
 import android.text.TextUtils
+import android.widget.ListView
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
@@ -15,6 +20,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.RadioPeer
+import java.io.File
 
 /** Fake radio and speech, fixture packs. */
 @RunWith(AndroidJUnit4::class)
@@ -36,6 +42,36 @@ class ChatsActivityTest {
     private fun resumedNow(): Activity? =
         ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull()
 
+    /** Silent fixture-only view export; FLAG_SECURE remains enabled. */
+    private fun saveSetupPicture(chats: ChatsActivity, name: String) {
+        if (InstrumentationRegistry.getArguments().getString("setupExport") != "true") return
+        inst.waitForIdleSync()
+        TestCore.onMain {
+            val decor = chats.window.decorView
+            val bitmap = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+            decor.draw(Canvas(bitmap))
+            val file = File(context.getExternalFilesDir(null), "task11/$name.png")
+            file.parentFile!!.mkdirs()
+            file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            bitmap.recycle()
+        }
+    }
+
+    @Test fun setupLeavesRoomForChatsAndCanScrollToLaterSteps() {
+        TestCore.install(voices = emptyList(), connected = false)
+        val chats = start()
+        saveSetupPicture(chats, "voice-before-scroll")
+        val list = Views.tagged(chats, "chats") as ListView
+        assertTrue("setup cannot squeeze chats out: list height=${list.height}, screen height=${chats.window.decorView.height}",
+            TestCore.onMain { list.height >= Ui.dp(chats, 76) && list.childCount > 0 })
+        val scroll = Views.all(chats).filterIsInstance<ScrollView>().single()
+        TestCore.onMain { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
+        Views.waitUntil {
+            Views.descendants(chats.window.decorView).first { it.tag == "step_row:3" }.getGlobalVisibleRect(Rect())
+        }
+        saveSetupPicture(chats, "voice-after-scroll")
+    }
+
     @Test fun firstLaunchAsksForTheLanguageThenShowsTheChats() {
         TestCore.install(language = null)
         val first = Views.start(ChatsActivity::class.java)
@@ -48,25 +84,114 @@ class ChatsActivityTest {
         assertNotNull(Views.withText(activity!!, "Discussions"))
     }
 
-    @Test fun setupCardsShowWhatIsMissingThenFreeTheMicrophone() {
+    @Test fun setupIsANumberedGuideThatFoldsAwayWhenDone() {
         TestCore.install(voices = emptyList(), connected = false)
         val chats = start()
         val voiceCard = Views.tagged(chats, "card_voice")!!
+        assertNotNull("the current step is numbered", Views.tagged(chats, "step_of"))
+        assertEquals("ÉTAPE 1 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        saveSetupPicture(chats, "step1")
         assertNotNull(Views.descendants(voiceCard).filterIsInstance<TextView>()
             .firstOrNull { Views.textOf(it) == "Voix française · 66 Mo · une seule fois" })
         assertNotNull(Views.tagged(chats, "voice_download"))
         assertNotNull(Views.tagged(chats, "voice_file"))
+        assertNotNull("step 1 plays the download picture", Views.tagged(chats, "howto:download"))
+        assertNotNull("and the friend picture as part 2", Views.tagged(chats, "part:2"))
+        Views.tap(chats, "part:2")
+        assertNotNull(Views.tagged(chats, "howto:friend"))
+        assertNull(Views.tagged(chats, "card_radio"))
+        assertNotNull(Views.tagged(chats, "step_row:2"))
+        assertNotNull(Views.tagged(chats, "step_row:3"))
+        assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+
+        TestCore.onMain {
+            Fixtures.installReady(context)
+            // This disk-only helper does not send AppCore's normal pack notification.
+            chats.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertNotNull(Views.tagged(chats, "card_radio"))
+        assertEquals("ÉTAPE 2 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertNotNull(Views.tagged(chats, "step_done:1"))
+        // The pinned voice-only archive is 6 MB; the missing engine plus voice was 66 MB.
+        assertNotNull(Views.withText(chats, "Voix française · 6 Mo"))
         assertNotNull(Views.withText(chats, "Connecter la radio"))
         assertNotNull(Views.tagged(chats, "radio_search"))
-        assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
-        TestCore.onMain { Fixtures.installReady(context) }
+        assertNotNull(Views.tagged(chats, "howto:power"))
+        saveSetupPicture(chats, "step2")
+        assertNull("pairing remains off", Views.tagged(chats, "part:4"))
+        Views.tap(chats, "part:2")
+        assertNotNull(Views.tagged(chats, "howto:close"))
+        Views.tap(chats, "part:3")
+        assertNotNull(Views.tagged(chats, "howto:search"))
+        assertEquals("Touchez « Trouver la radio ».", Views.textOf(Views.tagged(chats, "howto_sentence")!!))
+
         TestCore.onMain { TestCore.radio.connected(true) }
-        assertNull(Views.tagged(chats, "card_voice"))
-        assertNull(Views.tagged(chats, "card_radio"))
-        assertNotNull(Views.tagged(chats, "card_voice_done"))
-        assertNotNull(Views.tagged(chats, "card_radio_done"))
+        assertNotNull(Views.tagged(chats, "card_hello"))
+        assertEquals("ÉTAPE 3 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertNotNull(Views.tagged(chats, "step_done:1"))
+        assertNotNull(Views.tagged(chats, "step_done:2"))
         assertEquals("Radio connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+        assertNotNull(Views.tagged(chats, "howto:hello"))
+        saveSetupPicture(chats, "step3")
+        Views.tap(chats, "hello_try")
+        Views.waitUntil { resumedNow() is ConversationActivity }
+        Views.finish(Views.resumed())
+        Views.waitUntil { resumedNow() === chats }
+
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Bonjour"); assertTrue(core.send(group)) }
+        assertNotNull("synchronous send observers see completion", Views.tagged(chats, "setup_done"))
+        inst.waitForIdleSync()
+        saveSetupPicture(chats, "complete")
+        assertTrue(core.settings.setupFinished)
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
+        Views.waitUntil(4_000) { Views.descendants(chats.window.decorView).none { it.tag == "setup_done" && it.isShown } }
+        listOf("card_voice", "card_radio", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
         assertTrue(core.canTalk())
+        Views.finish(chats)
+        val reopened = start()
+        assertNull("setup never returns on reopening", Views.tagged(reopened, "step_of"))
+        assertNull(Views.tagged(reopened, "setup_done"))
+    }
+
+    @Test fun afterSetupALostRadioShowsOneCardWithoutNumbers() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        assertNull(Views.tagged(chats, "card_radio"))
+        TestCore.onMain { TestCore.radio.connected(false) }
+        assertNotNull(Views.tagged(chats, "card_radio"))
+        assertNotNull(Views.tagged(chats, "howto:lost"))
+        inst.waitForIdleSync()
+        saveSetupPicture(chats, "lost-radio")
+        assertNull(Views.tagged(chats, "step_of"))
+        assertNull(Views.tagged(chats, "step_row:1"))
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertNull(Views.tagged(chats, "card_radio"))
+        assertNull(Views.tagged(chats, "setup_done"))
+    }
+
+    @Test fun aNewLanguageAfterSetupShowsOnlyTheVoiceCard() {
+        TestCore.install(voices = listOf("fr"))
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true; core.settings.language = "en-US" }
+        val chats = start()
+        assertNotNull(Views.tagged(chats, "card_voice"))
+        assertNull(Views.tagged(chats, "step_of"))
+        assertNull(Views.tagged(chats, "card_hello"))
+        assertNull(Views.tagged(chats, "step_row:3"))
+        assertNotNull(Views.tagged(chats, "howto:download"))
+        assertNull("problem voice card has one picture", Views.tagged(chats, "part:2"))
+    }
+
+    @Test fun aRenderKeepsTheSamePicture() {
+        TestCore.install(connected = false)
+        val chats = start()
+        val before = Views.tagged(chats, "howto:power")!!
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
+        assertSame(before, Views.tagged(chats, "howto:power"))
+        Views.tap(chats, "part:3")
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.PACKS) }
+        assertSame("a render preserves the selected part", before, Views.tagged(chats, "howto:search"))
     }
 
     @Test fun rowsShowTheGroupFirstWithPeopleHeardThenPrivateChats() {

@@ -148,5 +148,11 @@
     <string name="howto_pair">Type the number shown on the radio.</string>
     <string name="howto_hello">Hold the microphone and say hello.</string>
     <string name="howto_lost">Turn on the radio and come closer.</string>
+    <string name="howto_cancel">Changed your mind? Slide left.</string>
+    <string name="howto_lock">Long message? Slide up to lock.</string>
+    <string name="howto_listen">Listen to it, then send.</string>
+    <string name="howto_delivery">Watch the small sign.</string>
+    <string name="howto_failed">Not sent? Tap “Send again”.</string>
+    <string name="howto_arrive">A radio message came. Tap to hear it.</string>
     <string name="howto_on">ON</string>
 </resources>

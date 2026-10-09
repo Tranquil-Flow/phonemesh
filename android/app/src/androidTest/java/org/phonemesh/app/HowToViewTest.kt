@@ -80,6 +80,42 @@ class HowToViewTest {
         }
     }
 
+    @Test fun lockDrawsASeparateTapOnTheStopSquareAfterRelease() {
+        val view = TestCore.onMain { laidOut("lock") }
+        val export = InstrumentationRegistry.getArguments().getString("howtoExport") == "true"
+        listOf("slide" to .52f, "locked" to .6f, "release" to .76f,
+            "approach" to .82f, "tap" to .86f, "lift" to .9f, "retreat" to .96f).forEach { (label, time) ->
+            TestCore.onMain { view.freezeAt(time) }
+            val bitmap = picture(view)
+            // The button is centred at (110,86) in the drawing's 220 x 110 units.
+            // Its lower square is white after release; the returning fingertip covers it on tap.
+            if (label in listOf("release", "retreat"))
+                assertEquals("stop square uncovered at $label", HowToKit.C.WHITE, bitmap.getPixel(220, 182))
+            if (label == "tap")
+                assertEquals("finger taps the visible stop square", HowToKit.C.SKIN, bitmap.getPixel(220, 182))
+            if (export) {
+                val file = File(inst.targetContext.getExternalFilesDir(null), "howto-setup/lock-$label.png")
+                file.parentFile!!.mkdirs()
+                file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            }
+            bitmap.recycle()
+        }
+    }
+
+    @Test fun theListenButtonKeepsTheMockupsSoundArc() {
+        val view = TestCore.onMain { laidOut("listen").apply { freezeAt(scene.still) } }
+        assertEquals("sound arc beside the speaker", HowToKit.C.INK, picture(view).getPixel(158, 160))
+    }
+
+    @Test fun cancelChevronsFollowTheMockupsPositiveAnimationDelays() {
+        val view = TestCore.onMain { laidOut("cancel").apply { freezeAt(.2f) } }
+        val bitmap = picture(view)
+        val first = android.graphics.Color.red(bitmap.getPixel(186, 150))
+        val second = android.graphics.Color.red(bitmap.getPixel(222, 150))
+        val third = android.graphics.Color.red(bitmap.getPixel(258, 150))
+        assertTrue("later chevrons have not brightened yet", first < second && second < third)
+    }
+
     @Test fun downloadDoesNotAddAHomeButtonAbsentFromTheMockup() {
         val view = TestCore.onMain { laidOut("download").apply { freezeAt(scene.still) } }
         assertEquals("download phone has no grey home dot", HowToKit.C.PHONE, picture(view).getPixel(310, 187))

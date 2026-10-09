@@ -10,6 +10,69 @@ class HowToScenesTest {
     @Test fun theSetupScenesAreThere() =
         assertEquals(listOf("download", "friend", "power", "close", "search", "pair", "hello", "lost"), HowToScenes.SETUP)
 
+    @Test fun theTalkingScenesAreThere() =
+        assertEquals(listOf("cancel", "lock", "listen", "delivery", "failed", "arrive"), HowToScenes.TALKING)
+
+    @Test fun talkingActionsMatchTheApprovedKeyframes() {
+        fun key(scene: String, track: String, t: Float, expected: Float) =
+            assertEquals("$scene.$track at $t", expected, HowToScenes.get(scene).value(track, t), 1e-4f)
+        key("cancel", "recording", .14f, 1f)
+        key("cancel", "finger.dx", .6f, -125f)
+        key("cancel", "lid", .58f, -35f)
+        key("cancel", "recording", .62f, 0f)
+        key("lock", "finger.dy", .52f, -62f)
+        key("lock", "shackle", .58f, 0f)
+        key("lock", "stop", .6f, 1f)
+        key("lock", "finger.dy", .74f, 30f)
+        key("listen", "sound", .22f, 1f)
+        key("listen", "sound", .5f, 0f)
+        key("listen", "finger.dx", .62f, 80f)
+        key("listen", "fly.dy", .86f, -34f)
+        key("listen", "fly.alpha", .86f, 0f)
+        key("delivery", "waiting", .3f, 1f)
+        key("delivery", "sent", .33f, 1f)
+        key("delivery", "waiting", .33f, 0f)
+        key("delivery", "rings", .36f, 1f)
+        key("delivery", "delivered", .66f, 1f)
+        key("delivery", "sent", .66f, 0f)
+        key("failed", "finger.dy", .28f, 2f)
+        key("failed", "failed", .33f, 0f)
+        key("failed", "waiting", .33f, 1f)
+        key("failed", "spin", .7f, 720f)
+        key("failed", "delivered", .73f, 1f)
+        key("arrive", "pulse", .22f, 1f)
+        key("arrive", "message.dx", .28f, 0f)
+        key("arrive", "message.alpha", .28f, 1f)
+        key("arrive", "finger.dy", .48f, 2f)
+        key("arrive", "sound", .52f, 1f)
+        key("arrive", "sound", .94f, 0f)
+    }
+
+    @Test fun lockReleasesThenTapsTheVisibleStopSquareBeforeResetting() {
+        val scene = HowToScenes.get("lock")
+        fun key(track: String, time: Float, expected: Float) =
+            assertEquals("lock.$track at $time", expected, scene.value(track, time), 1e-4f)
+        key("finger.dx", .52f, 0f)
+        key("finger.dy", .52f, -62f)
+        key("shackle", .6f, 0f)
+        key("stop", .6f, 1f)
+        key("finger.dx", .76f, 30f)
+        key("finger.dy", .76f, 30f)
+        key("stop", .76f, 1f)
+        key("finger.dx", .82f, 0f)
+        key("finger.dy", .82f, 0f)
+        key("finger.dx", .86f, 0f)
+        key("finger.dy", .86f, 2f)
+        key("stop", .86f, 1f)
+        key("finger.dx", .9f, 0f)
+        key("finger.dy", .9f, 0f)
+        key("finger.dx", .96f, 30f)
+        key("finger.dy", .96f, 30f)
+        key("stop", .96f, 1f)
+        assertEquals(.6f, scene.still, 0f)
+        key("finger.dy", scene.still, -62f)
+    }
+
     @Test fun everyListedSceneIsRegisteredOnce() {
         val listed = HowToScenes.groups.flatten()
         assertEquals(listed.size, listed.toSet().size)

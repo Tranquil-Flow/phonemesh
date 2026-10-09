@@ -145,5 +145,11 @@
     <string name="howto_pair">Tapez le numéro affiché sur la radio.</string>
     <string name="howto_hello">Maintenez le micro et dites bonjour.</string>
     <string name="howto_lost">Allumez la radio et approchez-vous.</string>
+    <string name="howto_cancel">Changé d\'avis ? Glissez à gauche.</string>
+    <string name="howto_lock">Message long ? Glissez vers le cadenas.</string>
+    <string name="howto_listen">Écoutez-le, puis envoyez.</string>
+    <string name="howto_delivery">Regardez le petit signe.</string>
+    <string name="howto_failed">Pas parti ? Touchez « Renvoyer ».</string>
+    <string name="howto_arrive">Un message radio est arrivé. Touchez pour écouter.</string>
     <string name="howto_on">ON</string>
 </resources>

@@ -67,10 +67,56 @@ object HowToScenes {
             "finger.dy" to "0:40 .14:0 .18:3 .22:0 .36:40 1:40"),
     )
 
-    /** Scene lists in Help-page order; later tasks add the remaining groups. */
-    val groups: List<List<String>> get() = listOf(SETUP)
+    val TALKING = listOf("cancel", "lock", "listen", "delivery", "failed", "arrive")
 
-    val all: Map<String, HowToScene> = setup.associateBy { it.name }
+    private val talking = listOf(
+        // Holding the microphone, slide left to the bin; its lid opens and recording ends.
+        scene("cancel", 5f, .6f, mapOf("finger.dx" to -125f, "lid" to -35f),
+            "recording" to "0:0 .1:0 .14:1 .55:1 .62:0 1:0",
+            "lid" to "0:0 .5:0 .58:-35 .72:-35 .8:0 1:0",
+            "finger.dx" to "0:25 .12:0 .25:0 .6:-125 .68:-125 .84:-110 .97:-110 1:25",
+            "finger.dy" to "0:44 .12:0 .25:0 .6:0 .68:0 .84:50 .97:50 1:44"),
+        // Slide up to lock, let go, then return and tap the visible stop square.
+        scene("lock", 5f, .6f, mapOf("finger.dy" to -62f, "stop" to 1f),
+            "shackle" to "0:-6 .52:-6 .58:0 .96:0 1:-6",
+            "stop" to "0:0 .57:0 .6:1 .96:1 1:0",
+            "finger.dx" to "0:25 .12:0 .6:0 .74:30 .76:30 .82:0 .9:0 .96:30 .97:30 1:25",
+            "finger.dy" to "0:30 .12:0 .22:0 .52:-62 .6:-62 .74:30 .76:30 .82:0 .86:2 .9:0 .96:30 1:30"),
+        // Listen, then tap the green arrow; the draft flies up as a sent message.
+        scene("listen", 6f, .3f, mapOf("finger.dx" to 0f, "sound" to 1f),
+            "sound" to "0:0 .19:0 .22:1 .46:1 .5:0 1:0",
+            "fly.dy" to "0:0 .7:0 .86:-34 .96:0 1:0",
+            "fly.alpha" to "0:1 .7:1 .86:0 .96:0 1:1",
+            "finger.dx" to "0:20 .12:0 .48:0 .62:80 .7:80 .82:100 .97:100 1:20",
+            "finger.dy" to "0:40 .12:0 .16:2 .2:0 .48:0 .62:0 .66:2 .7:0 .82:40 1:40"),
+        // The sign beside a message becomes a clock, a sent arrow, then delivered ticks.
+        scene("delivery", 6f, .8f, mapOf("delivered" to 1f),
+            "waiting" to "0:1 .3:1 .33:0 .97:0 1:1",
+            "sent" to "0:0 .3:0 .33:1 .63:1 .66:0 1:0",
+            "delivered" to "0:0 .63:0 .66:1 .97:1 1:0",
+            "rings" to "0:0 .33:0 .36:1 .62:1 .66:0 1:0"),
+        // Tap Send again; the red sign becomes a clock, then delivered ticks.
+        scene("failed", 6f, .28f, mapOf("finger.dx" to 0f, "finger.dy" to 2f),
+            "failed" to "0:1 .3:1 .33:0 .97:0 1:1",
+            "waiting" to "0:0 .3:0 .33:1 .7:1 .73:0 1:0",
+            "delivered" to "0:0 .7:0 .73:1 .97:1 1:0",
+            "spin" to "0:0 .3:0 .7:720 .97:720 1:0",
+            "finger.dx" to "0:30 .24:0 .32:0 .48:30 1:30",
+            "finger.dy" to "0:40 .24:0 .28:2 .32:0 .48:40 1:40"),
+        // The radio pulses; a message slides in; tap its speaker to hear it.
+        scene("arrive", 6f, .48f, mapOf("finger.dx" to 0f, "finger.dy" to 2f),
+            "pulse" to "0:0 .22:1 .97:1 1:0",
+            "message.dx" to "0:-40 .12:-40 .28:0 .97:0 1:-40",
+            "message.alpha" to "0:0 .12:0 .28:1 .97:1 1:0",
+            "sound" to "0:0 .49:0 .52:1 .9:1 .94:0 1:0",
+            "finger.dx" to "0:30 .3:30 .44:0 .52:0 .64:30 1:30",
+            "finger.dy" to "0:40 .3:40 .44:0 .48:2 .52:0 .64:40 1:40"),
+    )
+
+    /** Scene lists in Help-page order; later tasks add the remaining groups. */
+    val groups: List<List<String>> get() = listOf(SETUP, TALKING)
+
+    val all: Map<String, HowToScene> = (setup + talking).associateBy { it.name }
 
     fun get(name: String): HowToScene = requireNotNull(all[name]) { "No how-to scene $name" }
 }

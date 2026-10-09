@@ -44,6 +44,7 @@
     <string name="you">Vous</string>
 
     <string name="talk">Parler</string>
+    <string name="mic_hint">Maintenez pour parler</string>
     <string name="keyboard">Clavier</string>
     <string name="slide_to_cancel">◀ Annuler</string>
     <string name="recording_locked">Enregistrement verrouillé</string>

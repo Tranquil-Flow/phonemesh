@@ -22,9 +22,18 @@ class ThemeTest {
             .forEach { assertEquals(255, Color.alpha(it)) }
     }
 
-    @Test fun everyIconLoadsAt24dp() {
-        assertEquals(31, Icons.all.size)
-        Icons.all.forEach { assertEquals(Ui.dp(context, 24), checkNotNull(context.getDrawable(it)).intrinsicWidth) }
+    @Test fun everyIconLoadsAtItsDeclaredSize() {
+        assertEquals(32, Icons.all.size)
+        assertEquals(1, Icons.all.count { context.resources.getResourceEntryName(it) == "ic_hint_tail" })
+        Icons.all.forEach {
+            val drawable = checkNotNull(context.getDrawable(it))
+            if (context.resources.getResourceEntryName(it) == "ic_hint_tail") {
+                assertEquals(Ui.dp(context, 16), drawable.intrinsicWidth)
+                assertEquals(Ui.dp(context, 8), drawable.intrinsicHeight)
+            } else {
+                assertEquals(Ui.dp(context, 24), drawable.intrinsicWidth)
+            }
+        }
     }
 
     /** Pins the declared helper type that later screens consume. */

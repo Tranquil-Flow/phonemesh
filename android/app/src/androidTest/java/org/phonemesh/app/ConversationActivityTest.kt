@@ -7,6 +7,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.ImageView
+import android.widget.LinearLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -72,6 +74,83 @@ class ConversationActivityTest {
     }
 
     private fun description(a: Activity, tag: String) = Views.tagged(a, tag)?.contentDescription?.toString()
+
+    @Test fun theMicrophoneSaysHoldToTalkUntilTheFirstMessage() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "mic_hint"))
+        assertNotNull(Views.withText(a, "Maintenez pour parler"))
+        Views.tap(a, "mic")
+        assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+        assertTrue(core.recordLocked)
+        assertNull(Views.tagged(a, "mic_hint"))
+        assertNull(Views.withText(a, "Maintenez pour parler"))
+        Views.tap(a, "mic")
+        assertNotNull(Views.tagged(a, "draft_text"))
+        assertNull(Views.tagged(a, "mic_hint"))
+        Views.tap(a, "draft_clear")
+        assertNotNull(Views.tagged(a, "mic_hint"))
+        touch(a, MotionEvent.ACTION_DOWN)
+        assertNull(Views.tagged(a, "mic_hint"))
+        touch(a, MotionEvent.ACTION_MOVE, dxDp = -120f, atMs = 400)
+        touch(a, MotionEvent.ACTION_UP, dxDp = -120f, atMs = 500)
+        assertNotNull(Views.tagged(a, "mic_hint"))
+        assertFalse(core.settings.firstMessageSent)
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertTrue(TestCore.speech.spoken.isEmpty())
+        TestCore.onMain {
+            core.setDraft(group, "Bonjour")
+            assertTrue(core.send(group))
+        }
+        inst.waitForIdleSync()
+        assertTrue(core.settings.firstMessageSent)
+        assertNull(Views.tagged(a, "mic_hint"))
+        Views.finish(a)
+        val reopened = open(group)
+        assertNull(Views.tagged(reopened, "mic_hint"))
+        Views.finish(reopened)
+        TestCore.restart()
+        TestCore.onMain { TestCore.radio.connected(true) }
+        val restarted = open(group)
+        assertTrue(core.settings.firstMessageSent)
+        assertNull(Views.tagged(restarted, "mic_hint"))
+        assertNull(Views.withText(restarted, "Maintenez pour parler"))
+    }
+
+    @Test fun theEnglishHintPointsAtTheMicrophoneInDarkMode() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        TestCore.onMain { core.settings.theme = ThemeMode.DARK }
+        val a = open(TestCore.onMain { core.groupChatId() })
+        val hint = Views.tagged(a, "mic_hint") as? LinearLayout
+        assertNotNull(hint)
+        val words = checkNotNull(Views.withText(a, "Hold to talk"))
+        val mic = checkNotNull(Views.tagged(a, "mic"))
+        TestCore.onMain {
+            val shown = checkNotNull(hint)
+            assertEquals(LinearLayout.VERTICAL, shown.orientation)
+            assertEquals(shown, words.parent)
+            assertEquals(Palette(a).onAccent, words.currentTextColor)
+            assertEquals(2, shown.childCount)
+            val tail = shown.getChildAt(1) as ImageView
+            assertEquals(Ui.dp(a, 16), tail.width)
+            assertEquals(Ui.dp(a, 8), tail.height)
+            assertEquals(Palette(a).accent, tail.imageTintList!!.defaultColor)
+            assertFalse(tail.isClickable)
+            assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, tail.importantForAccessibility)
+            val hintAt = IntArray(2)
+            val micAt = IntArray(2)
+            shown.getLocationOnScreen(hintAt)
+            mic.getLocationOnScreen(micAt)
+            assertTrue(hintAt[1] + shown.height <= micAt[1])
+            assertEquals(hintAt[0] + shown.width / 2, micAt[0] + mic.width / 2)
+        }
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertEquals(0, TestCore.speech.recordings)
+        assertTrue(TestCore.speech.spoken.isEmpty())
+        assertTrue(TestCore.speech.clips.isEmpty())
+    }
 
     @Test fun holdAndReleaseMakesADraftThatNeverPlaysOrSendsByItself() {
         TestCore.install()

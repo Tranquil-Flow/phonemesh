@@ -57,6 +57,7 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var ring: RecordRing
     private lateinit var cancelHint: TextView
     private lateinit var lockHint: ImageView
+    private lateinit var micHint: View
     private lateinit var keyboard: ImageButton
     private lateinit var draftBar: LinearLayout
     private lateinit var playDraft: ImageButton
@@ -180,6 +181,20 @@ class ConversationActivity : ScreenActivity() {
             tag = "lock_hint"
             visibility = View.INVISIBLE
         }
+        micHint = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            tag = "mic_hint"
+            visibility = View.GONE
+            addView(Ui.text(this@ConversationActivity, getString(R.string.mic_hint), palette.onAccent, bold = true).apply {
+                background = Ui.outline(this@ConversationActivity, palette.accent, palette.outline)
+                setPadding(pad(), pad() / 2, pad(), pad() / 2)
+            })
+            addView(Ui.icon(this@ConversationActivity, R.drawable.ic_hint_tail, palette.accent, 16).apply {
+                layoutParams = LinearLayout.LayoutParams(Ui.dp(this@ConversationActivity, 16), Ui.dp(this@ConversationActivity, 8))
+            })
+        }
+        column.addView(micHint)
         column.addView(lockHint)
         val micSize = Ui.dp(this, MIC_DP)
         mic = FrameLayout(this).apply {
@@ -380,6 +395,7 @@ class ConversationActivity : ScreenActivity() {
     }
 
     private fun renderMic(recordingHere: Boolean) {
+        micHint.visibility = if (!core.settings.firstMessageSent && !recordingHere) View.VISIBLE else View.GONE
         val locked = recordingHere && core.recordLocked
         mic.alpha = if (core.canTalk() || recordingHere) 1f else 0.35f
         ring.startedAt = if (recordingHere) core.recordingStartedAt else 0L

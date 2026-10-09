@@ -47,6 +47,7 @@
     <string name="you">You</string>
 
     <string name="talk">Talk</string>
+    <string name="mic_hint">Hold to talk</string>
     <string name="keyboard">Keyboard</string>
     <string name="slide_to_cancel">◀ Cancel</string>
     <string name="recording_locked">Recording locked</string>

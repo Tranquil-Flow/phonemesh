@@ -81,9 +81,21 @@
 
     <string name="settings_language">Langue</string>
     <string name="settings_packs">Langues (packs)</string>
-    <string name="settings_model">Modèle vocal</string>
-    <string name="model_tiny">Tiny · léger</string>
-    <string name="model_base">Base · plus gros</string>
+    <string name="settings_appearance">Apparence</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Clair</string>
+    <string name="theme_dark">Sombre</string>
+    <string name="settings_speech">Comprendre la voix</string>
+    <string name="engine_fast">Rapide</string>
+    <string name="engine_fast_detail">Idéal pour les vieux téléphones.</string>
+    <string name="engine_accurate">Précis</string>
+    <string name="engine_accurate_detail">Moins d\'erreurs. Plus lent, plus gros.</string>
+    <string name="engine_speed">Vitesse</string>
+    <string name="engine_accuracy">Précision</string>
+    <string name="engine_level">%1$s : %2$d sur 3</string>
+    <string name="engine_size">%1$d Mo</string>
+    <string name="engine_in_use">Utilisé</string>
+    <string name="engine_use">Utiliser</string>
     <string name="share_app">Partager l\'application</string>
     <string name="licences">Licences</string>
     <string name="close">Fermer</string>

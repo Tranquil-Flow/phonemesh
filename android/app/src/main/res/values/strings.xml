@@ -84,9 +84,21 @@
 
     <string name="settings_language">Language</string>
     <string name="settings_packs">Languages (packs)</string>
-    <string name="settings_model">Speech model</string>
-    <string name="model_tiny">Tiny · light</string>
-    <string name="model_base">Base · larger</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_speech">Understanding speech</string>
+    <string name="engine_fast">Fast</string>
+    <string name="engine_fast_detail">Best for older phones.</string>
+    <string name="engine_accurate">Accurate</string>
+    <string name="engine_accurate_detail">Fewer mistakes. Slower and bigger download.</string>
+    <string name="engine_speed">Speed</string>
+    <string name="engine_accuracy">Accuracy</string>
+    <string name="engine_level">%1$s: %2$d of 3</string>
+    <string name="engine_size">%1$d MB</string>
+    <string name="engine_in_use">In use</string>
+    <string name="engine_use">Use</string>
     <string name="share_app">Share the app</string>
     <string name="licences">Licences</string>
     <string name="close">Close</string>

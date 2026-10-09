@@ -22,11 +22,12 @@ import kotlin.math.sqrt
  */
 class HowToKit(val words: Words) {
     /** Words drawn inside pictures, in the app's language. */
-    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String) {
+    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String, val allow: String) {
         companion object {
             fun of(context: Context) = Words(
                 StoryTimeline.WORD, context.getString(R.string.status_waiting), context.getString(R.string.status_sent),
                 context.getString(R.string.status_delivered), context.getString(R.string.resend), context.getString(R.string.howto_on),
+                context.getString(R.string.howto_allow_button),
             )
         }
     }
@@ -112,6 +113,17 @@ class HowToKit(val words: Words) {
 
     /** 0.35 → 1 → 0.35 over [periodMs] (the mockup's btp pulse). */
     fun pulse(periodMs: Long): Float = .35f + .65f * (.5f - .5f * cos(2 * PI * cycle(periodMs)).toFloat())
+
+    /** The opaque colour [t] of the way from [a] to [b], clamped to 0..1. */
+    fun mix(a: Int, b: Int, t: Float): Int {
+        val u = t.coerceIn(0f, 1f)
+        fun channel(shift: Int): Int {
+            val from = (a shr shift) and 0xFF
+            val to = (b shr shift) and 0xFF
+            return (from + (to - from) * u).roundToInt()
+        }
+        return (0xFF shl 24) or (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
+    }
 
     // ---- Shapes
 

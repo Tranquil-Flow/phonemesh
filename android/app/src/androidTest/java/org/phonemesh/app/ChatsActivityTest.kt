@@ -356,6 +356,139 @@ class ChatsActivityTest {
         TestCore.onMain { core.cancelRecording() }
     }
 
+    @Test fun aRefusedFileShowsItsPictureAndNoSpeakerBeforeAnyVoice() {
+        TestCore.install(voices = emptyList())
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.pack_unsafe)) }
+        val box = checkNotNull(Views.tagged(chats, "note_box"))
+        assertNotNull(Views.tagged(chats, "howto:refused"))
+        assertEquals("Fichier refusé pour votre sécurité.", Views.textOf(Views.tagged(chats, ScreenActivity.NOTE_TAG)!!))
+        assertEquals("Ce fichier a été refusé.", TestCore.onMain {
+            Views.descendants(box).filterIsInstance<TextView>().first { it.tag == "howto_sentence" }.text.toString()
+        })
+        assertTrue("nothing to read it with", TestCore.onMain {
+            Views.descendants(box).none { it.tag == "howto_say" && it.isShown }
+        })
+        Views.tap(chats, "note_close")
+        assertNull(Views.tagged(chats, "note_box"))
+        assertTrue("dismissal releases the picture", TestCore.onMain { Views.descendants(box).none { it is HowToView } })
+    }
+
+    @Test fun withAVoiceTheNotePictureCanBeHeard() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.no_space)) }
+        val box = checkNotNull(Views.tagged(chats, "note_box"))
+        val say = TestCore.onMain { Views.descendants(box).first { it.tag == "howto_say" } }
+        TestCore.onMain { say.performClick() }
+        assertEquals(listOf("Supprimez quelque chose pour faire de la place."), TestCore.speech.spoken)
+        assertTrue("fake speech only", TestCore.speech.clips.isEmpty())
+    }
+
+    @Test fun aNoteWithoutAPictureStaysPlain() {
+        TestCore.install()
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.share_choose)) }
+        assertNotNull(Views.tagged(chats, ScreenActivity.NOTE_TAG))
+        assertNull(Views.tagged(chats, "note_close"))
+        val box = checkNotNull(Views.tagged(chats, "note_box"))
+        assertTrue(TestCore.onMain { Views.descendants(box).none { it is HowToView } })
+        Views.waitUntil(6_500) { Views.descendants(chats.window.decorView).none { it.tag == "note_box" && it.isShown } }
+    }
+
+    @Test fun aPictureNoteLastsTwelveSecondsWithoutRestartingOnRender() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.pack_damaged)) }
+        val picture = checkNotNull(Views.tagged(chats, "howto:damaged"))
+        Thread.sleep(5_300)
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
+        assertSame("the first loop must not dismiss the note", picture, Views.tagged(chats, "howto:damaged"))
+        Views.waitUntil(8_000) { Views.descendants(chats.window.decorView).none { it.tag == "note_box" && it.isShown } }
+        assertNull(Views.tagged(chats, "howto:damaged"))
+    }
+
+    @Test fun replacingAndClosingNotesReleasesPicturesAndCancelsOldTimeouts() {
+        TestCore.install(voices = emptyList())
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.share_choose)) }
+        Thread.sleep(3_000)
+        TestCore.onMain { core.note(UiText(R.string.voice_missing)) }
+        val picture = Views.tagged(chats, "howto:download")!!
+        val box = Views.tagged(chats, "note_box")!!
+        TestCore.onMain { Views.descendants(box).first { it.tag == "howto_say" }.performClick() }
+        assertEquals(listOf(checkNotNull(LanguageRegistry.byTag("fr")).howToClips.getValue("download")), TestCore.speech.clips)
+        Thread.sleep(2_500)
+        assertSame("the plain note's old deadline cannot hide its replacement", picture, Views.tagged(chats, "howto:download"))
+        TestCore.onMain { core.note(UiText(R.string.pack_older)) }
+        assertFalse(TestCore.onMain { picture.isAttachedToWindow })
+        assertNotNull(Views.tagged(chats, "howto:older"))
+        Views.tap(chats, "note_close")
+        TestCore.onMain { core.note(UiText(R.string.share_choose)) }
+        assertNull(Views.tagged(chats, "note_close"))
+        assertTrue(TestCore.onMain { Views.descendants(box).none { it is HowToView } })
+    }
+
+    @Test fun aCoveredNoteKeepsItsOriginalDeadline() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        TestCore.onMain { core.note(UiText(R.string.pack_damaged)) }
+        val picture = checkNotNull(Views.tagged(chats, "howto:damaged"))
+        val shownAt = android.os.SystemClock.elapsedRealtime()
+        val top = Views.start(RadioActivity::class.java)
+        try {
+            Thread.sleep(1_000)
+        } finally {
+            Views.finish(top)
+        }
+        assertSame("covering must preserve the picture before its deadline", picture, Views.tagged(chats, "howto:damaged"))
+        val remaining = 12_500L - (android.os.SystemClock.elapsedRealtime() - shownAt)
+        if (remaining > 0L) Thread.sleep(remaining)
+        assertNull("returning must not cancel or restart the twelve-second deadline", Views.tagged(chats, "note_box"))
+        assertFalse(TestCore.onMain { picture.isAttachedToWindow })
+    }
+
+    @Test fun problemStillsKeepTheWaxPrintAndWaitingCheck() {
+        TestCore.install()
+        fun bitmap(name: String) = TestCore.onMain {
+            val view = HowToView(inst.targetContext, org.phonemesh.core.HowToScenes.get(name))
+            view.measure(android.view.View.MeasureSpec.makeMeasureSpec(440, android.view.View.MeasureSpec.EXACTLY),
+                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED))
+            view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+            view.freezeAt(view.scene.still)
+            android.graphics.Bitmap.createBitmap(440, 220, android.graphics.Bitmap.Config.ARGB_8888).also {
+                view.draw(android.graphics.Canvas(it))
+            }
+        }
+        // The opt-in negative control uses the real pre-fix export, never a made-up image.
+        val notheard = if (InstrumentationRegistry.getArguments().getString("howtoPatternNegative") == "true") {
+            val file = java.io.File(inst.targetContext.getExternalFilesDir(null), "howto-pattern-before.png")
+            checkNotNull(android.graphics.BitmapFactory.decodeFile(file.absolutePath))
+        } else bitmap("notheard")
+        val wait = bitmap("wait")
+        try {
+            // The motif is anchored at (0,0); the already-qualified band is the same pattern,
+            // 18 drawing units (three full tiles) below this interior patch of the dress.
+            for (y in 174 until 178) for (x in 96 until 120) {
+                val expected = notheard.getPixel(x, y + 36)
+                val actual = notheard.getPixel(x, y)
+                assertEquals("wax-print alpha at $x,$y", expected ushr 24, actual ushr 24)
+                // Path-clipped dress and rect-clipped band round edge coverage by one channel level.
+                // Keep all 96 pixels and every channel; the recorded unpatterned negative arm fails.
+                for (shift in intArrayOf(16, 8, 0))
+                    assertTrue("the dress keeps the anchored wax-print at $x,$y channel $shift",
+                        kotlin.math.abs(((expected shr shift) and 255) - ((actual shr shift) and 255)) <= 1)
+            }
+            assertEquals("the finished button has a tick beside the tapping finger", HowToKit.C.INK, wait.getPixel(204, 158))
+        } finally {
+            notheard.recycle()
+            wait.recycle()
+        }
+    }
+
     @Test fun theEmptyStateShowsUntilAMessageArrives() {
         TestCore.install()
         val chats = start()

@@ -152,5 +152,20 @@
     <string name="howto_delivery">Regardez le petit signe.</string>
     <string name="howto_failed">Pas parti ? Touchez « Renvoyer ».</string>
     <string name="howto_arrive">Un message radio est arrivé. Touchez pour écouter.</string>
+    <string name="howto_bt">Allumez le Bluetooth.</string>
+    <string name="howto_short">Maintenez le bouton pendant que vous parlez.</string>
+    <string name="howto_notheard">Tenez le téléphone près et reparlez.</string>
+    <string name="howto_mic">Vous pouvez encore écrire.</string>
+    <string name="howto_allow">Touchez « Autoriser » pour trouver la radio.</string>
+    <string name="howto_dlfail">Pas de réseau. Réessayez.</string>
+    <string name="howto_damaged">Téléchargez-le de nouveau.</string>
+    <string name="howto_refused">Ce fichier a été refusé.</string>
+    <string name="howto_older">Vous avez déjà une version plus récente.</string>
+    <string name="howto_space">Supprimez quelque chose pour faire de la place.</string>
+    <string name="howto_wait">Attendez la fin de cette tâche.</string>
+    <string name="howto_toolong">Le message s\'arrête à la limite de temps.</string>
+    <string name="howto_playfail">Le texte reste là pour être lu.</string>
+    <string name="howto_allow_button">Autoriser</string>
+    <string name="note_close">Fermer</string>
     <string name="howto_on">ON</string>
 </resources>

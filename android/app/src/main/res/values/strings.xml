@@ -155,5 +155,20 @@
     <string name="howto_delivery">Watch the small sign.</string>
     <string name="howto_failed">Not sent? Tap “Send again”.</string>
     <string name="howto_arrive">A radio message came. Tap to hear it.</string>
+    <string name="howto_bt">Turn on Bluetooth.</string>
+    <string name="howto_short">Hold the button while you talk.</string>
+    <string name="howto_notheard">Hold the phone close and speak again.</string>
+    <string name="howto_mic">You can still type.</string>
+    <string name="howto_allow">Tap “Allow” to find the radio.</string>
+    <string name="howto_dlfail">No signal. Try again.</string>
+    <string name="howto_damaged">Download it again.</string>
+    <string name="howto_refused">This file was refused.</string>
+    <string name="howto_older">You already have a newer one.</string>
+    <string name="howto_space">Remove something to make room.</string>
+    <string name="howto_wait">Wait until this is done.</string>
+    <string name="howto_toolong">The message stops at the time limit.</string>
+    <string name="howto_playfail">The text is still there to read.</string>
+    <string name="howto_allow_button">Allow</string>
+    <string name="note_close">Close</string>
     <string name="howto_on">ON</string>
 </resources>

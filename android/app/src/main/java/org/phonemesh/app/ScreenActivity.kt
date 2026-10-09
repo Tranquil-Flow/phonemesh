@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -25,8 +26,19 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     private var appliedTheme: ThemeMode? = null
     /** The AppCore this screen subscribed to; onStop releases that same one. */
     private var observed: AppCore? = null
+    private var noteBox: LinearLayout? = null
     private var noteView: TextView? = null
-    private val hideNote = Runnable { noteView?.visibility = View.GONE }
+    private var notePicture: FrameLayout? = null
+    private var noteClose: View? = null
+    private var noteUntil = 0L
+    private val hideNote = object : Runnable {
+        override fun run() {
+            noteBox?.removeCallbacks(this)
+            noteBox?.visibility = View.GONE
+            notePicture?.removeAllViews()
+            noteUntil = 0L
+        }
+    }
 
     override fun attachBaseContext(newBase: Context) {
         val settings = AppCore.get(newBase).settings
@@ -68,12 +80,34 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
         content.requestApplyInsets()
     }
 
-    /** A line for AppCore's short notes; hidden until there is one. */
-    protected fun noteLine(): TextView = Ui.text(this, "", palette.text, bold = true).apply {
-        tag = NOTE_TAG
-        visibility = View.GONE
-        setPadding(pad(), pad() / 2, pad(), pad() / 2)
-    }.also { noteView = it }
+    /** A note keeps its own sentence, with a compact matching picture underneath when available. */
+    protected fun noteLine(): View {
+        val text = Ui.text(this, "", palette.text, bold = true).apply { tag = NOTE_TAG }
+        val close = Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.note_close)).apply {
+            tag = "note_close"
+            setOnClickListener { hideNote.run() }
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(text, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(close)
+        }
+        val picture = FrameLayout(this)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "note_box"
+            visibility = View.GONE
+            setPadding(pad(), pad() / 2, pad(), pad() / 2)
+            addView(row)
+            addView(picture)
+        }.also {
+            noteBox = it
+            noteView = text
+            notePicture = picture
+            noteClose = close
+        }
+    }
 
     /** A panel for [scenes] in turn, read aloud with the recorded clip or the app's voice. */
     protected fun howTo(vararg scenes: String, compact: Boolean = false, sentence: ((HowToScene) -> String)? = null): HowToPanel =
@@ -94,6 +128,12 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
         current.activityStarted()
         current.observe(this)
         onScreenStart()
+        // A covering screen cancels the callback, not the note's original deadline.
+        noteBox?.takeIf { it.visibility == View.VISIBLE }?.let { box ->
+            val remaining = noteUntil - android.os.SystemClock.elapsedRealtime()
+            box.removeCallbacks(hideNote)
+            if (remaining <= 0L) hideNote.run() else box.postDelayed(hideNote, remaining)
+        }
         render()
     }
 
@@ -105,7 +145,7 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
             subscribed.unobserve(this)
             subscribed.activityStopped()
         }
-        noteView?.removeCallbacks(hideNote)
+        noteBox?.removeCallbacks(hideNote)
         super.onStop()
     }
 
@@ -114,11 +154,18 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     }
 
     private fun showNote() {
-        val view = noteView ?: return
-        view.text = core.lastNote?.let { core.text(it) } ?: return
-        view.visibility = View.VISIBLE
-        view.removeCallbacks(hideNote)
-        view.postDelayed(hideNote, NOTE_MS)
+        val box = noteBox ?: return
+        val note = core.lastNote ?: return
+        noteView?.text = core.text(note)
+        val scene = HowToNotes.sceneFor(note)
+        notePicture?.removeAllViews()
+        if (scene != null) notePicture?.addView(howTo(scene, compact = true))
+        noteClose?.visibility = if (scene != null) View.VISIBLE else View.GONE
+        box.visibility = View.VISIBLE
+        box.removeCallbacks(hideNote)
+        val duration = if (scene != null) NOTE_PICTURE_MS else NOTE_MS
+        noteUntil = android.os.SystemClock.elapsedRealtime() + duration
+        box.postDelayed(hideNote, duration)
     }
 
     protected open fun onScreenStart() {}
@@ -130,5 +177,6 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
     companion object {
         const val NOTE_TAG = "note"
         const val NOTE_MS = 5_000L
+        const val NOTE_PICTURE_MS = 12_000L
     }
 }

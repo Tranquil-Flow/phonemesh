@@ -113,10 +113,107 @@ object HowToScenes {
             "finger.dy" to "0:40 .3:40 .44:0 .48:2 .52:0 .64:40 1:40"),
     )
 
-    /** Scene lists in Help-page order; later tasks add the remaining groups. */
-    val groups: List<List<String>> get() = listOf(SETUP, TALKING)
+    val PROBLEMS = listOf("bt", "short", "notheard", "mic")
+    val RARE = listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail")
 
-    val all: Map<String, HowToScene> = (setup + talking).associateBy { it.name }
+    private val problems = listOf(
+        // Tap the switch; it turns blue and the Bluetooth sign lights.
+        scene("bt", 5f, .38f, mapOf("switch" to 1f, "finger.dx" to 0f),
+            "switch" to "0:0 .28:0 .36:1 .97:1 1:0",
+            "finger.dx" to "0:30 .24:0 .4:0 .5:30 1:30",
+            "finger.dy" to "0:40 .24:0 .28:2 .32:0 .4:0 .5:40 1:40"),
+        // A quick tap gets a cross; holding fills the ring and gets a check.
+        scene("short", 5f, .7f, mapOf("bad" to 1f, "finger.dx" to 0f),
+            "tap.dx" to "0:26 .16:0 .22:0 .36:26 1:26",
+            "tap.dy" to "0:40 .16:0 .22:0 .36:40 1:40",
+            "bad" to "0:0 .26:0 .34:1 .96:1 1:0",
+            "hold" to "0:0 .15:0 .75:1 .76:0 1:0",
+            "finger.dx" to "0:30 .15:0 .75:0 .88:30 1:30",
+            "finger.dy" to "0:44 .15:0 .75:0 .88:44 1:44",
+            "ok" to OK78),
+        // Bring the phone close to her mouth; the faint bars become big ones.
+        scene("notheard", 5f, .7f, mapOf("phone.dx" to 0f, "bars" to 1f),
+            "phone.dx" to "0:60 .1:60 .42:0 .95:0 1:60",
+            "phone.dy" to "0:8 .1:8 .42:0 .95:0 1:8",
+            "far" to "0:1 .08:1 .14:0 .95:0 1:1",
+            "bars" to "0:0 .44:0 .5:1 .9:1 .94:0 1:0",
+            "ok" to OK78),
+        // A crossed-out microphone points to the keyboard, which the finger taps.
+        scene("mic", 5f, .55f, mapOf("keyboard" to 1f, "finger.dx" to 0f),
+            "keyboard" to "0:0 .51:0 .54:1 .97:1 1:0",
+            "finger.dx" to "0:30 .3:30 .48:0 .56:0 .72:30 1:30",
+            "finger.dy" to "0:40 .3:40 .48:0 .52:2 .56:0 .72:40 1:40"),
+    )
+
+    private val rare = listOf(
+        // The phone's own question, with Allow lit as the finger taps it.
+        scene("allow", 5f, .4f, mapOf("finger.dy" to 2f, "allow" to 1f),
+            "allow" to "0:0 .39:0 .4:1 .48:1 .52:0 1:0",
+            "ok" to OK60,
+            "finger.dx" to "0:30 .2:30 .36:0 .44:0 .58:30 1:30",
+            "finger.dy" to "0:40 .2:40 .36:0 .4:2 .44:0 .58:40 1:40"),
+        // A failed signal, tap the round arrow, then download dots return.
+        scene("dlfail", 6f, .42f, mapOf("finger.dy" to 2f),
+            "fail" to "0:1 .46:1 .5:0 .97:0 1:1",
+            "dots" to "0:0 .5:0 .54:1 .88:1 .92:0 1:0",
+            "ok" to OK88,
+            "finger.dx" to "0:30 .24:30 .38:0 .46:0 .6:30 1:30",
+            "finger.dy" to "0:40 .24:40 .38:0 .42:2 .46:0 .6:40 1:40"),
+        // The broken box shakes away; a new one drops into the phone.
+        scene("damaged", 6f, .5f, mapOf("new.alpha" to 1f, "shake.alpha" to 0f),
+            "shake.dx" to "0:0 .05:-3 .1:3 .15:-3 .2:3 .25:-3 .3:0 1:0",
+            "shake.alpha" to "0:1 .3:1 .36:0 .97:0 1:1",
+            "new.dy" to "0:-30 .4:-30 .6:22 .97:22 1:-30",
+            "new.alpha" to "0:0 .4:0 .46:1 .6:1 .64:0 1:0",
+            "fill" to "0:0 .6:0 .88:1 .97:1 1:0",
+            "ok" to OK88),
+        // A grey box bounces off the receiver's shield.
+        scene("refused", 5f, .45f, mapOf("bad" to 1f),
+            "box.dx" to "0:0 .35:82 .55:20 .97:20 1:0",
+            "bad" to "0:0 .36:0 .42:1 .96:1 1:0"),
+        // Box 1 bounces off because box 2 is already inside.
+        scene("older", 5f, .7f, mapOf("bad" to 1f, "ok" to 1f),
+            "box.dx" to "0:0 .35:82 .55:20 .97:20 1:0",
+            "bad" to "0:0 .36:0 .42:1 .96:1 1:0",
+            "ok" to OK60),
+        // Send a photo to the bin, then the voice fits.
+        scene("space", 6f, .36f, mapOf("finger.dy" to 2f),
+            "trash.dx" to "0:0 .34:0 .52:90 .97:90 1:0",
+            "trash.dy" to "0:0 .34:0 .52:26 .97:26 1:0",
+            "trash.alpha" to "0:1 .34:1 .52:.6 .56:0 .97:0 1:1",
+            "voice.dx" to "0:0 .14:-40 .24:-30 .62:-30 .78:-92 .97:-92 1:0",
+            "voice.dy" to "0:0 .62:0 .78:10 .97:10 1:0",
+            "finger.dx" to "0:30 .2:30 .32:0 .4:0 .52:30 1:30",
+            "finger.dy" to "0:40 .2:40 .32:0 .36:2 .4:0 .52:40 1:40",
+            "ok" to OK88),
+        // The bar fills, the hourglass goes, the button wakes up and is tapped.
+        scene("wait", 6f, .88f, mapOf("finger.dy" to 2f, "button" to 1f, "check" to 1f),
+            "bar" to "0:0 .7:1 .97:1 1:0",
+            "button" to "0:0 .7:0 .74:1 .97:1 1:0",
+            "sand" to "0:1 .7:1 .72:0 .97:0 1:1",
+            "check" to "0:0 .6:0 .63:1 .97:1 1:0",
+            "finger.dx" to "0:30 .72:30 .84:0 .97:0 1:30",
+            "finger.dy" to "0:40 .72:40 .84:0 .88:2 .92:0 .97:0 1:40"),
+        // At the red line scissors cut the rest of the voice bars, which fall away.
+        scene("toolong", 6f, .7f, mapOf("snip" to 1f, "red" to 1f),
+            "red" to "0:0 .46:0 .5:1 .97:1 1:0",
+            "sweep" to "0:0 .48:360 .97:360 1:0",
+            "reveal" to "0:0 .6:200 .97:200 1:0",
+            "fall.dx" to "0:0 .62:0 .82:6 .97:6 1:0",
+            "fall.dy" to "0:0 .62:0 .82:40 .97:40 1:0",
+            "fall.rot" to "0:0 .62:0 .82:12 .97:12 1:0",
+            "fall.alpha" to "0:1 .62:1 .82:0 .97:0 1:1",
+            "snip" to "0:0 .46:0 .5:1 .96:1 1:0"),
+        // A failed speaker; the words light up and an arrow points at them.
+        scene("playfail", 5f, .7f, mapOf("arrow" to 1f),
+            "light" to "0:0 .4:0 .5:1 .97:1 1:0",
+            "arrow" to "0:0 .31:0 .36:1 .97:1 1:0"),
+    )
+
+    /** Scene lists in Help-page order. */
+    val groups: List<List<String>> get() = listOf(SETUP, TALKING, PROBLEMS, RARE)
+
+    val all: Map<String, HowToScene> = (setup + talking + problems + rare).associateBy { it.name }
 
     fun get(name: String): HowToScene = requireNotNull(all[name]) { "No how-to scene $name" }
 }

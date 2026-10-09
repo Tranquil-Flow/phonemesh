@@ -73,6 +73,64 @@ class HowToScenesTest {
         key("finger.dy", scene.still, -62f)
     }
 
+    @Test fun theProblemScenesAreThere() {
+        assertEquals(listOf("bt", "short", "notheard", "mic"), HowToScenes.PROBLEMS)
+        assertEquals(listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"), HowToScenes.RARE)
+        assertEquals(listOf(HowToScenes.SETUP, HowToScenes.TALKING, HowToScenes.PROBLEMS, HowToScenes.RARE), HowToScenes.groups)
+    }
+
+    @Test fun problemAndRareActionsMatchTheApprovedKeyframes() {
+        fun key(scene: String, track: String, t: Float, expected: Float) =
+            assertEquals("$scene.$track at $t", expected, HowToScenes.get(scene).value(track, t), 1e-4f)
+        key("bt", "switch", .28f, 0f)
+        key("bt", "switch", .36f, 1f)
+        key("bt", "finger.dy", .28f, 2f)
+        key("short", "bad", .34f, 1f)
+        key("short", "hold", .75f, 1f)
+        key("short", "hold", .76f, 0f)
+        key("notheard", "phone.dx", .1f, 60f)
+        key("notheard", "phone.dx", .42f, 0f)
+        key("notheard", "bars", .5f, 1f)
+        key("mic", "keyboard", .54f, 1f)
+        key("mic", "finger.dy", .52f, 2f)
+        key("allow", "allow", .4f, 1f)
+        key("allow", "finger.dy", .4f, 2f)
+        key("dlfail", "fail", .5f, 0f)
+        key("dlfail", "dots", .54f, 1f)
+        key("damaged", "shake.dx", .05f, -3f)
+        key("damaged", "shake.alpha", .36f, 0f)
+        key("damaged", "new.alpha", .46f, 1f)
+        key("damaged", "new.dy", .6f, 22f)
+        key("damaged", "fill", .88f, 1f)
+        key("refused", "box.dx", .35f, 82f)
+        key("refused", "box.dx", .55f, 20f)
+        key("older", "box.dx", .35f, 82f)
+        key("older", "bad", .42f, 1f)
+        key("older", "ok", .66f, 1f)
+        key("space", "trash.dx", .52f, 90f)
+        key("space", "trash.alpha", .56f, 0f)
+        key("space", "voice.dx", .78f, -92f)
+        key("wait", "bar", .7f, 1f)
+        key("wait", "button", .74f, 1f)
+        key("wait", "sand", .72f, 0f)
+        key("wait", "finger.dy", .88f, 2f)
+        key("toolong", "sweep", .48f, 360f)
+        key("toolong", "red", .5f, 1f)
+        key("toolong", "snip", .5f, 1f)
+        key("toolong", "fall.dy", .82f, 40f)
+        key("toolong", "fall.alpha", .82f, 0f)
+        key("playfail", "light", .5f, 1f)
+        key("playfail", "arrow", .36f, 1f)
+    }
+
+    @Test fun waitingStillShowsTheCompletedButtonAndCheck() {
+        val scene = HowToScenes.get("wait")
+        assertEquals(1f, scene.value("bar", scene.still), 1e-4f)
+        assertEquals(1f, scene.value("button", scene.still), 1e-4f)
+        assertEquals(1f, scene.value("check", scene.still), 1e-4f)
+        assertEquals(0f, scene.value("sand", scene.still), 1e-4f)
+    }
+
     @Test fun everyListedSceneIsRegisteredOnce() {
         val listed = HowToScenes.groups.flatten()
         assertEquals(listed.size, listed.toSet().size)

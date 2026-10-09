@@ -14,6 +14,11 @@ object HowTo {
         "hello" to R.string.howto_hello, "lost" to R.string.howto_lost,
         "cancel" to R.string.howto_cancel, "lock" to R.string.howto_lock, "listen" to R.string.howto_listen,
         "delivery" to R.string.howto_delivery, "failed" to R.string.howto_failed, "arrive" to R.string.howto_arrive,
+        "bt" to R.string.howto_bt, "short" to R.string.howto_short, "notheard" to R.string.howto_notheard,
+        "mic" to R.string.howto_mic, "allow" to R.string.howto_allow, "dlfail" to R.string.howto_dlfail,
+        "damaged" to R.string.howto_damaged, "refused" to R.string.howto_refused, "older" to R.string.howto_older,
+        "space" to R.string.howto_space, "wait" to R.string.howto_wait, "toolong" to R.string.howto_toolong,
+        "playfail" to R.string.howto_playfail,
     )
 
     fun sentence(scene: String): Int = requireNotNull(sentences[scene]) { "No sentence for how-to scene $scene" }

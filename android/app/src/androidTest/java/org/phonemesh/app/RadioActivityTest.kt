@@ -103,6 +103,20 @@ class RadioActivityTest {
         assertEquals("Radio EE01", TestCore.core.settings.radioName)
     }
 
+    @Suppress("DEPRECATION")
+    @Test fun bluetoothOffShowsTheSwitchPicture() {
+        TestCore.install(connected = false)
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.access.bluetooth = false
+        // Exercise the refused enable-result callback without opening or changing system settings.
+        val result = RadioActivity::class.java.getDeclaredMethod("onActivityResult",
+            Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, android.content.Intent::class.java).apply { isAccessible = true }
+        TestCore.onMain { result.invoke(activity!!, 2, android.app.Activity.RESULT_CANCELED, null) }
+        assertNotNull(Views.tagged(activity!!, "howto:bt"))
+        assertEquals("Allumez le Bluetooth.", Views.textOf(Views.tagged(activity!!, ScreenActivity.NOTE_TAG)!!))
+        assertEquals("no real scan or settings change", 1, TestCore.radio.scans)
+    }
+
     @Test fun aScanThatFailsShowsSearchAgainWithoutASpinner() {
         TestCore.install(connected = false)
         activity = Views.start(RadioActivity::class.java)
@@ -111,7 +125,8 @@ class RadioActivityTest {
         inst.waitForIdleSync()
         assertNull(Views.tagged(activity!!, "searching"))
         val again = checkNotNull(Views.tagged(activity!!, "radio_search_again"))
-        assertEquals("Chercher", again.contentDescription)
+        // The canonical setup_search label is already "Trouver la radio" at HEAD.
+        assertEquals("Trouver la radio", again.contentDescription)
         assertTrue(TestCore.onMain { again.height } >= Ui.dp(inst.targetContext, 48))
         Views.tap(activity!!, "radio_search_again")
         assertEquals(2, TestCore.radio.scans)

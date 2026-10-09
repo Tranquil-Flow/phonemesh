@@ -19,6 +19,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.core.DeliveryStatus
 
 /** Fake speech and radio: gestures are synthetic touch events; nothing records, plays or transmits. */
 @RunWith(AndroidJUnit4::class)
@@ -352,6 +353,187 @@ class ConversationActivityTest {
         Views.finish(a)
         Views.waitUntil { AppCore.get(context).playingId == null }
         assertNull(core.playingId)
+    }
+
+    @Test fun theFirstRecordingTeachesCancelThenTheDraftTeachesListen() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        Views.tap(a, "mic")
+        assertNotNull(Views.tagged(a, "tip:cancel"))
+        assertEquals("Changé d'avis ? Glissez à gauche.", Views.textOf(Views.tagged(a, "howto_sentence")!!))
+        Views.tap(a, "mic")
+        assertNull("the recording ended, so its tip did", Views.tagged(a, "tip:cancel"))
+        assertNotNull(Views.tagged(a, "tip:listen"))
+        Views.tap(a, "tip_close")
+        assertNull(Views.tagged(a, "tip:listen"))
+        assertEquals(setOf("cancel", "listen"), core.settings.tipsShown)
+        Views.tap(a, "draft_clear")
+        Views.tap(a, "mic")
+        assertNotNull("the second recording teaches lock", Views.tagged(a, "tip:lock"))
+    }
+
+    @Test fun aFailedMessageTeachesSendAgainOnceAndResendingClosesIt() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true }
+        val group = TestCore.onMain { core.groupChatId() }
+        val failed = TestCore.onMain {
+            core.history.addOutgoing(group, "Bonjour", "fr", System.currentTimeMillis()).also {
+                core.history.setStatus(it.id, DeliveryStatus.FAILED)
+            }
+        }
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "tip:failed"))
+        Views.tap(a, "resend:${failed.id}")
+        assertNull(Views.tagged(a, "tip:failed"))
+        assertTrue("failed" in core.settings.tipsShown)
+        Views.finish(a)
+        val again = open(group)
+        assertNull(Views.tagged(again, "tip:failed"))
+    }
+
+    @Test fun noChatTipWhileTheHoldToTalkHintShows() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain {
+            core.history.addIncoming(group, "!1234abcd", "Salut", "fr", System.currentTimeMillis(), countUnread = false)
+        }
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "mic_hint"))
+        assertNull(Views.tagged(a, "tip:arrive"))
+        assertTrue(core.settings.tipsShown.isEmpty())
+    }
+
+    @Test fun slidingUpClosesTheLockTipWithoutEndingTheRecording() {
+        TestCore.install()
+        TestCore.onMain { core.settings.tipsShown = setOf("cancel") }
+        val a = open(TestCore.onMain { core.groupChatId() })
+        touch(a, MotionEvent.ACTION_DOWN)
+        assertNotNull(Views.tagged(a, "tip:lock"))
+        touch(a, MotionEvent.ACTION_MOVE, dyDp = -100f, atMs = 400)
+        assertNull(Views.tagged(a, "tip:lock"))
+        assertTrue("lock" in core.settings.tipsShown)
+        assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+        assertTrue(core.recordLocked)
+        touch(a, MotionEvent.ACTION_UP, dyDp = -100f, atMs = 500)
+    }
+
+    @Test fun listeningClosesTheDraftTipWithoutSendingOrClearing() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Bonjour") }
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "tip:listen"))
+        Views.tap(a, "draft_play")
+        assertNull(Views.tagged(a, "tip:listen"))
+        assertTrue("listen" in core.settings.tipsShown)
+        assertEquals("Bonjour", core.draft(group))
+        assertEquals(listOf("Bonjour"), TestCore.speech.spoken)
+        assertTrue(TestCore.radio.sent.isEmpty())
+        TestCore.onMain { core.setDraft(group, "Salut"); core.openChat(group) }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(a, "tip:listen"))
+    }
+
+    @Test fun playingAnIncomingMessageClosesArrivalAndRestartRemembersIt() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain {
+            core.settings.firstMessageSent = true
+            TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut", false)
+        }
+        val incoming = core.history.messages(group).single()
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "tip:arrive"))
+        Views.tap(a, "play:${incoming.id}")
+        assertNull(Views.tagged(a, "tip:arrive"))
+        assertEquals(setOf("arrive"), core.settings.tipsShown)
+        assertEquals(listOf("Salut"), TestCore.speech.spoken)
+        Views.finish(a)
+        TestCore.restart()
+        val again = open(group)
+        assertNull(Views.tagged(again, "tip:arrive"))
+        assertEquals(setOf("arrive"), core.settings.tipsShown)
+    }
+
+    @Test fun leavingRetiresOnlyTheVisibleTipAndDoesNotPublishAnotherDuringStop() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain {
+            core.settings.firstMessageSent = true
+            TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut", false)
+        }
+        val a = open(group)
+        Views.tap(a, "mic")
+        assertNotNull(Views.tagged(a, "tip:cancel"))
+        Views.finish(a)
+        Views.waitUntil { core.recordState == AppCore.RecordState.IDLE }
+        assertEquals(setOf("arrive", "cancel"), core.settings.tipsShown)
+        assertNull(TestCore.onMain { Views.descendants(a.window.decorView).firstOrNull { it.tag == "tip:lock" || it.tag == "tip:arrive" } })
+        val again = open(group)
+        assertNull(Views.tagged(again, "tip:arrive"))
+        Views.tap(again, "mic")
+        assertNotNull(Views.tagged(again, "tip:lock"))
+    }
+
+    @Test fun aRenderKeepsTheTipPictureAndReducedMotionNeverTicks() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        touch(a, MotionEvent.ACTION_DOWN)
+        val picture = Views.tagged(a, "howto:cancel") as HowToView
+        TestCore.onMain { core.openChat(group) }
+        inst.waitForIdleSync()
+        assertSame(picture, Views.tagged(a, "howto:cancel"))
+        assertEquals(1, Views.all(a).count { it.tag?.toString()?.startsWith("tip:") == true })
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        assertFalse(TestCore.onMain { picture.isRunning })
+    }
+
+    @Test fun clearingAndSendingEndTheDraftTipAndDeliveryStartsAfterTheFirstSend() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Bonjour") }
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "tip:listen"))
+        Views.tap(a, "draft_clear")
+        assertNull(Views.tagged(a, "tip:listen"))
+        assertTrue("listen" in core.settings.tipsShown)
+        TestCore.onMain { core.setDraft(group, "Salut"); core.openChat(group) }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(a, "tip:listen"))
+        Views.tap(a, "draft_send")
+        assertNotNull(Views.tagged(a, "tip:delivery"))
+        assertNull(Views.tagged(a, "mic_hint"))
+        Views.tap(a, "tip_close")
+        assertNull(Views.tagged(a, "tip:delivery"))
+        TestCore.onMain { core.openChat(group) }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(a, "tip:delivery"))
+    }
+
+    @Test fun anEmptyEditorIsNotTheFirstDraftAndErasingEndsItsMoment() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        Views.tap(a, "keyboard")
+        assertNull("no draft exists yet", Views.tagged(a, "tip:listen"))
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        TestCore.onMain { edit.setText("   ") }
+        inst.waitForIdleSync()
+        assertNull("whitespace cannot be listened to", Views.tagged(a, "tip:listen"))
+        TestCore.onMain { edit.setText("Bonjour") }
+        inst.waitForIdleSync()
+        assertNotNull(Views.tagged(a, "tip:listen"))
+        TestCore.onMain { edit.setText("") }
+        inst.waitForIdleSync()
+        assertNull("erasing ends the draft moment", Views.tagged(a, "tip:listen"))
+        assertEquals(setOf("listen"), core.settings.tipsShown)
+        TestCore.onMain { edit.setText("Salut") }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(a, "tip:listen"))
+        assertTrue(TestCore.speech.spoken.isEmpty())
+        assertTrue(TestCore.radio.sent.isEmpty())
     }
 
     private fun rotate(old: Activity, orientation: Int): Activity {

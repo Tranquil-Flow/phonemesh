@@ -48,6 +48,7 @@
 
     <string name="talk">Talk</string>
     <string name="mic_hint">Hold to talk</string>
+    <string name="tip_close">Close tip</string>
     <string name="keyboard">Keyboard</string>
     <string name="slide_to_cancel">◀ Cancel</string>
     <string name="recording_locked">Recording locked</string>

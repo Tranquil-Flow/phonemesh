@@ -76,5 +76,25 @@ class SettingsTest {
         assertTrue(again.setupFinished)
     }
 
+    @Test fun shownTipsAreRemembered() {
+        val first = Settings(context, NAME)
+        assertEquals(emptySet<String>(), first.tipsShown)
+        first.tipsShown = setOf("cancel")
+        first.tipsShown = first.tipsShown + "listen"
+        assertEquals(setOf("cancel", "listen"), Settings(context, NAME).tipsShown)
+    }
+
+    @Test fun shownTipSetsAreDefensiveCopies() {
+        val settings = Settings(context, NAME)
+        val input = mutableSetOf("cancel", "lock")
+        settings.tipsShown = input
+        input.add("listen")
+        assertEquals(setOf("cancel", "lock"), settings.tipsShown)
+        // Java's Set mutation avoids a test-only Kotlin mutable-cast helper stripped by R8.
+        val read = settings.tipsShown
+        java.util.Set::class.java.getMethod("add", Any::class.java).invoke(read, "failed")
+        assertEquals(setOf("cancel", "lock"), Settings(context, NAME).tipsShown)
+    }
+
     private companion object { const val NAME = "settings-test" }
 }

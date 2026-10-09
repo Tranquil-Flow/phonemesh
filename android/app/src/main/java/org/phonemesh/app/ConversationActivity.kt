@@ -30,6 +30,10 @@ import android.widget.TextView
 import org.phonemesh.core.DraftFit
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.RecordGesture
+import org.phonemesh.core.Tip
+import org.phonemesh.core.TipFacts
+import org.phonemesh.core.TipPlace
+import org.phonemesh.core.Tips
 import java.util.Date
 
 /** One chat: bubbles with ▶, the big microphone, the draft with ✕ ▶ ➤. Nothing plays or sends by itself. */
@@ -62,6 +66,8 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var draftBar: LinearLayout
     private lateinit var playDraft: ImageButton
     private lateinit var send: Button
+    private lateinit var tipBox: FrameLayout
+    private var tip: Tip? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,6 +87,11 @@ class ConversationActivity : ScreenActivity() {
         }
         root.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(draftArea())
+        tipBox = FrameLayout(this).apply {
+            visibility = View.GONE
+            setPadding(pad(), pad() / 2, pad(), 0)
+        }
+        root.addView(tipBox)
         root.addView(micBarView())
         root.addView(draftBarView())
         show(root)
@@ -144,7 +155,7 @@ class ConversationActivity : ScreenActivity() {
                 override fun afterTextChanged(s: Editable?) {
                     if (!editing) return
                     core.setDraft(chatId, s?.toString()?.replace('\n', ' '))
-                    renderDraftState()
+                    render()
                 }
             })
             setOnEditorActionListener { _, action, _ ->
@@ -239,7 +250,10 @@ class ConversationActivity : ScreenActivity() {
         }
         playDraft = Ui.iconButton(this, palette, R.drawable.ic_play, getString(R.string.listen), 64).apply {
             tag = "draft_play"
-            setOnClickListener { core.playDraft(chatId) }
+            setOnClickListener {
+                if (tip == Tip.LISTEN) retireTip()
+                core.playDraft(chatId)
+            }
         }
         send = Ui.button(this, palette, getString(R.string.send), R.drawable.ic_send, filled = true).apply {
             tag = "draft_send"
@@ -278,14 +292,14 @@ class ConversationActivity : ScreenActivity() {
             MotionEvent.ACTION_MOVE -> if (pressing) {
                 when (RecordGesture.onMove(event.rawX - downX, event.rawY - downY, density)) {
                     RecordGesture.Phase.CANCELLED -> { pressing = false; core.cancelRecording() }
-                    RecordGesture.Phase.LOCKED -> { pressing = false; core.recordLocked = true; render() }
+                    RecordGesture.Phase.LOCKED -> { pressing = false; lockRecording() }
                     else -> cancelHint.alpha = 1f - 0.6f * RecordGesture.cancelProgress(event.rawX - downX, density)
                 }
             }
             MotionEvent.ACTION_UP -> if (pressing) {
                 pressing = false
                 when (RecordGesture.onRelease(event.rawX - downX, event.rawY - downY, density, event.eventTime - downAt)) {
-                    RecordGesture.Phase.LOCKED -> { core.recordLocked = true; render() }
+                    RecordGesture.Phase.LOCKED -> lockRecording()
                     RecordGesture.Phase.CANCELLED -> core.cancelRecording()
                     else -> core.finishRecording()
                 }
@@ -308,6 +322,12 @@ class ConversationActivity : ScreenActivity() {
             !core.access.microphoneAllowed() -> requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
             core.startRecording(chatId) -> { core.recordLocked = true; render() }
         }
+    }
+
+    private fun lockRecording() {
+        core.recordLocked = true
+        if (tip == Tip.LOCK) retireTip()
+        render()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -343,6 +363,7 @@ class ConversationActivity : ScreenActivity() {
     override fun onScreenStop() {
         val owner = started ?: return
         started = null
+        if (!isChangingConfigurations) retireTip(owner.settings)
         owner.closeChat(chatId)
         if (!isChangingConfigurations) {
             owner.cancelRecording()
@@ -363,7 +384,8 @@ class ConversationActivity : ScreenActivity() {
         title.text = core.chatTitle(chat)
         Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) PeopleHeard.count(core.history.sendersHeard(chatId), null) else null)
         Looks.radio(radioStatus, palette, core.connected)
-        bubbles.update(chat, core.history.messages(chatId))
+        val messages = core.history.messages(chatId)
+        bubbles.update(chat, messages)
         val recordingHere = core.recordState == AppCore.RecordState.RECORDING && core.recordingChatId == chatId
         // A finger on the microphone does not survive a rotation: the recording carries on, locked.
         if (recordingHere && !pressing) core.recordLocked = true
@@ -378,6 +400,56 @@ class ConversationActivity : ScreenActivity() {
         draftBar.visibility = if (drafting) View.VISIBLE else View.GONE
         renderDraftState()
         renderMic(recordingHere)
+        if (started != null) renderTip(when {
+            recordingHere -> TipPlace.RECORDING
+            drafting -> if (core.draftFit(chatId) == DraftFit.EMPTY) null else TipPlace.DRAFT
+            else -> TipPlace.CHAT
+        }, messages)
+    }
+
+    /** Keep the same picture through renders; leaving its moment retires it. */
+    private fun renderTip(place: TipPlace?, messages: List<Message>) {
+        tip?.let { if (it.place != place) retireTip() }
+        // The first-message hint owns this space while the microphone is idle.
+        if (tip == null && place != null && (place != TipPlace.CHAT || core.settings.firstMessageSent)) {
+            val facts = TipFacts(
+                sent = messages.any { it.direction == Direction.OUT },
+                failed = messages.any { it.status?.canResend == true },
+                received = messages.any { it.direction == Direction.IN },
+            )
+            Tips.next(place, facts, core.settings.tipsShown)?.let { showTip(it) }
+        }
+        (tipBox.getChildAt(0) as? ViewGroup)?.let { card ->
+            (card.getChildAt(0) as? HowToPanel)?.update()
+        }
+        tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
+    }
+
+    private fun showTip(next: Tip) {
+        tip = next
+        tipBox.removeAllViews()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            tag = "tip:${next.key}"
+            setPadding(pad() / 2, pad() / 2, pad() / 2, pad() / 2)
+            background = Ui.outline(this@ConversationActivity, palette.surface, palette.accent, strokeDp = 3)
+        }
+        card.addView(howTo(next.key, compact = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.tip_close)).apply {
+            tag = "tip_close"
+            setOnClickListener { retireTip(); render() }
+        })
+        tipBox.addView(card)
+    }
+
+    /** Persist on close, action or moment end, not merely on display. */
+    private fun retireTip(settings: Settings = core.settings) {
+        val seen = tip ?: return
+        settings.tipsShown = settings.tipsShown + seen.key
+        tip = null
+        tipBox.removeAllViews()
+        tipBox.visibility = View.GONE
     }
 
     private fun renderDraftState() {
@@ -454,7 +526,10 @@ class ConversationActivity : ScreenActivity() {
         line.addView(Ui.iconButton(this, palette, if (playing) R.drawable.ic_pause else R.drawable.ic_play,
             getString(if (playing) R.string.stop_listening else R.string.listen), color = if (playing) palette.good else palette.text).apply {
             tag = "play:${message.id}"
-            setOnClickListener { core.play(message.id) }
+            setOnClickListener {
+                if (tip == Tip.ARRIVE && message.direction == Direction.IN) retireTip()
+                core.play(message.id)
+            }
         })
         line.addView(Ui.text(this, DateFormat.getTimeFormat(this).format(Date(message.time)), palette.muted).apply {
             setPadding(pad() / 2, 0, pad() / 2, 0)
@@ -471,7 +546,10 @@ class ConversationActivity : ScreenActivity() {
         if (message.status?.canResend == true) {
             box.addView(Ui.button(this, palette, getString(R.string.resend), R.drawable.ic_retry).apply {
                 tag = "resend:${message.id}"
-                setOnClickListener { core.resend(message.id) }
+                setOnClickListener {
+                    if (tip == Tip.FAILED) retireTip()
+                    core.resend(message.id)
+                }
             })
         }
         row.addView(box)

@@ -42,6 +42,11 @@ class Settings(context: Context, name: String = PREFS) {
         get() = prefs.getBoolean(SETUP_FINISHED, false)
         set(value) { prefs.edit().putBoolean(SETUP_FINISHED, value).apply() }
 
+    /** Keys of one-time tips already closed. Never mutate Android's stored string sets. */
+    var tipsShown: Set<String>
+        get() = prefs.getStringSet(TIPS_SHOWN, emptySet()).orEmpty().toSet()
+        set(value) { prefs.edit().putStringSet(TIPS_SHOWN, value.toSet()).apply() }
+
     /** Keeps the engine and radio chosen in the Phase 2 screen, whose preferences were named "MainActivity". */
     private fun migrate(context: Context) {
         if (prefs.getBoolean(MIGRATED, false)) return
@@ -63,6 +68,7 @@ class Settings(context: Context, name: String = PREFS) {
         private const val THEME = "theme"
         private const val FIRST_MESSAGE_SENT = "firstMessageSent"
         private const val SETUP_FINISHED = "setupFinished"
+        private const val TIPS_SHOWN = "tipsShown"
         internal const val MIGRATED = "migrated"
     }
 }

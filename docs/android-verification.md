@@ -221,3 +221,24 @@ Spec: `docs/specs/2026-10-06-ui-core-loop-design.md`. Emulator `Phonemesh_API_35
 - Screenshots: `docs/screenshots-phase3/` (nine states, captured from the test-only build without FLAG_SECURE).
 - `speech-smoke` is outside the gate and did not compile before this work (`PackDownloads.kt`: unresolved `BuildConfig`); unchanged here.
 - Owner walkthrough on the Pixel: pending.
+
+## Sub-project 3a-2: visual guide
+
+Spec: `docs/specs/2026-10-07-visual-guide-design.md`.
+
+| Measure | Before | After | Change |
+|---|---|---|---|
+| arm64-v8a release APK | 12352398 B | 12542422 B | +190024 B (budget 250,000 B) |
+| armeabi-v7a release APK | 11395158 B | 11585186 B | +190028 B |
+| caption clips (res/raw) | none | 12 files, 84724 B | |
+| how-to clips (res/raw) | none | 4 files, 28092 B | |
+
+- `scripts/check.sh`: `CHECK_OK` on the final tree. Emulator `Phonemesh_API_35`, fake radio and fake speech: `OK` for all 247 selected tests in seven batches. Left out: the four real-speech classes and two voice-removal tests that load a real voice; the argument-gated tool tests skip by assumption.
+- Screen checks: every state passes in light and in dark (`ScreenChecksTest`).
+- Screenshots: `docs/screenshots-phase3/` (21 states in light and dark, and 27 `howto-*.png` stills, from the test-only build without FLAG_SECURE).
+
+Fairphone 3, welcome screen, 20 s (`dumpsys gfxinfo`): pending (the owner unlocks the phone first).
+
+Fairphone 3, Help page (26 pictures, scrolled), 20 s: pending.
+
+Owner check on the Pixel 8 Pro: pending.

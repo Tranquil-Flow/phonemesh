@@ -25,8 +25,7 @@ At official commit `21031efe4244e575dff1b879ed555982d94da54d`,
 The app therefore uses **direct Meshtastic Bluetooth GATT**, with official protobuf
 schemas, rather than pretending a legacy AIDL bridge works against the current app.
 Only one application should hold a node's Bluetooth connection: disconnect the stock
-Meshtastic app before connecting in Phonemesh. Configure channel/region/keys with the
-stock app first. Phonemesh does not change them. The AIDL investigation record in
+Meshtastic app before connecting in Phonemesh. Phonemesh may change the radio's LoRa region, and only the region, after a tap from the person (see `docs/specs/2026-10-07-radio-region-design.md`). Channels, keys and every other setting are configured with the stock app; Phonemesh does not change them. The AIDL investigation record in
 `docs/android-aidl-investigation.md` is historical; it is not a runtime app dependency.
 
 Submission/queueing, GATT write completion, peer radio reception, read and playback

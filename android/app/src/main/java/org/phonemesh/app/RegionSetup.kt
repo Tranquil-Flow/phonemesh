@@ -64,6 +64,8 @@ class RegionSetup(
 
     var phase: RegionPhase = RegionPhase.Idle
         private set
+    // Test hook: tests shorten the wait for the radio's return.
+    internal var returnMs = RETURN_MS
 
     private val nudge = Runnable { if (phase is RegionPhase.Working && link.connected) link.reconnect() }
     private val giveUp = Runnable {
@@ -191,7 +193,7 @@ class RegionSetup(
                 RegionResult.SENT -> {
                     clock.cancel(giveUp)
                     clock.cancel(nudge)
-                    clock.after(RETURN_MS, giveUp)
+                    clock.after(returnMs, giveUp)
                     clock.after(NUDGE_MS, nudge)
                 }
                 RegionResult.DROPPED, RegionResult.NO_SETTINGS -> stop(RegionPhase.Failed(RegionFailure.TRY_AGAIN))

@@ -126,6 +126,12 @@ class ScreenChecksTest {
     @Test fun noteWithPicture() = check(minTargets = 5) { ScreenStates.noteWithPicture() }
     @Test fun help() = check(minTargets = 27) { ScreenStates.help() }
 
+    @Test fun regionSetUp() = check(minTargets = 4) { ScreenStates.regionSetUp() }
+    @Test fun regionChange() = check(minTargets = 4) { ScreenStates.regionChange() }
+    @Test fun regionHelper() = check(minTargets = 3) { ScreenStates.regionHelper() }
+    @Test fun regionCountries() = check(minTargets = 4, minRows = 3) { ScreenStates.regionCountries() }
+    @Test fun regionHelpers() = check(minTargets = 4, minRows = 3) { ScreenStates.regionHelpers() }
+
     @Test fun everyScreenPassesInLight() = checkEveryScreen(ScreenStates.all, 0xFFFFFFFF.toInt())
     @Test fun everyScreenPassesInDark() = checkEveryScreen(ScreenStates.dark, 0xFF121212.toInt())
 

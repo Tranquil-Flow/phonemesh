@@ -18,12 +18,13 @@ class ScreenshotTour {
     @Test fun captureEveryScreen() {
         assumeFalse("only in the screenshot build (-Pphonemesh.screenshots=true)", BuildConfig.SECURE_SCREENS)
         val inst = InstrumentationRegistry.getInstrumentation()
+        val states = ScreenStates.all + ScreenStates.dark + ScreenStates.region + ScreenStates.regionDark
         val dir = File(checkNotNull(inst.targetContext.getExternalFilesDir(null)), "screenshots-phase3").apply {
             deleteRecursively()
             mkdirs()
         }
         try {
-            for ((name, state) in ScreenStates.all + ScreenStates.dark) {
+            for ((name, state) in states) {
                 val activity = state()
                 try {
                     inst.waitForIdleSync()
@@ -50,7 +51,7 @@ class ScreenshotTour {
         } finally {
             TestCore.uninstall()
         }
-        val expected = (ScreenStates.all + ScreenStates.dark).map { "${it.first}.png" } +
+        val expected = states.map { "${it.first}.png" } +
             HowToScenes.all.keys.map { "howto-$it.png" }
         assertEquals(expected.size, dir.listFiles().orEmpty().count { it.name.endsWith(".png") })
         assertEquals(expected.toSet(), dir.listFiles().orEmpty().map { it.name }.toSet())

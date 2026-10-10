@@ -10,7 +10,9 @@ import org.phonemesh.ble.BleMeshTransport
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.MeshRadio
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.ble.RegionResult
 import org.phonemesh.core.CatalogEntry
+import org.phonemesh.core.CountryRegions
 import org.phonemesh.core.DeliveryRules
 import org.phonemesh.core.DeliveryStatus
 import org.phonemesh.core.DraftFit
@@ -45,7 +47,7 @@ class AppCore private constructor(
     val settings: Settings,
     val access: DeviceAccess,
 ) : MeshRadio.Listener {
-    enum class Change { RADIO, SCAN, MESSAGES, DELIVERY, PEERS, PACKS, RECORDING, PLAYBACK, NOTE }
+    enum class Change { RADIO, SCAN, MESSAGES, DELIVERY, PEERS, PACKS, RECORDING, PLAYBACK, NOTE, REGION }
     enum class RecordState { IDLE, RECORDING, TRANSCRIBING }
     fun interface Observer { fun onCoreChange(change: Change) }
     data class FoundRadio(val address: String, val name: String, val rssi: Int)
@@ -55,6 +57,30 @@ class AppCore private constructor(
     private val work = Executors.newSingleThreadExecutor()
     private val observers = LinkedHashSet<Observer>()
     private val radio: MeshRadio = radioFactory(this)
+    val countries = CountryRegions.bundled()
+    /** The region check for the connected radio. It writes a region only after Yes, Change, helper Set or Try again. */
+    val region = RegionSetup(
+        countries,
+        settings,
+        object : RegionLink {
+            override val address get() = settings.radioAddress
+            override val connected get() = this@AppCore.connected
+            override fun region() = radio.region()
+            override fun setRegion(region: String, done: (RegionResult) -> Unit) {
+                runCatching { radio.setRegion(region, done) }.onFailure {
+                    Log.w(TAG, "region write refused", it)
+                    done(RegionResult.DROPPED)
+                }
+            }
+            override fun reconnect() = reconnectForRegion()
+        },
+        object : RegionClock {
+            override fun after(ms: Long, task: Runnable) { main.postDelayed(task, ms) }
+            override fun cancel(task: Runnable) = main.removeCallbacks(task)
+        },
+        guess = { BuildConfig.FAKE_COUNTRY.ifEmpty { null } ?: access.countryCode() },
+        changed = { changed(Change.REGION) },
+    )
     val store = PackStore(File(app.filesDir, "packs"), GeneratedPackCatalog.entries, BuildConfig.ALLOW_UNKNOWN_PACKS)
 
     var connected = false
@@ -78,6 +104,8 @@ class AppCore private constructor(
     private val scanExpired = Runnable { stopScan() }
     private val connectExpired = Runnable { changed(Change.RADIO) }
     private val backgroundStop = Runnable { if (started == 0) leaveRadio() }
+    // True from the moment the radio is let go in the background until a screen opens again.
+    private var radioLetGo = false
 
     var openChatId: Long? = null
         private set
@@ -142,6 +170,7 @@ class AppCore private constructor(
 
     fun activityStarted() {
         started++
+        radioLetGo = false
         main.removeCallbacks(backgroundStop)
         if (started == 1) autoReconnect()
     }
@@ -153,6 +182,7 @@ class AppCore private constructor(
     }
 
     private fun leaveRadio() {
+        radioLetGo = true
         cancelRecording()
         stopPlayback()
         stopScan()
@@ -218,6 +248,21 @@ class AppCore private constructor(
         return true
     }
 
+    /**
+     * The region wait asks for the remembered radio again. A new connection ends the one being made, so an
+     * attempt still in progress is left to finish (or to fail) first. Nothing reconnects once the radio was
+     * let go in the background; the next screen reconnects and the check carries on.
+     */
+    internal fun reconnectForRegion() {
+        val address = settings.radioAddress ?: return
+        if (radioLetGo || isConnecting(address)) return
+        if (access.radioPermissionsMissing().isNotEmpty() || !access.bluetoothOn()) return
+        connect(address, settings.radioName ?: address)
+    }
+
+    /** Connected, and the region check has nothing to ask and nothing running. */
+    fun radioReady(): Boolean = connected && region.settled
+
     fun peers(): List<RadioPeer> = radio.peers()
 
     private fun knownName(id: String): String? =
@@ -241,6 +286,9 @@ class AppCore private constructor(
         // Only success ends an attempt here; false is progress too (the radio reports it many times while connecting).
         val attempting = connectingAddress != null
         if (becameReady) endAttempt()
+        // Only a real change of the link reaches the region check: ready means a new handshake has finished.
+        if (becameReady) region.onReady()
+        if (was && !connected) region.onLost()
         if (connected != was || attempting) changed(Change.RADIO)
     }
 
@@ -419,6 +467,8 @@ class AppCore private constructor(
     /** Sends the chat's draft. Nothing is sent without this call (the ➤ button). */
     fun send(chatId: Long): Boolean {
         val text = drafts[chatId]?.trim().orEmpty()
+        // No region yet, or a region write is running: nothing goes out and the draft stays for the card to explain.
+        if (region.blocksSending) { changed(Change.REGION); return false }
         val language = currentLanguage().tag
         if (DraftRules.fit(text, language) != DraftFit.FITS) return false
         val chat = history.chat(chatId) ?: return false
@@ -468,6 +518,12 @@ class AppCore private constructor(
         if (playingId == DRAFT_PLAYBACK) { stopPlayback(); return }
         val text = drafts[chatId]?.trim()?.takeIf { it.isNotEmpty() } ?: return
         speakAs(DRAFT_PLAYBACK, text, currentLanguage().tag)
+    }
+
+    /** Reads one on-screen sentence aloud with the app's own voice (cards, country names); a second tap stops it. */
+    fun speakLine(text: String) {
+        if (playingId == LINE_PLAYBACK) { stopPlayback(); return }
+        speakAs(LINE_PLAYBACK, text, currentLanguage().tag)
     }
 
     /** A how-to sentence can be read: it has a recorded clip, or the voice is ready. */
@@ -663,6 +719,7 @@ class AppCore private constructor(
         const val PRIMARY_CHANNEL = 0
         const val DRAFT_PLAYBACK = -1L
         const val HOWTO_PLAYBACK = -2L
+        const val LINE_PLAYBACK = -3L
         const val BROADCAST = "^all"
         const val BACKGROUND_GRACE_MS = 60_000L
         const val CONNECT_WAIT_MS = 35_000L

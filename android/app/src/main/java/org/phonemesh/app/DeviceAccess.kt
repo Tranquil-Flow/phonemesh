@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.telephony.TelephonyManager
 
 /** What the phone allows right now. Tests replace it, so no permission is ever granted to the app. */
 interface DeviceAccess {
@@ -12,6 +13,9 @@ interface DeviceAccess {
     fun radioPermissionsMissing(): List<String>
     fun bluetoothOn(): Boolean
     fun microphoneAllowed(): Boolean
+
+    /** The phone's country from the mobile network, else the SIM; ISO code, any case; null when neither is known. */
+    fun countryCode(): String?
 }
 
 class PhoneAccess(private val context: Context) : DeviceAccess {
@@ -25,4 +29,10 @@ class PhoneAccess(private val context: Context) : DeviceAccess {
 
     override fun microphoneAllowed(): Boolean =
         context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /** Needs no permission and asks nothing over the network: the phone already knows both values. */
+    override fun countryCode(): String? {
+        val phone = context.getSystemService(TelephonyManager::class.java) ?: return null
+        return listOf(phone.networkCountryIso, phone.simCountryIso).firstOrNull { !it.isNullOrBlank() }
+    }
 }

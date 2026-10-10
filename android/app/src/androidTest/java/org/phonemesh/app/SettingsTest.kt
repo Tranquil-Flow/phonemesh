@@ -96,5 +96,34 @@ class SettingsTest {
         assertEquals(setOf("cancel", "lock"), Settings(context, NAME).tipsShown)
     }
 
+    @Test fun regionMemoryIsPerRadio() {
+        val settings = Settings(context, NAME)
+        settings.keep("AA", "TG")
+        settings.keep("AA", "DE")
+        assertEquals(setOf("TG", "DE"), settings.kept("AA"))
+        assertTrue(settings.kept("BB").isEmpty())
+        settings.setRadioCountry("AA", "TG")
+        assertEquals("TG", settings.radioCountry("AA"))
+        settings.setRadioCountry("AA", null)
+        assertNull(settings.radioCountry("AA"))
+        settings.setHelperSet("AA", true)
+        assertTrue(settings.helperSet("AA"))
+        assertFalse(settings.helperSet("BB"))
+        settings.setHelperSet("AA", false)
+        assertFalse(settings.helperSet("AA"))
+    }
+
+    @Test fun regionMemoryPersistsAcrossInstances() {
+        val first = Settings(context, NAME)
+        first.keep("AA", "TG")
+        first.setRadioCountry("AA", "DE")
+        first.setHelperSet("BB", true)
+        val again = Settings(context, NAME)
+        assertEquals(setOf("TG"), again.kept("AA"))
+        assertEquals("DE", again.radioCountry("AA"))
+        assertTrue(again.helperSet("BB"))
+        assertFalse(again.helperSet("AA"))
+    }
+
     private companion object { const val NAME = "settings-test" }
 }

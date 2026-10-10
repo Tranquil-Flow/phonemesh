@@ -3,7 +3,7 @@ package org.phonemesh.app
 import android.content.Context
 
 /** The few choices the app remembers, in its own preferences file. */
-class Settings(context: Context, name: String = PREFS) {
+class Settings(context: Context, name: String = PREFS) : RegionMemory {
     private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
     init {
@@ -47,6 +47,30 @@ class Settings(context: Context, name: String = PREFS) {
         get() = prefs.getStringSet(TIPS_SHOWN, emptySet()).orEmpty().toSet()
         set(value) { prefs.edit().putStringSet(TIPS_SHOWN, value.toSet()).apply() }
 
+    /** Countries the person chose Keep for on this radio. Never mutate Android's stored string sets. */
+    override fun kept(address: String): Set<String> = prefs.getStringSet(KEPT + address, null).orEmpty().toSet()
+
+    override fun keep(address: String, country: String) {
+        prefs.edit().putStringSet(KEPT + address, kept(address) + country).apply()
+    }
+
+    /** The country this phone last set the radio up for; it chooses the flag the radio shows. */
+    override fun radioCountry(address: String): String? = prefs.getString(RADIO_COUNTRY + address, null)
+
+    override fun setRadioCountry(address: String, country: String?) {
+        val edit = prefs.edit()
+        if (country == null) edit.remove(RADIO_COUNTRY + address) else edit.putString(RADIO_COUNTRY + address, country)
+        edit.apply()
+    }
+
+    /** A helper chose this radio's region: a country guess never offers to change it. */
+    override fun helperSet(address: String): Boolean = address in prefs.getStringSet(HELPER_SET, null).orEmpty()
+
+    override fun setHelperSet(address: String, on: Boolean) {
+        val now = prefs.getStringSet(HELPER_SET, null).orEmpty().toSet()
+        prefs.edit().putStringSet(HELPER_SET, if (on) now + address else now - address).apply()
+    }
+
     /** Keeps the engine and radio chosen in the Phase 2 screen, whose preferences were named "MainActivity". */
     private fun migrate(context: Context) {
         if (prefs.getBoolean(MIGRATED, false)) return
@@ -69,6 +93,9 @@ class Settings(context: Context, name: String = PREFS) {
         private const val FIRST_MESSAGE_SENT = "firstMessageSent"
         private const val SETUP_FINISHED = "setupFinished"
         private const val TIPS_SHOWN = "tipsShown"
+        private const val KEPT = "keptRegions."
+        private const val RADIO_COUNTRY = "radioCountry."
+        private const val HELPER_SET = "helperSet"
         internal const val MIGRATED = "migrated"
     }
 }

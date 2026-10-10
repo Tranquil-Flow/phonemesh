@@ -5,6 +5,10 @@ plugins {
 // Test-only screenshot build: `-Pphonemesh.screenshots=true` drops FLAG_SECURE from debug builds so
 // ScreenshotTour can capture the screens. Release always keeps it (ReleaseFlagsTest).
 val screenshotBuild = project.findProperty("phonemesh.screenshots") == "true"
+// Test-only: -Pphonemesh.fakeCountry=US makes a debug build guess that country (real-radio Change and helper tests).
+// Release always uses the phone's own country (ReleaseFlagsTest).
+val fakeCountry = (project.findProperty("phonemesh.fakeCountry") as String?).orEmpty()
+require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phonemesh.fakeCountry must be two capital letters" }
 android {
     namespace = "org.phonemesh.app"
     compileSdk = 35
@@ -18,6 +22,7 @@ android {
         testProguardFiles("proguard-rules.pro")
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
         buildConfigField("boolean", "SECURE_SCREENS", "true")
+        buildConfigField("String", "FAKE_COUNTRY", "\"\"")
         buildConfigField("String", "PACK_BASE_URL", "\"${project.findProperty("phonemesh.packBaseUrl") ?: "https://packs.invalid/"}\"")
     }
     buildFeatures { buildConfig = true }
@@ -30,6 +35,7 @@ android {
         debug {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
             buildConfigField("boolean", "SECURE_SCREENS", (!screenshotBuild).toString())
+            buildConfigField("String", "FAKE_COUNTRY", "\"$fakeCountry\"")
             buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8777/\"")
         }
         release {

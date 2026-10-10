@@ -1,5 +1,6 @@
 package org.phonemesh.app
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,4 +16,7 @@ class ReleaseFlagsTest {
 
     /** Only the test-only screenshot build may show screens to screenshots and recents thumbnails. */
     @Test fun releaseScreensAreSecure() = assertTrue(BuildConfig.SECURE_SCREENS)
+
+    /** Only debug test builds may pretend to be in another country. */
+    @Test fun releaseUsesThePhonesRealCountry() = assertEquals("", BuildConfig.FAKE_COUNTRY)
 }

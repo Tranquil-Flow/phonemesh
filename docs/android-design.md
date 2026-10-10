@@ -28,6 +28,37 @@ Only one application should hold a node's Bluetooth connection: disconnect the s
 Meshtastic app before connecting in Phonemesh. Phonemesh may change the radio's LoRa region, and only the region, after a tap from the person (see `docs/specs/2026-10-07-radio-region-design.md`). Channels, keys and every other setting are configured with the stock app; Phonemesh does not change them. The AIDL investigation record in
 `docs/android-aidl-investigation.md` is historical; it is not a runtime app dependency.
 
+**Pairing inside one connection.** `BleMeshTransport.connect` reads the radio's bond state.
+A bonded radio is opened at once, with the usual limits: 10 s per GATT operation, 30 s for
+the whole connection, 35 s in `AppCore`. An unbonded radio is bonded first
+(`BluetoothDevice.createBond()`, covered by the `BLUETOOTH_CONNECT` permission the app
+already holds; `BLUETOOTH_ADMIN` up to Android 11) and the GATT link is opened only when
+Android reports `BOND_BONDED`, so no GATT operation is waiting, and none can time out,
+while the person types the code. `PairingWait` holds that state: it listens to
+`ACTION_BOND_STATE_CHANGED` for the target radio from `connect` until the connection ends,
+gives pairing 90 s, and ends the attempt once, through the usual failure report, when the
+bond goes back to `BOND_NONE` or the 90 s run out. If `createBond()` cannot be started the
+link is opened as before; should Android then start pairing by itself in the middle of that
+connection, operation timeouts, the connection deadline and failed steps are ignored while
+the bond state is `BOND_BONDING`, and the link is replaced by a fresh one, once, on
+`BOND_BONDED`. Bond reports never touch a connection that is ready. The transport tells the
+app with `MeshRadio.Listener.onPairing`: `AppCore` stops its 35 s clock while pairing and
+restarts it when pairing ends, so the screens keep showing "Connecting…" and nothing starts
+a second connection. The region flow's reconnects use the same `connect` and are unchanged
+for a bonded radio. The receiver is registered as exported on Android 13 and later because
+bond reports come from Android's Bluetooth app, not from the system user; the broadcast is
+protected, so no other app can send it. The pairing logic is tested with fakes only; its
+behaviour with a real radio and Android's own pairing prompt is not verified by tests.
+
+**Tips and pictures in the chat.** A tip's picture and the cut-off notice's picture are as
+wide as their card (2:1), with the sentence, speaker and close button under them. The draft
+and the tip share one column that never takes the room of the bar below it nor of 96 dp of
+messages; pictures shrink first, and a window under 560 dp high keeps the small picture
+beside the words. The "delivery" tip shows only in a private chat, because a group message
+ends at "Sent". The draft bar's Listen control is a filled round button (yellow; green
+while playing), and the "listen" picture draws the bar as it is: Clear, Listen, Send. See
+`docs/specs/2026-10-07-visual-guide-design.md`.
+
 Submission/queueing, GATT write completion, peer radio reception, read and playback
 are distinct events. The UI must not display a submission as confirmed delivery.
 An emulator cannot qualify physical BLE/RF behavior.

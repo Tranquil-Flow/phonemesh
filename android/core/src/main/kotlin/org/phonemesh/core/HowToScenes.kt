@@ -82,12 +82,12 @@ object HowToScenes {
             "stop" to "0:0 .57:0 .6:1 .96:1 1:0",
             "finger.dx" to "0:25 .12:0 .6:0 .74:30 .76:30 .82:0 .9:0 .96:30 .97:30 1:25",
             "finger.dy" to "0:30 .12:0 .22:0 .52:-62 .6:-62 .74:30 .76:30 .82:0 .86:2 .9:0 .96:30 1:30"),
-        // Listen, then tap the green arrow; the draft flies up as a sent message.
+        // Tap the round Listen button, then Send (61 units to its right); the draft flies up as a sent message.
         scene("listen", 6f, .3f, mapOf("finger.dx" to 0f, "sound" to 1f),
             "sound" to "0:0 .19:0 .22:1 .46:1 .5:0 1:0",
             "fly.dy" to "0:0 .7:0 .86:-34 .96:0 1:0",
             "fly.alpha" to "0:1 .7:1 .86:0 .96:0 1:1",
-            "finger.dx" to "0:20 .12:0 .48:0 .62:80 .7:80 .82:100 .97:100 1:20",
+            "finger.dx" to "0:20 .12:0 .48:0 .62:61 .7:61 .82:81 .97:81 1:20",
             "finger.dy" to "0:40 .12:0 .16:2 .2:0 .48:0 .62:0 .66:2 .7:0 .82:40 1:40"),
         // The sign beside a message becomes a clock, a sent arrow, then delivered ticks.
         scene("delivery", 6f, .8f, mapOf("delivered" to 1f),

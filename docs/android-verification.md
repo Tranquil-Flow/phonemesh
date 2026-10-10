@@ -255,6 +255,15 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10, on the tree
 - Not checked on a screen by a person: the paced story in motion. The tests turn animations off, so the screenshots show its still frame.
 - The sign for "no internet" is a voice download that failed without reaching the server or is waiting for the network; the app holds no permission to ask the phone about its connection.
 
+### Pairing wait, the listen picture, large tips
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: arm64-v8a 12590393 B, armeabi-v7a 11633153 B, +237995 B over the size before the visual guide (budget 250,000 B).
+- Instrumented tests: 343 selected tests, all passed. `docs/screenshots-phase3/` holds 107 files; the new state, in light and dark, is a chat with a tip and its large picture.
+- Pairing: `PairingWaitTest` (JVM, 8 tests) covers one connection call for a radio that is not paired yet, the wait outliving the usual time limits, refused pairing and the 90 s limit; `AppCoreTest` and `RadioActivityTest` cover what the screens show, through the fake radio. Pairing with a real radio: pending — owner.
+- The delivery tip shows only in a private chat (`TipsTest`, `ConversationActivityTest`).
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

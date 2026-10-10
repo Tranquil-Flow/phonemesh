@@ -5,8 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TipsTest {
-    private val none = TipFacts(sent = false, failed = false, received = false)
-    private val all = TipFacts(sent = true, failed = true, received = true)
+    private val none = TipFacts(sent = false, failed = false, received = false, direct = true)
+    private val all = TipFacts(sent = true, failed = true, received = true, direct = true)
 
     @Test fun recordingTeachesCancelThenLock() {
         assertEquals(Tip.CANCEL, Tips.next(TipPlace.RECORDING, none, emptySet()))
@@ -21,8 +21,8 @@ class TipsTest {
 
     @Test fun theChatTeachesOnlyWhatHasHappened() {
         assertNull(Tips.next(TipPlace.CHAT, none, emptySet()))
-        assertEquals(Tip.DELIVERY, Tips.next(TipPlace.CHAT, TipFacts(true, false, false), emptySet()))
-        assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, TipFacts(false, false, true), emptySet()))
+        assertEquals(Tip.DELIVERY, Tips.next(TipPlace.CHAT, TipFacts(true, false, false, true), emptySet()))
+        assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, TipFacts(false, false, true, true), emptySet()))
     }
 
     @Test fun aFailureComesFirstThenArrivalThenDelivery() {
@@ -30,6 +30,16 @@ class TipsTest {
         assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, all, setOf("failed")))
         assertEquals(Tip.DELIVERY, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive")))
         assertNull(Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive", "delivery")))
+    }
+
+    @Test fun aGroupChatNeverPromisesDelivered() {
+        assertNull(Tips.next(TipPlace.CHAT, TipFacts(true, false, false, direct = false), emptySet()))
+        val group = all.copy(direct = false)
+        assertEquals(Tip.FAILED, Tips.next(TipPlace.CHAT, group, emptySet()))
+        assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, group, setOf("failed")))
+        assertNull(Tips.next(TipPlace.CHAT, group, setOf("failed", "arrive")))
+        assertEquals("unseen in the group, so a private chat still shows it",
+            Tip.DELIVERY, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive")))
     }
 
     @Test fun eachTipIsATalkingScene() =

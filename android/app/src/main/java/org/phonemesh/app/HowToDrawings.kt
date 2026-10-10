@@ -130,15 +130,18 @@ object HowToDrawings {
             k.fade(v["fly.alpha"]) { k.bubble(c, 34f, 16f, 140f, k.words.bonjour, HowToKit.C.MINT) }
             c.restore()
             k.fade(v["sound"]) { k.waves(c, 180f, 29f) }
-            k.circle(c, 70f, 80f, 14f, HowToKit.C.RADIO)
-            speaker(c, k, 70f, 80f)
-            c.drawArc(listenSoundBounds, -56.44269f, 112.88538f, false, k.line(width = 2f))
-            k.circle(c, 110f, 80f, 14f, HowToKit.C.BUBBLE)
-            c.drawLine(105f, 75f, 115f, 85f, k.line(width = 2.4f))
-            c.drawLine(115f, 75f, 105f, 85f, k.line(width = 2.4f))
-            k.circle(c, 150f, 80f, 14f, HowToKit.C.GREEN)
+            // The draft bar as the chat shows it: Clear, the round Listen button, Send.
+            k.rect(c, 14f, 65f, 70f, 30f, 7f, HowToKit.C.BUBBLE)
+            c.drawLine(22f, 76f, 30f, 84f, k.line(width = 2.4f))
+            c.drawLine(30f, 76f, 22f, 84f, k.line(width = 2.4f))
+            k.text(c, k.words.clear, 58f, 84f, 11f)
+            k.circle(c, 110f, 80f, 15f, HowToKit.C.RADIO)
+            shape.rewind(); shape.moveTo(105f, 72f); shape.lineTo(118f, 80f); shape.lineTo(105f, 88f); shape.close()
+            c.drawPath(shape, k.fill(HowToKit.C.INK))
+            k.rect(c, 136f, 65f, 70f, 30f, 7f, HowToKit.C.PHONE)
             sendArrow(c, k, 150f, 80f)
-            k.finger(c, 70f, 80f, v["finger.dx"], v["finger.dy"])
+            k.text(c, k.words.send, 182f, 84f, 11f, HowToKit.C.WHITE)
+            k.finger(c, 110f, 80f, v["finger.dx"], v["finger.dy"])
         },
         "delivery" to { c, k, v ->
             k.bubble(c, 22f, 20f, 130f, k.words.bonjour, HowToKit.C.MINT)
@@ -390,8 +393,6 @@ object HowToDrawings {
 
     private val shape = android.graphics.Path()
     private val shapeBounds = android.graphics.RectF()
-    // SVG M77 75 a6 6 0 0 1 0 10: the circular arc's centre is (77 - sqrt(11), 80).
-    private val listenSoundBounds = android.graphics.RectF(67.68338f, 74f, 79.68338f, 86f)
 
     /** A red left-pointing triangle showing slide to cancel. */
     private fun chevron(c: Canvas, k: HowToKit, x: Float, y: Float, opacity: Float) {

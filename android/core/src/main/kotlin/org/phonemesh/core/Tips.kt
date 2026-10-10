@@ -13,7 +13,8 @@ enum class Tip(val key: String, val place: TipPlace) {
     DELIVERY("delivery", TipPlace.CHAT),
 }
 
-data class TipFacts(val sent: Boolean, val failed: Boolean, val received: Boolean)
+/** What has happened in the open chat. [direct] is a private chat: only there can a message reach "Delivered". */
+data class TipFacts(val sent: Boolean, val failed: Boolean, val received: Boolean, val direct: Boolean)
 
 object Tips {
     /** The first unseen tip whose moment has happened. */
@@ -24,6 +25,7 @@ object Tips {
         Tip.CANCEL, Tip.LOCK, Tip.LISTEN -> true
         Tip.FAILED -> facts.failed
         Tip.ARRIVE -> facts.received
-        Tip.DELIVERY -> facts.sent
+        // A group message ends at "Sent", so the picture that ends on "Delivered" belongs to private chats.
+        Tip.DELIVERY -> facts.sent && facts.direct
     }
 }

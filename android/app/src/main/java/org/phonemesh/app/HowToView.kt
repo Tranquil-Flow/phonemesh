@@ -124,8 +124,10 @@ class HowToView(context: Context, scene: HowToScene) : View(context) {
         else (elapsed % scene.durationMs).toFloat() / scene.durationMs
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val width = MeasureSpec.getSize(widthMeasureSpec)
-        setMeasuredDimension(width, width / 2)
+        // Twice as wide as tall, and smaller rather than cut when the height is limited.
+        var height = MeasureSpec.getSize(widthMeasureSpec) / 2
+        if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) height = minOf(height, MeasureSpec.getSize(heightMeasureSpec))
+        setMeasuredDimension(height * 2, height)
     }
 
     override fun onDraw(canvas: Canvas) {

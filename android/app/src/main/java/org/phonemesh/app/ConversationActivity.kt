@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputFilter
@@ -70,6 +71,7 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var keyboard: ImageButton
     private lateinit var draftBar: LinearLayout
     private lateinit var playDraft: ImageButton
+    private lateinit var playFill: GradientDrawable
     private lateinit var send: Button
     private lateinit var tipBox: FrameLayout
     private lateinit var regionScroll: ScrollView
@@ -120,14 +122,13 @@ class ConversationActivity : ScreenActivity() {
         }
         root.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(regionArea())
-        root.addView(draftArea())
         tipBox = FrameLayout(this).apply {
             visibility = View.GONE
             setPadding(pad(), pad() / 2, pad(), 0)
         }
-        root.addView(tipBox)
-        root.addView(micBarView())
-        root.addView(draftBarView())
+        val bars = listOf(micBarView(), draftBarView())
+        root.addView(fitted(draftArea(), tipBox))
+        bars.forEach { root.addView(it) }
         show(root)
         built = true
         if (editing) loadDraftForEditing()
@@ -176,6 +177,30 @@ class ConversationActivity : ScreenActivity() {
         return regionScroll
     }
 
+    /** Tall enough for a picture as wide as the screen; a low window (a phone on its side) keeps the small one beside the words. */
+    private val roomy get() = resources.configuration.screenHeightDp >= ROOMY_DP
+
+    /**
+     * The draft and the tip, kept out of the way of what must stay in reach: the bar below them (microphone, or
+     * Clear, Listen and Send) and, in a tall window, a strip of messages above. With less room than they need,
+     * their pictures get smaller.
+     */
+    private fun fitted(vararg views: View): View = object : LinearLayout(this) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            var height = heightMeasureSpec
+            if (View.MeasureSpec.getMode(height) != View.MeasureSpec.UNSPECIFIED) {
+                val bar = if (micBar.visibility == View.VISIBLE) micBar else draftBar
+                bar.measure(widthMeasureSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                val kept = bar.measuredHeight + if (roomy) Ui.dp(context, MESSAGES_KEPT_DP) else 0
+                height = View.MeasureSpec.makeMeasureSpec((View.MeasureSpec.getSize(height) - kept).coerceAtLeast(0), View.MeasureSpec.AT_MOST)
+            }
+            super.onMeasure(widthMeasureSpec, height)
+        }
+    }.apply {
+        orientation = LinearLayout.VERTICAL
+        views.forEach { addView(it) }
+    }
+
     private fun draftArea(): View {
         draftBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -221,13 +246,14 @@ class ConversationActivity : ScreenActivity() {
         draftBox.addView(draftText)
         draftBox.addView(draftEdit)
         draftBox.addView(tooLong)
-        cutPanel = howTo("toolong", compact = true) { getString(R.string.draft_cut) }
+        cutPanel = howTo("toolong", compact = !roomy) { getString(R.string.draft_cut) }
         cutNotice = FrameLayout(this).apply {
             tag = "draft_cut"
             visibility = View.GONE
             addView(cutPanel)
         }
-        draftBox.addView(cutNotice)
+        // Weighted: the notice's picture gives way before the draft's own words do.
+        draftBox.addView(cutNotice, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         return draftBox
     }
 
@@ -309,8 +335,11 @@ class ConversationActivity : ScreenActivity() {
                 stopEditing()
             }
         }
+        // A filled round button like the microphone, so it is found at a glance; renderDraftState colours it.
+        playFill = Ui.circle(palette.accent).apply { setStroke(Ui.dp(this@ConversationActivity, 2), palette.outline) }
         playDraft = Ui.iconButton(this, palette, R.drawable.ic_play, getString(R.string.listen), 64).apply {
             tag = "draft_play"
+            background = Ui.ripple(playFill, Ui.pressedOf(palette.onAccent))
             setOnClickListener {
                 if (tip == Tip.LISTEN) retireTip()
                 core.playDraft(chatId)
@@ -482,7 +511,8 @@ class ConversationActivity : ScreenActivity() {
         renderMic(recordingHere)
         if (started != null) renderTip(when {
             recordingHere -> TipPlace.RECORDING
-            drafting -> if (core.draftFit(chatId) == DraftFit.EMPTY) null else TipPlace.DRAFT
+            // One picture at a time: while the cut-off notice shows, the draft's tip waits.
+            drafting -> if (core.draftFit(chatId) == DraftFit.EMPTY || cutNotice.visibility == View.VISIBLE) null else TipPlace.DRAFT
             else -> TipPlace.CHAT
         }, messages)
     }
@@ -496,27 +526,24 @@ class ConversationActivity : ScreenActivity() {
                 sent = messages.any { it.direction == Direction.OUT },
                 failed = messages.any { it.status?.canResend == true },
                 received = messages.any { it.direction == Direction.IN },
+                direct = core.history.chat(chatId)?.kind != ChatKind.GROUP,
             )
             Tips.next(place, facts, core.settings.tipsShown)?.let { showTip(it) }
         }
-        (tipBox.getChildAt(0) as? ViewGroup)?.let { card ->
-            (card.getChildAt(0) as? HowToPanel)?.update()
-        }
+        (tipBox.getChildAt(0) as? HowToPanel)?.update()
         tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
     }
 
     private fun showTip(next: Tip) {
         tip = next
         tipBox.removeAllViews()
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+        // The picture as wide as the card, like a setup step; the sentence, speaker and close sit under it.
+        val card = howTo(next.key, compact = !roomy).apply {
             tag = "tip:${next.key}"
             setPadding(pad() / 2, pad() / 2, pad() / 2, pad() / 2)
             background = Ui.outline(this@ConversationActivity, palette.surface, palette.accent, strokeDp = 3)
         }
-        card.addView(howTo(next.key, compact = true), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        card.addView(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.tip_close)).apply {
+        card.add(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.tip_close)).apply {
             tag = "tip_close"
             setOnClickListener { retireTip(); render() }
         })
@@ -543,7 +570,9 @@ class ConversationActivity : ScreenActivity() {
         Ui.enable(send, fit == DraftFit.FITS && !core.region.blocksSending)
         val playing = core.playingId == AppCore.DRAFT_PLAYBACK
         playDraft.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
-        playDraft.imageTintList = ColorStateList.valueOf(if (playing) palette.good else palette.text)
+        // Yellow with a dark triangle; green with the stop bars while it plays (the same in both themes).
+        playFill.setColor(if (playing) palette.good else palette.accent)
+        playDraft.imageTintList = ColorStateList.valueOf(if (playing) palette.background else palette.onAccent)
         playDraft.contentDescription = getString(if (playing) R.string.stop_listening else R.string.listen)
         Ui.enable(playDraft, fit != DraftFit.EMPTY)
     }
@@ -643,6 +672,10 @@ class ConversationActivity : ScreenActivity() {
     companion object {
         const val EXTRA_CHAT_ID = "chat"
         const val MIC_DP = 80
+        /** The height of messages that stays in view above a draft or a tip. */
+        const val MESSAGES_KEPT_DP = 96
+        /** Top bar, the microphone bar, a large tip on a 360 dp wide screen and the messages kept. */
+        const val ROOMY_DP = 560
         private const val STATE_EDITING = "editing"
         private const val REQUEST_MIC = 1
 

@@ -102,9 +102,32 @@ class HowToViewTest {
         }
     }
 
-    @Test fun theListenButtonKeepsTheMockupsSoundArc() {
-        val view = TestCore.onMain { laidOut("listen").apply { freezeAt(scene.still) } }
-        assertEquals("sound arc beside the speaker", HowToKit.C.INK, picture(view).getPixel(158, 160))
+    /** The draft bar as the chat shows it, in the drawing's 220 x 110 units at twice the size. */
+    @Test fun theListenPictureShowsTheRealDraftBarAndTapsListenThenSend() {
+        val view = TestCore.onMain { laidOut("listen").apply { freezeAt(0f) } }
+        val apart = picture(view)
+        assertEquals("Clear is the light button on the left", HowToKit.C.BUBBLE, apart.getPixel(36, 144))
+        assertEquals("Listen is the round yellow button in the middle", HowToKit.C.RADIO, apart.getPixel(220, 136))
+        assertEquals("with a dark triangle", HowToKit.C.INK, apart.getPixel(218, 160))
+        assertEquals("Send is the dark button on the right", HowToKit.C.PHONE, apart.getPixel(400, 140))
+        TestCore.onMain { view.freezeAt(view.scene.still) }
+        assertEquals("the finger is on Listen first", HowToKit.C.SKIN, picture(view).getPixel(220, 172))
+        TestCore.onMain { view.freezeAt(.66f) }
+        val sending = picture(view)
+        assertEquals("then on Send", HowToKit.C.SKIN, sending.getPixel(342, 180))
+        assertEquals("and no longer on Listen", HowToKit.C.INK, sending.getPixel(218, 160))
+    }
+
+    @Test fun aLimitedHeightMakesItSmallerNotCut() {
+        val view = HowToView(inst.targetContext, HowToScenes.get("listen"))
+        TestCore.onMain {
+            view.measure(View.MeasureSpec.makeMeasureSpec(440, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.AT_MOST))
+            assertEquals(200, view.measuredWidth)
+            assertEquals(100, view.measuredHeight)
+            view.measure(View.MeasureSpec.makeMeasureSpec(440, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(500, View.MeasureSpec.AT_MOST))
+            assertEquals(440, view.measuredWidth)
+            assertEquals(220, view.measuredHeight)
+        }
     }
 
     @Test fun cancelChevronsFollowTheMockupsPositiveAnimationDelays() {

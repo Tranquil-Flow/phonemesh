@@ -146,15 +146,31 @@ object ScreenStates {
         return screen
     }
 
+    /** The chat as it is day to day: its one-time tips have been seen (conversationTip shows one). */
     fun conversation(): Activity {
         TestCore.install()
         val group = seedChats()
+        TestCore.onMain { TestCore.core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() }
         val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
         val messages = TestCore.onMain { TestCore.core.history.messages(group).size }
         expect(messages >= 4, "seeded messages ($messages)")
         expect(tagsOf(screen, "message:").size == messages, "one bubble per message ($messages)")
         expect(tagsOf(screen, "status:").isNotEmpty(), "a status icon")
         expect(tagsOf(screen, "resend:").isNotEmpty(), "a resend button")
+        return screen
+    }
+
+    /** The first failed message: its tip, with the large picture, between the messages and the microphone. */
+    fun conversationTip(): Activity {
+        TestCore.install()
+        val group = seedChats()
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        expect(Views.tagged(screen, "tip:failed") != null, "the failed-message tip")
+        val picture = Views.tagged(screen, "howto:failed")
+        expect(picture != null && TestCore.onMain { picture.width >= screen.window.decorView.width * 4 / 5 }, "the tip's large picture")
+        expect(tagsOf(screen, "message:").size >= 2, "messages stay in view above the tip")
+        expect(tagsOf(screen, "resend:").isNotEmpty(), "the resend button the tip points at")
+        expect(Views.tagged(screen, "mic") != null, "the microphone")
         return screen
     }
 
@@ -458,6 +474,7 @@ object ScreenStates {
         "04-chats-english" to { chatsRows("en-US") },
         "05-conversation" to { conversation() },
         "05-conversation-mic-hint" to { conversationMicHint() },
+        "05-conversation-tip" to { conversationTip() },
         "06-draft-too-long" to { draftTooLong() },
         "06-draft-cut" to { draftCut() },
         "07-recording" to { recordingLocked() },

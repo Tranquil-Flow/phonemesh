@@ -21,6 +21,8 @@ class HardeningUiTest {
         TestCore.install()
         val core = TestCore.core
         val radio = TestCore.radio
+        // The one-time tips have been seen: a tip's large picture would leave room for fewer than these three messages.
+        TestCore.onMain { core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() }
         val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
         TestCore.onMain { listOf("Un", "Deux", "Trois").forEach { core.setDraft(chat, it); core.send(chat) } }
         val (one, two, three) = core.history.messages(chat)

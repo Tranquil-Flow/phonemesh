@@ -58,7 +58,7 @@ The owner chose each design from mockups.
   - The ring will span about one minute once sub-project 2 lands.
 - **Draft:**
   - The transcription (or typed text) appears as a dashed bubble.
-  - The bottom bar swaps the microphone for three large buttons: ✕ Effacer · ▶ (the same play icon as sent messages) · ➤ Envoyer.
+  - The bottom bar swaps the microphone for three large buttons: ✕ Effacer · ▶ (the same play icon as sent messages, on a filled round yellow button) · ➤ Envoyer.
   - Nothing plays or sends by itself.
   - Tapping the draft text opens the keyboard to fix a word.
   - If the encoded text exceeds one part: red outline, "Trop long. Raccourcissez.", and ➤ stays disabled.
@@ -85,6 +85,7 @@ Both UNCONFIRMED and FAILED use the same red triangle shape, but their spoken an
 ### Radio
 
 - "🔍 Recherche…" and nearby radios as large rows with signal bars. Tap to connect; Android's pairing prompt may appear.
+- **One tap connects a radio that was never paired.** The app asks Android to pair with the radio first and connects when pairing ends; the row keeps showing "Connexion…" while the person finds and types the code, for up to 90 seconds. If pairing is refused or cancelled, or the 90 seconds run out, "Connexion…" goes away and the radio can be tapped again. A radio that is already paired connects as before, with the same time limits.
 - The app remembers the radio and reconnects by itself on later launches.
 - Help line: "Pas trouvée ? Allumez la radio. Approchez le téléphone."
 

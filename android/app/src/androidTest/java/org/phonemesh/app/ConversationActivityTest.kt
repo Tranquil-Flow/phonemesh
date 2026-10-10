@@ -797,13 +797,134 @@ class ConversationActivityTest {
         inst.waitForIdleSync()
         assertNull(Views.tagged(a, "tip:listen"))
         Views.tap(a, "draft_send")
-        assertNotNull(Views.tagged(a, "tip:delivery"))
+        assertNull("a group message ends at Sent, so nothing promises Delivered", Views.tagged(a, "tip:delivery"))
         assertNull(Views.tagged(a, "mic_hint"))
-        Views.tap(a, "tip_close")
-        assertNull(Views.tagged(a, "tip:delivery"))
         TestCore.onMain { core.openChat(group) }
         inst.waitForIdleSync()
         assertNull(Views.tagged(a, "tip:delivery"))
+        Views.finish(a)
+        assertEquals("the group never marks it as seen", setOf("listen"), core.settings.tipsShown)
+        // The first send in a private chat is its moment.
+        val direct = TestCore.onMain { core.startDirectChat(RadioPeer("!1234abcd", "Awa")) }
+        val b = open(direct)
+        assertNull("nothing was sent here yet", Views.tagged(b, "tip:delivery"))
+        TestCore.onMain { core.setDraft(direct, "Salut"); core.openChat(direct) }
+        inst.waitForIdleSync()
+        Views.tap(b, "draft_send")
+        assertEquals(listOf("^all", "!1234abcd"), TestCore.radio.sent.map { it.destinationId })
+        assertNotNull(Views.tagged(b, "tip:delivery"))
+        Views.tap(b, "tip_close")
+        assertNull(Views.tagged(b, "tip:delivery"))
+        assertEquals(setOf("listen", "delivery"), core.settings.tipsShown)
+        TestCore.onMain { core.openChat(direct) }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(b, "tip:delivery"))
+    }
+
+    private fun whole(view: View): Boolean = TestCore.onMain {
+        val seen = android.graphics.Rect()
+        view.getGlobalVisibleRect(seen) && seen.width() == view.width && seen.height() == view.height
+    }
+
+    @Test fun aTipShowsItsPictureLargeAndLeavesTheMessagesAndTheBarsInReach() {
+        TestCore.install()
+        val group = TestCore.onMain {
+            core.settings.firstMessageSent = true
+            repeat(6) { TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut $it", false) }
+            core.groupChatId()
+        }
+        val a = open(group)
+        val tip = checkNotNull(Views.tagged(a, "tip:arrive"))
+        val picture = checkNotNull(Views.tagged(a, "howto:arrive"))
+        val words = checkNotNull(Views.tagged(a, "howto_sentence"))
+        val close = checkNotNull(Views.tagged(a, "tip_close"))
+        val list = checkNotNull(Views.tagged(a, "bubbles"))
+        TestCore.onMain {
+            assertTrue("the picture fills the card: ${picture.width} of ${tip.width}", picture.width >= tip.width - Ui.dp(a, 24))
+            assertTrue("and most of the screen's width", picture.width >= a.window.decorView.width * 4 / 5)
+            assertEquals(picture.width / 2, picture.height)
+            val at = IntArray(2)
+            val wordsAt = IntArray(2)
+            picture.getLocationOnScreen(at)
+            words.getLocationOnScreen(wordsAt)
+            assertTrue("the sentence is under the picture", wordsAt[1] >= at[1] + picture.height)
+            assertSame("close sits in the sentence row", (words.parent as View), close.parent)
+            assertTrue("messages keep ${list.height} px", list.height >= Ui.dp(a, ConversationActivity.MESSAGES_KEPT_DP))
+        }
+        assertTrue(whole(picture) && whole(close) && whole(checkNotNull(Views.tagged(a, "mic"))) && whole(checkNotNull(Views.tagged(a, "keyboard"))))
+        assertTrue("a message is in view", Views.all(a).any { it.tag?.toString()?.startsWith("message:") == true })
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        // A draft: the tip moves on; Clear, Listen and Send stay whole under a large picture.
+        Views.tap(a, "tip_close")
+        TestCore.onMain { core.setDraft(group, "Bonjour"); core.openChat(group) }
+        inst.waitForIdleSync()
+        val listen = checkNotNull(Views.tagged(a, "howto:listen"))
+        assertTrue(TestCore.onMain { listen.width >= a.window.decorView.width * 4 / 5 })
+        for (tag in listOf("draft_clear", "draft_play", "draft_send", "draft_text")) assertTrue(tag, whole(checkNotNull(Views.tagged(a, tag))))
+        assertTrue(TestCore.onMain { list.height >= Ui.dp(a, ConversationActivity.MESSAGES_KEPT_DP) })
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+    }
+
+    @Test fun theCutNoticeIsLargeAndTheDraftTipWaitsForItsTurn() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.speech.nextTranscript = "mot ".repeat(80).trim()
+        val a = open(group)
+        makeCutDraft(a)
+        val notice = checkNotNull(Views.tagged(a, "draft_cut"))
+        val picture = checkNotNull(Views.tagged(a, "howto:toolong"))
+        assertTrue("the notice's picture is as wide as the notice", TestCore.onMain { picture.width == notice.width && picture.height * 2 == picture.width })
+        assertNull("one picture at a time", Views.tagged(a, "tip:listen"))
+        assertEquals(setOf("cancel"), core.settings.tipsShown)
+        for (tag in listOf("draft_clear", "draft_play", "draft_send", "draft_text", "howto:toolong")) assertTrue(tag, whole(checkNotNull(Views.tagged(a, tag))))
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        // Editing ends the notice; the draft's own tip takes its turn.
+        Views.tap(a, "draft_text")
+        assertNull(Views.tagged(a, "draft_cut"))
+        assertNotNull(Views.tagged(a, "tip:listen"))
+    }
+
+    @Test fun aLowWindowKeepsTheSmallPictureAndTheWholeDraftBar() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Bonjour") }
+        var a: Activity = open(group)
+        a = rotate(a, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+        val low = a
+        assertTrue("the emulator's landscape is low", TestCore.onMain { low.resources.configuration.screenHeightDp } < ConversationActivity.ROOMY_DP)
+        val picture = checkNotNull(Views.tagged(low, "howto:listen"))
+        assertEquals("the picture stays beside the words", Ui.dp(low, 120), TestCore.onMain { picture.width })
+        for (tag in listOf("draft_clear", "draft_play", "draft_send")) assertTrue(tag, whole(checkNotNull(Views.tagged(low, tag))))
+    }
+
+    @Test fun theListenButtonIsAFilledRoundButtonInBothStatesAndThemes() {
+        for (theme in listOf(ThemeMode.LIGHT, ThemeMode.DARK)) {
+            TestCore.nextTheme = theme
+            TestCore.install()
+            val group = TestCore.onMain { core.groupChatId() }
+            TestCore.onMain { core.setDraft(group, "Bonjour") }
+            val a = open(group)
+            val palette = TestCore.onMain { Palette(a) }
+            val play = checkNotNull(Views.tagged(a, "draft_play")) as android.widget.ImageButton
+            fun pixel(dx: Int): Int = TestCore.onMain {
+                val bitmap = Bitmap.createBitmap(play.width, play.height, Bitmap.Config.ARGB_8888)
+                play.draw(Canvas(bitmap))
+                bitmap.getPixel(play.width / 2 + dx, play.height / 4).also { bitmap.recycle() }
+            }
+            assertEquals("$theme idle fill", palette.accent, pixel(0))
+            assertEquals("$theme round: the corner is empty", Color.TRANSPARENT, pixel(-play.width / 2 + 2))
+            assertEquals(palette.onAccent, TestCore.onMain { play.imageTintList!!.defaultColor })
+            assertTrue(TestCore.onMain { play.width >= Ui.dp(a, 64) && play.height >= Ui.dp(a, 64) })
+            assertEquals("Écouter", description(a, "draft_play"))
+            Views.tap(a, "draft_play")
+            assertEquals("$theme playing fill", palette.good, pixel(0))
+            assertEquals(palette.background, TestCore.onMain { play.imageTintList!!.defaultColor })
+            assertEquals("Arrêter l'écoute", description(a, "draft_play"))
+            assertEquals(listOf("Bonjour"), TestCore.speech.spoken)
+            Views.finish(a)
+            activity = null
+            TestCore.uninstall()
+        }
     }
 
     @Test fun anEmptyEditorIsNotTheFirstDraftAndErasingEndsItsMoment() {

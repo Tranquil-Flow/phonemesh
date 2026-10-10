@@ -12,7 +12,8 @@ import org.phonemesh.core.HowToScene
 /**
  * A how-to picture with its one sentence and a speaker. Several scenes play one loop each, in turn, with numbered
  * part buttons to pick one (with animations off, the buttons are the way to see the other parts). [compact] lays
- * the picture beside the words, for tips, notes and the Help page.
+ * the picture small beside the words, for notes, the friend guide and the Help page. Otherwise the picture is as
+ * wide as the panel and gives up its height first when the panel is given less room than it needs.
  */
 class HowToPanel(
     context: Context,
@@ -27,6 +28,7 @@ class HowToPanel(
     private val words: TextView = Ui.text(context, "", palette.text, bold = true).apply { tag = "howto_sentence" }
     private val speaker: ImageButton
     private val parts = ArrayList<TextView>()
+    private var bar: LinearLayout = this
     var part = 0
         private set
 
@@ -35,7 +37,7 @@ class HowToPanel(
         orientation = if (compact) HORIZONTAL else VERTICAL
         gravity = Gravity.CENTER_VERTICAL
         val frame = FrameLayout(context)
-        frame.addView(picture, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        frame.addView(picture, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL))
         speaker = Ui.iconButton(context, palette, R.drawable.ic_speaker, context.getString(R.string.read_aloud), if (compact) 48 else 56).apply {
             tag = "howto_say"
             setOnClickListener { say(scenes[part]) }
@@ -50,7 +52,7 @@ class HowToPanel(
             addView(column, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Ui.dp(context, 12) })
             addView(speaker)
         } else {
-            addView(frame, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            addView(frame, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
             val row = LinearLayout(context).apply {
                 orientation = HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -58,6 +60,7 @@ class HowToPanel(
             }
             row.addView(words, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             row.addView(speaker)
+            bar = row
             addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
             if (scenes.size > 1) addView(partButtons(context), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         }
@@ -79,6 +82,9 @@ class HowToPanel(
             addView(button, LayoutParams(Ui.dp(context, 48), Ui.dp(context, 48)).apply { marginEnd = Ui.dp(context, 8) })
         }
     }
+
+    /** Puts one more button after the speaker (a tip's close). */
+    fun add(button: View) = bar.addView(button)
 
     fun show(index: Int) {
         require(index in scenes.indices)

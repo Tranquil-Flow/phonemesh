@@ -22,12 +22,12 @@ import kotlin.math.sqrt
  */
 class HowToKit(val words: Words) {
     /** Words drawn inside pictures, in the app's language. */
-    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String, val allow: String) {
+    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String, val allow: String, val clear: String, val send: String) {
         companion object {
             fun of(context: Context) = Words(
                 StoryTimeline.WORD, context.getString(R.string.status_waiting), context.getString(R.string.status_sent),
                 context.getString(R.string.status_delivered), context.getString(R.string.resend), context.getString(R.string.howto_on),
-                context.getString(R.string.howto_allow_button),
+                context.getString(R.string.howto_allow_button), context.getString(R.string.draft_clear), context.getString(R.string.send),
             )
         }
     }

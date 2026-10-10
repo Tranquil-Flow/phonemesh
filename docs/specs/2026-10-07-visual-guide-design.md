@@ -172,8 +172,8 @@ The owner asked that every step and every problem shows, with a moving picture, 
 | hello | step 3 | Hold the yellow button and say hello. | Hold, talk, let go; words appear as text. |
 | cancel | tip, first recording | Changed your mind? Slide left. | Finger slides to the bin while holding. |
 | lock | tip, first recording | Long message? Slide up to lock. | Finger slides up to the lock, lets go; tap the square to stop. |
-| listen | tip, first draft | Listen to it, then send. | Listen plays; finger taps the green arrow. |
-| delivery | tip, first message sent | Watch the small sign. | Clock, then arrow, then green check. |
+| listen | tip, first draft | Listen to it, then send. | The draft bar as the chat shows it: light "✕ Clear" on the left, the round yellow Listen button (▶) in the middle, dark "➤ Send" on the right. The finger taps Listen, the draft is read, then the finger taps Send and the draft flies up. |
+| delivery | tip, first message sent in a private chat | Watch the small sign. | Clock, then arrow, then green check. |
 | failed | tip, first failed message | Not sent? Tap "Send again". | Red sign, tap, clock, green check. |
 | arrive | tip, first message received | A message came by radio. Tap to hear it. | The radio pulses, the message slides in, the phone reads it. |
 | lost | problem card | Turn on the radio and come closer. | Finger presses the radio button; the radio comes close. |
@@ -193,7 +193,11 @@ The owner asked that every step and every problem shows, with a moving picture, 
 
 ### Tips and the Help page (T1)
 
-- Each tip shows once, in the chat, above the microphone, the first time its moment happens (first recording, first draft, first send, first failure, first received message). It closes with a tap or after the person does the action. Shown tips are stored and never come back on their own.
+- Each tip shows once, in the chat, above the microphone, the first time its moment happens (first recording, first draft, first send in a private chat, first failure, first received message). It closes with a tap or after the person does the action. Shown tips are stored and never come back on their own.
+- **The delivery tip belongs to private chats only.** A group message ends at "Sent" (see the delivery states in `2026-10-06-ui-core-loop-design.md`), so the picture that ends on "Delivered" never shows in the group and is not stored as shown there: it shows after the first message sent in a private chat. Its Help row stays, since Help explains every sign.
+- **A tip's picture is large**, like a setup step's: as wide as the tip card and half as tall, with the sentence, the speaker and the close button in one row under it. The cut-off notice in the draft uses the same layout. Help rows, the friend guide and the pictures in notes keep the small picture beside the words.
+- **The chat stays usable under a large picture.** The draft and the tip are laid out together and never take the room of the bar under them (the microphone, or Clear, Listen and Send) nor of a 96 dp strip of messages; when they need more than is left, the pictures get smaller (always twice as wide as tall, centred) before any words do. A window lower than 560 dp (a phone on its side) keeps the small picture beside the words. While the cut-off notice shows, the draft's "listen" tip waits, so one picture shows at a time; it shows once the notice is gone (the draft is edited, or at the next draft).
+- **The Listen button in the draft bar** is a filled round button, 64 dp: yellow with a dark triangle, and green with the stop bars while the draft is being read, in both themes. It is the button the "listen" picture shows.
 - A **"?"** button in the chats top bar, beside the gear, opens a **Help** page with every scene above, grouped as Setup, Talking, Problems and Rare problems. Each row plays its picture and its sentence.
 
 ### Too long: cut off, not condensed (behaviour change)

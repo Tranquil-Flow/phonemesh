@@ -3,6 +3,7 @@ package org.phonemesh.app
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -63,6 +64,43 @@ class HowToPanelTest {
         attach(activity, panel)
         assertNull(Views.tagged(activity, "part:1"))
         assertNotNull(Views.tagged(activity, "howto_say"))
+    }
+
+    @Test fun aLargePanelGivesUpItsPictureHeightBeforeItsWords() {
+        val activity = start()
+        val extra = TestCore.onMain { android.view.View(activity).apply {
+            tag = "extra"
+            layoutParams = android.widget.LinearLayout.LayoutParams(Ui.dp(activity, 48), Ui.dp(activity, 48))
+        } }
+        val panel = TestCore.onMain {
+            HowToPanel(activity, Palette(activity), listOf(HowToScenes.get("hello")), sentence = { "x" }, canSay = { true }, say = {})
+                .apply { add(extra) }
+        }
+        attach(activity, panel)
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        val picture = Views.tagged(activity, "howto:hello")!!
+        val words = Views.tagged(activity, "howto_sentence")!!
+        val speaker = Views.tagged(activity, "howto_say")!!
+        TestCore.onMain {
+            assertEquals("as wide as the panel", panel.width, picture.width)
+            assertEquals(picture.width / 2, picture.height)
+            assertSame("an added button joins the sentence row, after the speaker", speaker.parent, extra.parent)
+            val row = speaker.parent as ViewGroup
+            assertEquals(row.childCount - 1, row.indexOfChild(extra))
+            assertTrue(picture.bottom <= row.top)
+        }
+        val limit = TestCore.onMain { panel.height * 2 / 3 }
+        TestCore.onMain { panel.layoutParams = panel.layoutParams.apply { height = limit } }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        TestCore.onMain {
+            val row = speaker.parent as ViewGroup
+            assertEquals(limit, panel.height)
+            assertEquals("the sentence row stays whole", limit, row.bottom)
+            assertTrue(row.height >= speaker.height && words.height > 0)
+            assertTrue("the picture is smaller", picture.width < panel.width)
+            assertEquals("and keeps its shape", picture.height * 2, picture.width)
+            assertEquals("in the middle", (panel.width - picture.width) / 2, picture.left)
+        }
     }
 
     @Test fun compactMultipleScenesStillHaveAccessiblePartButtons() {

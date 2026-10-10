@@ -36,7 +36,7 @@ class ScreenChecksTest {
             "01-welcome-1", "01-welcome-3", "01-welcome-5", "01-welcome-still",
             "01-language-from-settings", "02-chats-step1", "02-chats-step1-offline", "02-chats-friend-guide",
             "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
-            "05-conversation-mic-hint", "06-draft-too-long", "06-draft-cut", "07-recording",
+            "05-conversation-mic-hint", "05-conversation-tip", "06-draft-too-long", "06-draft-cut", "07-recording",
             "07-recording-tip", "08-radio", "09-settings", "10-help", "11-note-picture",
         )
         assertEquals(names, ScreenStates.all.map { it.first })
@@ -48,6 +48,7 @@ class ScreenChecksTest {
     @Test fun chatsWithRows() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows() }
     @Test fun chatsInEnglish() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows("en-US") }
     @Test fun conversation() = check(minTargets = 6, minRows = 4) { ScreenStates.conversation() }
+    @Test fun conversationTip() = check(minTargets = 6, minRows = 2) { ScreenStates.conversationTip() }
     @Test fun draftTooLong() = check(minTargets = 3) { ScreenStates.draftTooLong() }
     @Test fun draftCut() = check(minTargets = 4) { ScreenStates.draftCut() }
     @Test fun recordingLocked() = check(minTargets = 2) { ScreenStates.recordingLocked() }

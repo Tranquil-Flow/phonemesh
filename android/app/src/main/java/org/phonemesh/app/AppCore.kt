@@ -80,6 +80,8 @@ class AppCore private constructor(
         },
         guess = { BuildConfig.FAKE_COUNTRY.ifEmpty { null } ?: access.countryCode() },
         changed = { changed(Change.REGION) },
+        log = { warn, line -> if (warn) Log.w(TAG, line) else Log.i(TAG, line) },
+        now = { SystemClock.elapsedRealtime() },
     )
     val store = PackStore(File(app.filesDir, "packs"), GeneratedPackCatalog.entries, BuildConfig.ALLOW_UNKNOWN_PACKS)
 
@@ -491,6 +493,8 @@ class AppCore private constructor(
         val message = history.message(messageId) ?: return false
         if (message.direction != Direction.OUT || message.status?.canResend != true) return false
         val chat = history.chat(message.chatId) ?: return false
+        // Like send: no region yet, or a region write is running. Nothing goes out and the message stays as it is.
+        if (region.blocksSending) { changed(Change.REGION); return false }
         history.setStatus(messageId, DeliveryStatus.WAITING)
         transmit(messageId, message.text, message.language ?: currentLanguage().tag, chat)
         changed(Change.DELIVERY)

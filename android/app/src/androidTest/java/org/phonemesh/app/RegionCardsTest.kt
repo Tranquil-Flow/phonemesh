@@ -10,6 +10,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.RegionResult
+import org.phonemesh.core.DeliveryStatus
 
 /** The region cards on the chats and chat screens, with the fake radio. A region is written only after a tap. */
 @RunWith(AndroidJUnit4::class)
@@ -204,6 +205,94 @@ class RegionCardsTest {
         assertNotNull(Views.withText(screen, text(R.string.region_working)))
     }
 
+    /** S3: a failed Change can be left. Back shows the question again, and Keep is there; nothing more is written. */
+    @Test fun aFailureCardLeadsBackToTheQuestion() {
+        radio("US", "TG")
+        val screen = chats()
+        TestCore.onMain { radio.regionResult = RegionResult.DROPPED }
+        Views.tap(screen, "region_change")
+        assertEquals(RegionPhase.Failed(RegionFailure.TRY_AGAIN), TestCore.onMain { TestCore.core.region.phase })
+        assertNotNull(Views.tagged(screen, "region_retry"))
+        assertNull(Views.tagged(screen, "region_keep"))
+        assertEquals(text(R.string.back), Views.textOf(Views.tagged(screen, "region_back")!!))
+        Views.tap(screen, "region_back")
+        assertEquals(RegionPhase.Idle, TestCore.onMain { TestCore.core.region.phase })
+        assertNotNull(Views.tagged(screen, "region_change"))
+        assertNull(Views.tagged(screen, "region_retry"))
+        assertEquals("Back writes nothing", 1, radio.regionWrites.size)
+        assertTrue(radio.connects.isEmpty())
+        Views.tap(screen, "region_keep")
+        await { Views.tagged(screen, "card_region") == null }
+        assertNotNull("step 2 is done", Views.tagged(screen, "card_hello"))
+        assertEquals(1, radio.regionWrites.size)
+    }
+
+    /** S3: the card that says "Ask a helper" has the helper's button, and a way back; neither writes. */
+    @Test fun theCardThatSaysAskAHelperOpensTheHelperList() {
+        radio("UNSET", "TG")
+        val screen = chats()
+        Views.tap(screen, "region_yes")
+        repeat(2) { TestCore.onMain { radio.connected(false); radio.region = "UNSET"; radio.connected(true) } }
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), TestCore.onMain { TestCore.core.region.phase })
+        assertNotNull(Views.withText(screen, text(R.string.region_ask_helper)))
+        assertNotNull(Views.tagged(screen, "region_retry"))
+        assertNotNull(Views.tagged(screen, "region_back"))
+        assertEquals(text(R.string.region_for_helpers), Views.textOf(Views.tagged(screen, "region_helpers")!!))
+        Views.tap(screen, "region_helpers")
+        await { Views.resumed() is RegionActivity }
+        val list = Views.resumed()!!
+        assertNotNull("the helper list, not the country list", Views.tagged(list, "regions"))
+        assertNotNull(Views.tagged(list, "helper_set"))
+        assertEquals("opening the list writes nothing", 2, radio.regionWrites.size)
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), TestCore.onMain { TestCore.core.region.phase })
+    }
+
+    /** S3: the other failure cards have no helper button, and Back from a radio that is away leaves no card. */
+    @Test fun backFromARadioThatDidNotReturnClearsTheCard() {
+        radio("UNSET", "TG")
+        val screen = chats()
+        val yes = Views.tagged(screen, "region_yes")!!
+        TestCore.onMain { TestCore.core.region.returnMs = 0; yes.performClick(); radio.connected(false) }
+        await { TestCore.onMain { TestCore.core.region.phase } == RegionPhase.Failed(RegionFailure.NO_RETURN) }
+        assertNull(Views.tagged(screen, "region_helpers"))
+        Views.tap(screen, "region_back")
+        assertEquals(RegionPhase.Idle, TestCore.onMain { TestCore.core.region.phase })
+        assertNull(Views.tagged(screen, "card_region"))
+        assertEquals(1, radio.regionWrites.size)
+        // The radio returns unchanged: the question again, nothing written by itself.
+        TestCore.onMain { radio.region = "UNSET"; radio.connected(true) }
+        assertNotNull(Views.tagged(screen, "region_yes"))
+        assertEquals(1, radio.regionWrites.size)
+    }
+
+    /** B1: "Send again" is off like Send while sending is blocked, and a tap that gets through sends nothing. */
+    @Test fun sendAgainIsOffWhileSendingIsBlocked() {
+        radio("UNSET", "TG")
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        TestCore.onMain {
+            radio.connected(false)
+            TestCore.core.setDraft(group, "Bonjour")
+            TestCore.core.send(group)
+            radio.connected(true)
+        }
+        val failed = TestCore.onMain { TestCore.core.history.lastMessage(group)!! }
+        assertEquals(DeliveryStatus.FAILED, failed.status)
+        val screen = conversation(null)
+        val again = "resend:${failed.id}"
+        assertFalse(enabled(screen, again))
+        Views.tap(screen, again)
+        assertTrue(radio.sent.isEmpty())
+        assertEquals(DeliveryStatus.FAILED, TestCore.onMain { TestCore.core.history.message(failed.id)!!.status })
+        // Still off while the radio restarts with its new region.
+        TestCore.onMain { TestCore.core.region.yes() }
+        assertFalse(enabled(screen, again))
+        TestCore.onMain { radio.connected(false); radio.region = "EU_868"; radio.connected(true) }
+        assertTrue(enabled(screen, again))
+        Views.tap(screen, again)
+        assertEquals(1, radio.sent.size)
+        assertEquals(DeliveryStatus.WAITING, TestCore.onMain { TestCore.core.history.message(failed.id)!!.status })
+    }
+
     @Test fun aFailedReconnectLeavesTryAgainReady() {
         radio("UNSET", "TG")
         val screen = chats()
@@ -241,7 +330,17 @@ class RegionCardsTest {
         TestCore.onMain { radio.regionResult = RegionResult.DROPPED }
         val screen = chats()
         Views.tap(screen, "region_yes")
+        assertNotNull(Views.tagged(screen, "region_back"))
         assertEquals(emptyList<String>(), A11yCheck.problems(screen))
+        // The card with the most buttons: Try again, For helpers and Back, in the dark.
+        Views.finish(activity)
+        TestCore.uninstall()
+        radio("UNSET", "TG", ThemeMode.DARK)
+        val dark = chats()
+        Views.tap(dark, "region_yes")
+        repeat(2) { TestCore.onMain { radio.connected(false); radio.region = "UNSET"; radio.connected(true) } }
+        listOf("region_retry", "region_helpers", "region_back").forEach { assertNotNull(it, Views.tagged(dark, it)) }
+        assertEquals(emptyList<String>(), A11yCheck.problems(dark))
     }
 
     /** The picture: the amber radio with the country's flag on its screen; still while animations are off; kept across renders. */

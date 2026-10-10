@@ -64,7 +64,9 @@ class RegionSetupTest {
     private val clock = Clock()
     private var guess: String? = "TG"
     private var changes = 0
-    private val setup = RegionSetup(countries, memory, link, clock, { guess }, { changes++ })
+    /** The log lines, each with whether it was a warning. */
+    private val logged = mutableListOf<Pair<Boolean, String>>()
+    private val setup = RegionSetup(countries, memory, link, clock, { guess }, { changes++ }, { warn, line -> logged += warn to line }, { clock.now })
 
     /** The radio restarts with [region] and the handshake finishes. */
     private fun comeBack(region: String) { link.connected = false; setup.onLost(); link.radioRegion = region; link.connected = true; setup.onReady() }
@@ -107,8 +109,200 @@ class RegionSetupTest {
 
     @Test fun verifiesEvenWhenTheLinkNeverDrops() {
         setup.yes()
+        clock.advance(7_999)
+        assertEquals("not before the radio had its time to restart", 0, link.reconnects)
+        clock.advance(1)
+        assertEquals(1, link.reconnects)
+        assertEquals(RegionPhase.Working("EU_868", "TG", false), setup.phase)
+        // The forced reconnect drops the link; the new handshake carries the region: verified.
+        link.connected = false; setup.onLost()
+        assertEquals(RegionPhase.Working("EU_868", "TG", false), setup.phase)
+        assertNull("nothing is remembered before the new handshake", memory.radioCountry("AA"))
+        link.radioRegion = "EU_868"; link.connected = true; setup.onReady()
+        assertEquals(RegionPhase.Done("EU_868", "TG", false), setup.phase)
+        assertEquals("TG", memory.radioCountry("AA"))
+        assertEquals(listOf("EU_868"), link.writes)
+        clock.advance(300_000)
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertTrue(setup.settled)
+        assertEquals("no reconnect after the radio is verified", 1, link.reconnects)
+        assertTrue(clock.tasks.isEmpty())
+    }
+
+    /** The radio never drops and never changes: each write gets its own forced reconnect, and there is one retry only. */
+    @Test fun aRadioThatNeverDropsAndNeverChangesIsWrittenOnceMoreThenFails() {
+        setup.yes()
         clock.advance(8_000)
         assertEquals(1, link.reconnects)
+        comeBack("UNSET")
+        assertEquals(listOf("EU_868", "EU_868"), link.writes)
+        assertEquals(RegionPhase.Working("EU_868", "TG", false), setup.phase)
+        clock.advance(7_999)
+        assertEquals("the retry waits its own eight seconds", 1, link.reconnects)
+        clock.advance(1)
+        assertEquals(2, link.reconnects)
+        comeBack("UNSET")
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), setup.phase)
+        assertEquals(2, link.writes.size)
+        assertNull(memory.radioCountry("AA"))
+        clock.advance(300_000)
+        assertEquals(2, link.reconnects)
+        assertEquals(2, link.writes.size)
+        assertTrue(clock.tasks.isEmpty())
+    }
+
+    // ---- S3: a failure card can be left; leaving writes nothing and leaves no timer or reconnect behind
+
+    @Test fun backFromAFailedChangeShowsTheQuestionAgainSoKeepWorks() {
+        link.radioRegion = "US"
+        link.result = RegionResult.DROPPED
+        setup.yes()
+        assertEquals(RegionPhase.Failed(RegionFailure.TRY_AGAIN), setup.phase)
+        assertFalse(setup.settled)
+        val before = changes
+        setup.back()
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertTrue("the screen is told", changes > before)
+        assertEquals(RegionStep.AskChange("TG", "US"), setup.step())
+        assertEquals(1, link.writes.size)
+        assertTrue(clock.tasks.isEmpty())
+        // Try again belongs to the card that was left: it writes nothing now.
+        link.result = RegionResult.SENT
+        setup.retry()
+        assertEquals(1, link.writes.size)
+        setup.keep()
+        assertTrue(setup.settled)
+        assertEquals(setOf("TG"), memory.kept("AA"))
+        assertEquals(1, link.writes.size)
+        assertEquals(0, link.reconnects)
+    }
+
+    @Test fun backFromARadioThatDidNotReturnStopsEveryTimerAndReconnect() {
+        setup.yes()
+        link.connected = false; setup.onLost()
+        clock.advance(60_000)
+        assertEquals(RegionPhase.Failed(RegionFailure.NO_RETURN), setup.phase)
+        assertTrue("the card's own reconnect loop is running", clock.tasks.isNotEmpty())
+        val reconnects = link.reconnects
+        setup.back()
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertTrue("timers left: ${clock.tasks.size}", clock.tasks.isEmpty())
+        clock.advance(300_000)
+        assertEquals(reconnects, link.reconnects)
+        assertEquals(1, link.writes.size)
+        // The radio comes back later, still without a region: the question again, and nothing written by itself.
+        link.connected = true; setup.onReady()
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertEquals(RegionStep.AskSet("TG"), setup.step())
+        assertEquals(1, link.writes.size)
+        assertNull(memory.radioCountry("AA"))
+        assertTrue(clock.tasks.isEmpty())
+    }
+
+    @Test fun backFromASettingTheRadioDidNotTakeLeadsToTheQuestionAndTheHelperPath() {
+        setup.yes()
+        comeBack("UNSET")
+        comeBack("UNSET")
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), setup.phase)
+        setup.back()
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertEquals(RegionStep.AskSet("TG"), setup.step())
+        assertEquals(2, link.writes.size)
+        assertTrue(clock.tasks.isEmpty())
+        // A later handshake is not taken for an answer to the write that was given up.
+        comeBack("EU_868")
+        assertEquals(RegionPhase.Idle, setup.phase)
+        assertNull(memory.radioCountry("AA"))
+        assertEquals(2, link.writes.size)
+    }
+
+    @Test fun aHelperCanSetTheRadioFromTheCardThatSaysAskAHelper() {
+        setup.yes()
+        comeBack("UNSET")
+        comeBack("UNSET")
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), setup.phase)
+        setup.helperChoose("EU_433")
+        assertEquals(RegionPhase.Working("EU_433", "TG", true), setup.phase)
+        assertEquals(listOf("EU_868", "EU_868", "EU_433"), link.writes)
+        comeBack("EU_433")
+        assertEquals(RegionPhase.Done("EU_433", "TG", true), setup.phase)
+        assertTrue(memory.helperSet("AA"))
+    }
+
+    @Test fun backDoesNothingUnlessACardHasFailed() {
+        setup.back()
+        assertEquals(RegionPhase.Idle, setup.phase)
+        link.defer = true
+        setup.yes()
+        setup.back()
+        assertEquals(RegionPhase.Working("EU_868", "TG", false), setup.phase)
+        link.finish()
+        assertEquals("the wait for the radio is still armed", 2, clock.tasks.size)
+        setup.back()
+        assertEquals(2, clock.tasks.size)
+        comeBack("EU_868")
+        setup.back()
+        assertEquals(RegionPhase.Done("EU_868", "TG", false), setup.phase)
+        assertEquals(1, link.writes.size)
+    }
+
+    // ---- S2: the log says what was written, who chose it and how it ended
+
+    private fun lines() = logged.map { it.second }
+
+    @Test fun theLogRecordsTheRegionTheCountryAndThatAHelperChoseIt() {
+        guess = "BJ"
+        link.address = "AA:BB:CC:DD:EE:01"
+        setup.helperChoose("EU_868")
+        val started = lines().single { "started" in it }
+        listOf("region=EU_868", "country=BJ", "helper=yes", "attempt=1").forEach { assertTrue("$it in: $started", it in started) }
+        assertTrue(lines().toString(), lines().any { "result" in it && "SENT" in it })
+        clock.advance(1_500)
+        link.connected = false; setup.onLost()
+        assertTrue(lines().toString(), lines().any { "lost" in it && "1500 ms" in it })
+        clock.advance(4_000)
+        link.radioRegion = "EU_868"; link.connected = true; setup.onReady()
+        assertTrue(lines().toString(), lines().any { "returned" in it && "5500 ms" in it })
+        val verified = lines().single { "verified" in it }
+        listOf("region=EU_868", "country=BJ", "helper=yes").forEach { assertTrue("$it in: $verified", it in verified) }
+        assertTrue("nothing here is a warning", logged.none { it.first })
+        assertTrue("no radio address in the log", lines().none { "AA:BB" in it || "EE:01" in it })
+    }
+
+    @Test fun aNormalSetIsLoggedAsNotAHelpersChoice() {
+        setup.yes()
+        val started = lines().single { "started" in it }
+        listOf("region=EU_868", "country=TG", "helper=no", "attempt=1").forEach { assertTrue("$it in: $started", it in started) }
+    }
+
+    @Test fun theLogSaysWhatTheRadioReportedWhenItDidNotTakeTheSetting() {
+        link.radioRegion = "US"
+        setup.yes()
+        comeBack("US")
+        assertTrue(lines().toString(), lines().any { "started" in it && "attempt=2" in it })
+        comeBack("US")
+        assertEquals(RegionPhase.Failed(RegionFailure.NOT_TAKEN), setup.phase)
+        val (warn, line) = logged.single { "NOT_TAKEN" in it.second }
+        assertTrue("a failure is a warning", warn)
+        listOf("wanted=EU_868", "radio=US", "writes=2").forEach { assertTrue("$it in: $line", it in line) }
+    }
+
+    @Test fun theLogNamesEveryOtherFailureToo() {
+        link.result = RegionResult.DROPPED
+        setup.yes()
+        assertTrue(lines().toString(), lines().any { "result" in it && "DROPPED" in it })
+        assertTrue(logged.toString(), logged.any { it.first && "TRY_AGAIN" in it.second && "wanted=EU_868" in it.second && "radio=UNSET" in it.second })
+        setup.back()
+        link.result = RegionResult.NO_SETTINGS
+        setup.yes()
+        assertTrue(lines().toString(), lines().any { "result" in it && "NO_SETTINGS" in it })
+        setup.back()
+        link.result = RegionResult.SENT
+        setup.yes()
+        link.connected = false; setup.onLost()
+        clock.advance(60_000)
+        assertEquals(RegionPhase.Failed(RegionFailure.NO_RETURN), setup.phase)
+        assertTrue(logged.toString(), logged.any { it.first && "NO_RETURN" in it.second && "wanted=EU_868" in it.second && "radio=none" in it.second })
     }
 
     @Test fun droppedOrNoSettingsAskToTryAgain() {

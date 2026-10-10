@@ -52,6 +52,9 @@ class RegionSetup(
     private val clock: RegionClock,
     private val guess: () -> String?,
     private val changed: () -> Unit,
+    /** One line for the app's log (warn = something failed). Never an address, a key or message text. */
+    private val log: (warn: Boolean, line: String) -> Unit = { _, _ -> },
+    private val now: () -> Long = { 0L },
 ) {
     private val check = RegionCheck(countries)
     private val countryList = countries
@@ -61,6 +64,8 @@ class RegionSetup(
     private var writes = 0
     /** The link dropped after the last write, so the next ready report carries a new handshake's settings. */
     private var fresh = false
+    /** When the last write was handed to the radio, for the log's elapsed times. */
+    private var wroteAt = 0L
 
     var phase: RegionPhase = RegionPhase.Idle
         private set
@@ -71,6 +76,7 @@ class RegionSetup(
     private val giveUp = Runnable {
         if (phase is RegionPhase.Working) {
             clock.cancel(nudge)
+            fail(RegionFailure.NO_RETURN)
             set(RegionPhase.Failed(RegionFailure.NO_RETURN))
         }
     }
@@ -142,6 +148,13 @@ class RegionSetup(
         start(last)
     }
 
+    /** Back on a failure card: the question shows again. Nothing is written; no timer or reconnect is left behind. */
+    fun back() {
+        if (phase !is RegionPhase.Failed) return
+        log(false, "region failure card left; nothing written")
+        stop(RegionPhase.Idle)
+    }
+
     fun onReady() {
         val working = target ?: return
         if (link.address != targetAddress) { stop(RegionPhase.Idle); return }
@@ -149,15 +162,18 @@ class RegionSetup(
         if ((phase as? RegionPhase.Failed)?.why == RegionFailure.TRY_AGAIN) return
         // Without a restart since the write, the region on hand is not the radio's answer to it.
         if (!fresh) return
+        log(false, "region flow: link returned ${now() - wroteAt} ms after the write, radio=${link.region() ?: "none"}")
         if (link.region() == working.region) {
             val address = targetAddress ?: return
             memory.setRadioCountry(address, working.country)
             memory.setHelperSet(address, working.helper)
+            log(false, "region verified: ${describe(working)}")
             stop(RegionPhase.Done(working.region, working.country, working.helper))
             clock.after(DONE_MS, idle)
         } else if (writes < MAX_WRITES) {
             write(working)
         } else {
+            fail(RegionFailure.NOT_TAKEN)
             stop(RegionPhase.Failed(RegionFailure.NOT_TAKEN))
         }
     }
@@ -165,6 +181,7 @@ class RegionSetup(
     fun onLost() {
         if (target == null) return
         if (link.address != targetAddress) { stop(RegionPhase.Idle); return }
+        if (phase is RegionPhase.Working) log(false, "region flow: link lost ${now() - wroteAt} ms after the write")
         fresh = true
         clock.cancel(nudge)
         clock.cancel(tryReconnect)
@@ -186,9 +203,12 @@ class RegionSetup(
         clock.cancel(idle)
         fresh = false
         writes++
+        wroteAt = now()
+        log(false, "region write started: ${describe(working)} attempt=$writes")
         set(working)
         link.setRegion(working.region) { result ->
             if (target !== working || phase != working) return@setRegion
+            log(false, "region write result: $result")
             when (result) {
                 RegionResult.SENT -> {
                     clock.cancel(giveUp)
@@ -196,10 +216,20 @@ class RegionSetup(
                     clock.after(returnMs, giveUp)
                     clock.after(NUDGE_MS, nudge)
                 }
-                RegionResult.DROPPED, RegionResult.NO_SETTINGS -> stop(RegionPhase.Failed(RegionFailure.TRY_AGAIN))
+                RegionResult.DROPPED, RegionResult.NO_SETTINGS -> {
+                    fail(RegionFailure.TRY_AGAIN)
+                    stop(RegionPhase.Failed(RegionFailure.TRY_AGAIN))
+                }
             }
         }
     }
+
+    private fun describe(working: RegionPhase.Working) =
+        "region=${working.region} country=${working.country ?: "none"} helper=${if (working.helper) "yes" else "no"}"
+
+    /** The log's line for a failure card: what was wanted and what the radio says it has instead. */
+    private fun fail(why: RegionFailure) =
+        log(true, "region failed: $why wanted=${target?.region} radio=${link.region() ?: "none"} writes=$writes")
 
     private fun cancelTimers() = listOf(nudge, giveUp, tryReconnect).forEach { clock.cancel(it) }
 

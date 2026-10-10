@@ -18,10 +18,18 @@ class RegionSessionTest {
     private var localNode: Int? = 0x0a0b0c0d
     /** Number of writes the fake link accepts before refusing. */
     private var accept = Int.MAX_VALUE
+    /** Whether the fake link has room for a whole region transaction, and what it was asked about. */
+    private var roomy = true
+    private val roomAsked = mutableListOf<List<AdminMessage.PayloadVariantCase>>()
     private val session = RegionSession(
         ready = { ready },
         local = { localNode },
         write = { admin, to, wantResponse -> (writes.size < accept).also { if (it) writes += Write(admin, to, wantResponse) } },
+        room = { messages, to ->
+            assertEquals(localNode, to)
+            roomAsked += messages.map { it.payloadVariantCase }
+            roomy
+        },
         later = { task, delay -> timers += task to delay },
         cancel = { task -> timers.removeAll { it.first === task } },
         finish = { done, result -> done(result) },
@@ -229,6 +237,29 @@ class RegionSessionTest {
         session.onReply(RadioEvent.AdminLora(local, asked, passkey))
         assertEquals(listOf(RegionResult.DROPPED), results)
         assertTrue(writes.none { it.admin.commitEditSettings })
+    }
+
+    /** DROPPED means the radio was not changed: with no room for all three messages, none of them is queued. */
+    @Test fun aWriteWithoutRoomForTheWholeTransactionQueuesNoneOfIt() {
+        session.onSettings(handshake)
+        roomy = false
+        session.start("EU_868", done)
+        session.onReply(RadioEvent.AdminLora(local, asked, passkey))
+        assertEquals(listOf(RegionResult.DROPPED), results)
+        assertEquals("only the read request left", listOf(AdminMessage.PayloadVariantCase.GET_CONFIG_REQUEST), writes.map { it.admin.payloadVariantCase })
+        assertTrue(writes.none { it.admin.beginEditSettings || it.admin.hasSetConfig() || it.admin.commitEditSettings })
+        // Positive control: with room, the same transaction goes out whole, and the check saw all three messages.
+        roomy = true
+        session.start("EU_868", done)
+        session.onReply(RadioEvent.AdminLora(local, asked, passkey))
+        assertEquals(listOf(RegionResult.DROPPED, RegionResult.SENT), results)
+        assertEquals(5, writes.size)
+        val transaction = listOf(
+            AdminMessage.PayloadVariantCase.BEGIN_EDIT_SETTINGS,
+            AdminMessage.PayloadVariantCase.SET_CONFIG,
+            AdminMessage.PayloadVariantCase.COMMIT_EDIT_SETTINGS,
+        )
+        assertEquals(listOf(transaction, transaction), roomAsked)
     }
 
     @Test fun theLinkLostWhileWaitingDropsTheWriteOnce() {

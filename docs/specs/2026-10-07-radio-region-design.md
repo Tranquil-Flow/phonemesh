@@ -50,7 +50,7 @@ The region check runs every time a radio connects. During setup it is the fourth
 The **For helpers** button opens one screen:
 
 - Title "Choose the radio region". One sentence: "Only choose if you know this country's radio rules."
-- A list of every region in the bundled proto except `UNSET`, each with its flag from the region block below and its name with the underscore as a space ("EU 868").
+- A list of every region in the bundled proto except `UNSET`, `UNRECOGNIZED` and the seven licensed amateur bands (`ITU1_2M`, `ITU2_2M`, `ITU3_2M`, `ITU1_70CM`, `ITU2_70CM`, `ITU3_70CM`, `ITU2_125CM`), each with its flag from the region block below and its name with the underscore as a space ("EU 868").
 - A tick box: "I checked the radio rules for Benin." **Set** stays disabled until a region is chosen and the box is ticked.
 - **Set** runs the same write and the same "Setting up…" and "Radio ready" pictures as **Yes**. The ready sentence names the region, not the country: "Radio set to EU 868."
 - Settings records `radioCountry` for the radio as usual, so later cards show Benin's flag, and records `helperSet: Set<radioAddress>`. A helper-set radio never gets a Change card from a guess; it only changes through **For helpers** again (reachable from the radio's row in Settings).
@@ -73,7 +73,7 @@ One file, `core/src/main/resources/countries.txt`. One line per country, fields 
 
 ```
 # code | region | flag | source
-DE | EU_868 | h:000000,dd0000,ffce00 | Bundesnetzagentur general allocation for short-range devices, 863-870 MHz (exact reference added when the line is written)
+DE | EU_868 | h:000000,dd0000,ffce00 | Bundesnetzagentur Vfg. 91/2025 (November 2025), Tabelle 2, Band Nr. 54: 869.4-869.65 MHz, 500 mW ERP, frequency access and interference mitigation techniques [7] or duty cycle <= 10 %
 TG | EU_868 | h:006a4e,ffce00,006a4e,ffce00,006a4e; canton:d21034; star:ffffff | ARCEP Togo Décision N°226/ARCEP/DG/22 (30 Dec 2022), Annex 2: 869.4-869.65 MHz, 500 mW ERP, 10 % duty cycle
 ```
 
@@ -93,7 +93,7 @@ EU_433 | flag:v:003399; stars:12:ffcc00 | Europe
 
 `country:XX` reuses a country's flag and name (the country does not need to be in the supported list). `flag:` draws one directly; version 1 adds `stars:N:colour`, a ring of N stars, for the European flag. Regions with no line get the globe.
 
-Germany's line gets its exact Bundesnetzagentur reference from the published text when it is written. The line is not committed without it. The Togo line comes from the ARCEP decision, read on 2026-10-07.
+Germany's line carries its exact Bundesnetzagentur reference, copied from the published text. The Togo line comes from the ARCEP decision, read on 2026-10-07.
 
 ## Architecture
 
@@ -131,6 +131,7 @@ Three parts, each with one job.
 | Reconnects, region unchanged after one retry | "The radio did not take the setting. Ask a helper." Helper picture. Detail goes to the log. |
 | `Dropped` | **Try again**. The radio was not changed. |
 | `NoSettings` | **Try again**. Nothing was written. |
+| Any of the four cards above | **Back** returns to the question (Yes / Other country, Change / Keep, or For helpers). It writes nothing and stops the reconnect attempts. The "did not take the setting" card also has **For helpers**. |
 | Person leaves the screen during setup | Setup carries on. The result shows when they return, or as a problem card on the chats screen. |
 | Country line found wrong later | Fixed in the file and shipped in an app update. Radios already set get the Change card on their next connection. |
 
@@ -165,10 +166,10 @@ The added code, the country file and the flag drawing come to a few KB. No new d
    - Every new screen passes the existing checks (touch size, content descriptions, wording) in light and dark.
    - Screenshots of each card.
 3. **Real radios, on both the Pixel 8 Pro and the Fairphone 3:**
-   - The owner does every tap that changes a radio. Claude installs the owner-approved build and reads logs or takes read-only screenshots. On the Pixel that means install and screenshots only.
+   - The owner does every tap that changes a radio. The owner-approved build is installed, and logs are read or read-only screenshots taken. On the Pixel that means install and screenshots only.
    - FLAG_SECURE blacks out screenshots, so the owner photographs the cards or approves a test build without it.
    - **New radio:** the owner sets radio A to `UNSET` in the Meshtastic app. In Phonemesh: "Set up this radio for Germany?" → Yes → restart → "Radio ready". Then a message from A to B proves it transmits. Run once per phone, swapping which radio is reset.
-   - **Different region:** a test build fakes the country as `US`. The Change card appears. The owner taps **Keep** only, because Change would set `US_915`, which is not legal in Germany. The Change write is the same path as the new-radio test.
+   - **Different region:** a test build fakes the country as `US`. The Change card appears. The owner taps **Keep** only, because Change would set `US`, which is not legal in Germany. The Change write is the same path as the new-radio test.
    - **Helper path:** a test build fakes the country as `BJ`. The Ask a helper card appears; the owner opens For helpers, picks `EU_868` (legal in Germany), ticks and taps **Set**. Then a message from A to B. One phone is enough; the write is the same path as the new-radio test.
    - **Pairing:** record whether the V4 asks for a pairing code and where it shows. This settles the "type the number" how-to picture.
 

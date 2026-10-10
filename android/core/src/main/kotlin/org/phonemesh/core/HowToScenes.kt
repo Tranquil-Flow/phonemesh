@@ -1,6 +1,6 @@
 package org.phonemesh.core
 
-/** Every picture's timing, ported from `.local/visual-guide-mockups/phonemesh-howto.html`. */
+/** Every picture's timing, ported from the approved how-to mockup's CSS keyframes. */
 object HowToScenes {
     // CSS check pops, held until .96/.97 then returned to their first frame.
     private const val OK60 = "0:0 .58:0 .66:1 .96:1 1:0"

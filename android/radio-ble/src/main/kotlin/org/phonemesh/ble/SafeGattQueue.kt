@@ -16,13 +16,16 @@ internal class SafeGattQueue(
     }
     private val pending=ArrayDeque<Operation>()
     private var active:Operation?=null
+    private fun held():Int = pending.size+(if(active==null) 0 else 1)
     fun enqueue(name:String,start:()->Boolean):Boolean {
-        if(pending.size+(if(active==null) 0 else 1)>=maxPending) return false
+        if(!room(1)) return false
         val op=Operation(name,start)
         pending.add(op)
         pump()
         return !op.rejected
     }
+    /** True when [count] more operations fit now, so none of them can be refused for space. */
+    fun room(count:Int):Boolean = held()+count<=maxPending
     fun complete(name:String) {
         val op=active ?: return
         if(op.name!=name) return

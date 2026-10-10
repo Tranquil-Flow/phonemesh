@@ -79,6 +79,11 @@ class BleMeshTransport(
         write = { admin, node, wantResponse ->
             writeToRadio(MeshtasticProtocol.buildAdmin(admin, node, wantResponse = wantResponse), "admin ${admin.payloadVariantCase}")
         },
+        // Every refusal writeToRadio can give for space or size, checked for the whole edit before its first message.
+        room = { messages, node ->
+            gatt != null && toRadio != null && opQueue.room(messages.size) &&
+                messages.all { MeshtasticProtocol.buildAdmin(it, node, wantResponse = false).size <= maxWriteBytes() }
+        },
         later = { task, delay -> workHandler.postDelayed(task, delay); Unit },
         cancel = { task -> workHandler.removeCallbacks(task) },
         finish = { done, result ->

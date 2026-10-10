@@ -14,6 +14,8 @@ internal class RegionSession(
     private val local: () -> Int?,
     /** Queues one admin message for the local node; false when the link refused it. */
     private val write: (admin: AdminMessage, localNode: Int, wantResponse: Boolean) -> Boolean,
+    /** True when the link will take all of [messages] now; asked before the first of them is queued. */
+    private val room: (messages: List<AdminMessage>, localNode: Int) -> Boolean,
     private val later: (Runnable, Long) -> Unit,
     private val cancel: (Runnable) -> Unit,
     /** Delivers a result to the caller (the transport posts it to the main thread). */
@@ -84,8 +86,9 @@ internal class RegionSession(
             finish(waiting.done, RegionResult.NO_SETTINGS)
             return
         }
-        val sent = RegionWriter.messages(base, waiting.code, RegionWriter.passkey(reply, unsigned(node)))
-            .all { message -> write(message, node, false) }
+        val messages = RegionWriter.messages(base, waiting.code, RegionWriter.passkey(reply, unsigned(node)))
+        // All or nothing: DROPPED tells the person the radio was not changed, so no part of the edit may be queued.
+        val sent = room(messages, node) && messages.all { message -> write(message, node, false) }
         finish(waiting.done, if (sent) RegionResult.SENT else RegionResult.DROPPED)
     }
 

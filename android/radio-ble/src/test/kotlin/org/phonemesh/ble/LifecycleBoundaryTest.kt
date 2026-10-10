@@ -23,6 +23,19 @@ class LifecycleBoundaryTest {
         queue.complete("first")
         assertEquals(listOf("first"),starts)
     }
+    @Test fun roomPromisesThatManyOperationsAreAccepted() {
+        val timers=mutableListOf<Runnable>(); val failures=mutableListOf<String>()
+        val queue=SafeGattQueue({task,_->timers.add(task)},{timers.remove(it)},{failures.add(it)},maxPending=4)
+        assertTrue(queue.room(4)); assertFalse(queue.room(5))
+        assertTrue(queue.enqueue("active") { true })
+        assertTrue(queue.room(3)); assertFalse(queue.room(4))
+        repeat(3) { assertTrue(queue.enqueue("write$it") { true }) }
+        assertFalse(queue.room(1))
+        assertFalse(queue.enqueue("over") { true })
+        queue.complete("active")
+        assertTrue(queue.room(1)); assertFalse(queue.room(2))
+        assertTrue(failures.isEmpty())
+    }
     @Test fun startFailureClearsQueuedWorkAndSuccessRemainsSerialized() {
         val timers=mutableListOf<Runnable>(); val starts=mutableListOf<String>(); val failures=mutableListOf<String>()
         val queue=SafeGattQueue({task,_->timers.add(task)},{timers.remove(it)},{failures.add(it)})

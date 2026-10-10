@@ -83,6 +83,11 @@ object RegionCards {
                 val connecting = core.isConnecting(address)
                 if (connecting) lines += screen.getString(R.string.radio_connecting)
                 button("region_retry", R.string.region_try_again, filled = true, enabled = !connecting) { region.retry() }
+                if (phase.why == RegionFailure.NOT_TAKEN) {
+                    button("region_helpers", R.string.region_for_helpers, false) { screen.startActivity(RegionActivity.helpers(screen)) }
+                }
+                // The way out: the question shows again (Keep, Other country, For helpers). It writes nothing.
+                button("region_back", R.string.back, false) { region.back() }
             }
             RegionPhase.Idle -> when (val step = region.step()) {
                 RegionStep.Ready -> return null

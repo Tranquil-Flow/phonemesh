@@ -3,7 +3,7 @@ package org.phonemesh.app
 /** The how-to pictures' sentences (one per scene, read aloud by their speaker button) and the pairing switch. */
 object HowTo {
     /**
-     * The "type the number" picture ships only if the real-radio test (radio region plan) shows the Heltec V4
+     * The "type the number" picture ships only if the real-radio test shows the Heltec V4
      * asks for a pairing code. Until then nothing shows it; turning it on is this one line.
      */
     val showPair: Boolean = false

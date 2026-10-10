@@ -327,6 +327,7 @@ object ScreenStates {
         expectWords(screen, R.string.region_no_return)
         expectWords(screen, R.string.region_no_return_hint)
         expect(Views.tagged(screen, "region_retry")?.let { TestCore.onMain { it.isEnabled } } == true, "Try again ready")
+        expect(Views.tagged(screen, "region_back") != null, "Back")
         return screen
     }
 
@@ -340,6 +341,8 @@ object ScreenStates {
         expect(TestCore.radio.regionWrites.size == RegionSetup.MAX_WRITES, "two writes")
         expectWords(screen, R.string.region_not_taken)
         expect(Views.tagged(screen, "region_retry") != null, "Try again")
+        expect(Views.tagged(screen, "region_helpers") != null, "For helpers")
+        expect(Views.tagged(screen, "region_back") != null, "Back")
         return screen
     }
 
@@ -350,6 +353,7 @@ object ScreenStates {
         Views.tap(screen, "region_yes")
         expectWords(screen, R.string.region_not_changed)
         expect(Views.tagged(screen, "region_retry") != null, "Try again")
+        expect(Views.tagged(screen, "region_back") != null, "Back")
         return screen
     }
 

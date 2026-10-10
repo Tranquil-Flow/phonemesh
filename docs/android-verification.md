@@ -275,10 +275,10 @@ Release APKs from `:app:checkApkSize`, measured 2026-10-10. "Before" is the tree
 
 | Measure | Before | After | Change | Ceiling |
 |---|---|---|---|---|
-| arm64-v8a release APK | 12542422 B | 12580113 B | +37691 B | 12700000 B |
-| armeabi-v7a release APK | 11585186 B | 11622873 B | +37687 B | 11700000 B |
+| arm64-v8a release APK | 12542422 B | 12581837 B | +39415 B | 12700000 B |
+| armeabi-v7a release APK | 11585186 B | 11624597 B | +39411 B | 11700000 B |
 
-The growth is above the 30 KB per ABI at which the cause is to be looked up. The arm64-v8a size along the way: 12559513 B with the radio's region read and write (+17091 B), 12565233 B with the write, reconnect and verify flow and the send block (+5720 B), 12580065 B with the cards, the picture, the flag drawing, the two lists and their English and French strings (+14832 B), 12580113 B with the screen checks' shortened wait (+48 B). No dependency, permission or resource file other than `countries.txt` and strings was added.
+The growth is above the 30 KB per ABI at which the cause is to be looked up. The arm64-v8a size along the way: 12559513 B with the radio's region read and write (+17091 B), 12565233 B with the write, reconnect and verify flow and the send block (+5720 B), 12580065 B with the cards, the picture, the flag drawing, the two lists and their English and French strings (+14832 B), 12580113 B with the screen checks' shortened wait (+48 B), 12581837 B with the way back from a failure card, the block on Send again, the log lines and the all-or-nothing write (+1724 B). No dependency, permission or resource file other than `countries.txt` and strings was added.
 
 ### Emulator checks
 
@@ -287,8 +287,8 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10. No real rad
 - Region screen states (16, each in light and dark): Set up for Germany, Set up for Togo, the same question after setup, Change, no country known, country without rules, "My country is not here", working, ready, did not come back, did not take the setting, not changed, the blocked send on the chat screen, the country list, the helper list with nothing chosen, the helper list with a region chosen and the box ticked.
 - `ScreenChecksTest` and `RegionScreensTest`: `OK (34 tests)`. For every region state in both themes `RegionScreensTest` runs the every-screen checks (48 dp targets, descriptions, 18 sp text, eight words, no technical words), the theme background and FLAG_SECURE, and checks that no word is cut or ends in dots, that no control is cut at the sides, and that the picture is whole, twice as wide as high and holding its still frame. The Germany and Togo pictures are checked for their flag colours.
 - `ScreenshotTour`: `OK (1 test)`; `docs/screenshots-phase3/` now holds 101 files: 37 states in light and dark (21 earlier states, 16 region states) and 27 `howto-*.png` stills, from the test-only build without FLAG_SECURE. The tests turn animations off, so every region picture in the screenshots is its still frame.
-- `RegionCardsTest`, `RegionActivityTest`, `RegionFlowTest` and `FlagPainterTest`: `OK (50 tests)`.
-- `RegionSetupTest` (JVM): 28 tests, 0 failures.
+- `RegionCardsTest`, `RegionActivityTest`, `RegionFlowTest` and `FlagPainterTest`: 57 tests, all passed.
+- `RegionSetupTest` (JVM): 38 tests, 0 failures.
 - "Did not come back" is reached in the screen states by shortening the 60 s wait through a test hook; the 60 s timer itself is covered by `RegionSetupTest` with a hand-run clock.
 
 ### Results
@@ -296,7 +296,7 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10. No real rad
 | Check | Result |
 |---|---|
 | Emulator checks | passed, see above (the complete suite and `scripts/check.sh` on the final tree: pending — owner) |
-| Size before/after | arm64-v8a 12542422 B → 12580113 B; armeabi-v7a 11585186 B → 11622873 B; both under their ceilings |
+| Size before/after | arm64-v8a 12542422 B → 12581837 B; armeabi-v7a 11585186 B → 11624597 B; both under their ceilings |
 | Pixel 8 Pro, new radio (region write on a Heltec, real restart timing) | pending — owner |
 | Fairphone 3, new radio (region write on a Heltec, real restart timing) | pending — owner |
 | Keep (faked US) | pending — owner |

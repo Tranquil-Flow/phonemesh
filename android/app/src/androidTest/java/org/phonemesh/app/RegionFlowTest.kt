@@ -6,6 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.RegionResult
+import org.phonemesh.core.DeliveryStatus
 import org.phonemesh.core.RegionStep
 
 /** AppCore with the fake radio: the region flow end to end, without screens. */
@@ -54,7 +55,15 @@ class RegionFlowTest {
         restartWith("EU_868")
         assertTrue(main { core.region.phase is RegionPhase.Done })
         assertEquals("TG", main { core.settings.radioCountry(ADDRESS) })
-        assertTrue(main { core.radioReady() || core.region.phase is RegionPhase.Done })
+        // The green card is still showing: setup step 2 is not finished until it has gone.
+        assertFalse(main { core.radioReady() })
+        assertFalse(main { core.region.blocksSending })
+        val deadline = System.currentTimeMillis() + RegionSetup.DONE_MS + 5_000
+        while (main { core.region.phase } != RegionPhase.Idle && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        assertEquals(RegionPhase.Idle, main { core.region.phase })
+        assertEquals(RegionStep.Ready, main { core.region.step() })
+        assertTrue(main { core.radioReady() })
+        assertEquals(listOf("EU_868"), radio.regionWrites)
     }
 
     @Test fun matchingRadioIsReadyWithoutAnyCard() {
@@ -94,6 +103,81 @@ class RegionFlowTest {
         assertTrue(main { core.send(group) })
         assertEquals(1, radio.sent.size)
         assertNull(main { core.draft(group) })
+    }
+
+    /** A message that failed while the radio was away, in the group chat; the radio is back with the same region. */
+    private fun failedMessage(): Message {
+        val group = main { core.groupChatId() }
+        main { radio.connected(false); core.setDraft(group, "Bonjour") }
+        assertTrue(main { core.send(group) })
+        main { radio.connected(true) }
+        val failed = main { core.history.lastMessage(group)!! }
+        assertEquals(DeliveryStatus.FAILED, failed.status)
+        assertTrue(radio.sent.isEmpty())
+        return failed
+    }
+
+    private fun status(id: Long) = main { core.history.message(id)!!.status }
+
+    /** "Send again" is a send: nothing goes out while a set radio is being changed, and the message stays failed. */
+    @Test fun sendAgainIsBlockedWhileASetRadioIsBeingChanged() {
+        connectRadio("US", "TG")
+        val failed = failedMessage()
+        main { core.region.yes() }
+        assertEquals(RegionPhase.Working("EU_868", "TG", false), main { core.region.phase })
+        var told = 0
+        main { core.observe { change -> if (change == AppCore.Change.REGION) told++ } }
+        assertFalse(main { core.resend(failed.id) })
+        assertTrue(radio.sent.isEmpty())
+        assertEquals(DeliveryStatus.FAILED, status(failed.id))
+        assertEquals(failed.packetId, main { core.history.message(failed.id)!!.packetId })
+        assertTrue("the screen is told to show the card", told > 0)
+        // Still blocked while the radio is restarting.
+        main { radio.connected(false) }
+        assertFalse(main { core.resend(failed.id) })
+        assertTrue(radio.sent.isEmpty())
+        assertEquals(DeliveryStatus.FAILED, status(failed.id))
+        // Positive control: the region is verified, and the same message goes out.
+        main { radio.region = "EU_868"; radio.connected(true) }
+        assertTrue(main { core.region.phase is RegionPhase.Done })
+        assertTrue(main { core.resend(failed.id) })
+        assertEquals(1, radio.sent.size)
+        assertEquals(DeliveryStatus.WAITING, status(failed.id))
+        assertEquals(radio.sent.single().packetId, main { core.history.message(failed.id)!!.packetId })
+        assertEquals(listOf("EU_868"), radio.regionWrites)
+    }
+
+    /** A radio with no region transmits nothing, by Send or by Send again. */
+    @Test fun sendAgainIsBlockedWhileTheRadioHasNoRegion() {
+        connectRadio("UNSET", "TG")
+        val failed = failedMessage()
+        assertTrue(main { core.region.blocksSending })
+        assertFalse(main { core.resend(failed.id) })
+        assertTrue(radio.sent.isEmpty())
+        assertEquals(DeliveryStatus.FAILED, status(failed.id))
+        assertTrue("nothing is written without a tap", radio.regionWrites.isEmpty())
+        main { core.region.yes() }
+        assertFalse(main { core.resend(failed.id) })
+        assertTrue(radio.sent.isEmpty())
+        restartWith("EU_868")
+        assertTrue(main { core.resend(failed.id) })
+        assertEquals(1, radio.sent.size)
+        assertEquals(DeliveryStatus.WAITING, status(failed.id))
+    }
+
+    /** S3: a failure card can be left; Keep is reachable again and nothing more is written or reconnected. */
+    @Test fun aFailedChangeCanBeLeftAndTheRadioKept() {
+        connectRadio("US", "TG")
+        main { radio.regionResult = RegionResult.DROPPED; core.region.yes() }
+        assertEquals(RegionPhase.Failed(RegionFailure.TRY_AGAIN), main { core.region.phase })
+        assertFalse(main { core.radioReady() })
+        main { core.region.back() }
+        assertEquals(RegionPhase.Idle, main { core.region.phase })
+        assertEquals(RegionStep.AskChange("TG", "US"), main { core.region.step() })
+        main { core.region.keep() }
+        assertTrue(main { core.radioReady() })
+        assertEquals(1, radio.regionWrites.size)
+        assertTrue(radio.connects.isEmpty())
     }
 
     /** D5 leaves other send failures alone: a set radio whose write failed still sends. */

@@ -628,6 +628,8 @@ class ConversationActivity : ScreenActivity() {
         if (message.status?.canResend == true) {
             box.addView(Ui.button(this, palette, getString(R.string.resend), R.drawable.ic_retry).apply {
                 tag = "resend:${message.id}"
+                // Off like Send while the radio has no region or its region is being set.
+                Ui.enable(this, !core.region.blocksSending)
                 setOnClickListener {
                     if (tip == Tip.FAILED) retireTip()
                     core.resend(message.id)

@@ -15,7 +15,10 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -30,7 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Direct Android BLE transport for one Meshtastic radio.
  *
  * The app owns the radio connection while this object is connected; Meshtastic radios generally allow one
- * phone/app BLE connection at a time. Public methods are intended to be invoked from explicit foreground UI
+ * phone/app BLE connection at a time. A radio that Android has not paired with yet is paired first and connected
+ * when pairing ends, inside the same [connect] ([PairingWait]). Public methods are intended to be invoked from explicit foreground UI
  * actions after the parent app has requested runtime permissions and let the user choose a device.
  */
 class BleMeshTransport(
@@ -53,9 +57,45 @@ class BleMeshTransport(
     private val opQueue = SafeGattQueue(
         { runnable, delay -> workHandler.postDelayed(runnable, delay); Unit },
         { runnable -> workHandler.removeCallbacks(runnable) },
-        { reason -> disconnectAndCleanup(reason) },
+        { reason -> pairing.linkFailed(reason) },
     )
     private var connectionDeadline: Runnable? = null
+    /** The radio of the connection being made or held; its bond reports are watched until that connection ends. */
+    private var target: BluetoothDevice? = null
+    private var watchingBond = false
+    private val pairing: PairingWait = PairingWait(
+        later = { task, delay -> workHandler.postDelayed(task, delay); Unit },
+        cancel = { task -> workHandler.removeCallbacks(task) },
+        bond = {
+            try {
+                @Suppress("MissingPermission")
+                target?.bondState ?: BluetoothDevice.BOND_NONE
+            } catch (_: SecurityException) {
+                BluetoothDevice.BOND_NONE
+            }
+        },
+        pair = {
+            try {
+                @Suppress("MissingPermission")
+                target?.createBond() == true
+            } catch (_: SecurityException) {
+                false
+            }
+        },
+        open = { openGatt() },
+        fail = { reason -> disconnectAndCleanup(reason) },
+        told = { waiting -> mainHandler.post { if (!closed.get()) listener.onPairing(waiting) }; Unit },
+    )
+    /** Delivered on the radio worker. A ready connection is never disturbed by a bond report. */
+    private val bondReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            @Suppress("DEPRECATION")
+            val device: BluetoothDevice? = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            val wanted = target ?: return
+            if (ready || device?.address != wanted.address) return
+            pairing.onBond(intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR))
+        }
+    }
 
     @Volatile private var scanning = false
     @Volatile private var gatt: BluetoothGatt? = null
@@ -124,7 +164,7 @@ class BleMeshTransport(
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
                         if (status != BluetoothGatt.GATT_SUCCESS) {
-                            disconnectAndCleanup("BLE connect failed: status=$status")
+                            pairing.linkFailed("BLE connect failed: status=$status")
                             return@post
                         }
                         this@BleMeshTransport.gatt = gatt
@@ -141,7 +181,7 @@ class BleMeshTransport(
                         } else {
                             "BLE radio disconnected: status=$status"
                         }
-                        disconnectAndCleanup(detail)
+                        pairing.linkFailed(detail)
                     }
                 }
             }
@@ -160,7 +200,7 @@ class BleMeshTransport(
             workHandler.post {
                 if (!acceptsCallback(gatt)) return@post
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    disconnectAndCleanup("GATT service discovery failed: status=$status")
+                    pairing.linkFailed("GATT service discovery failed: status=$status")
                     return@post
                 }
                 opQueue.complete("discoverServices")
@@ -173,7 +213,7 @@ class BleMeshTransport(
             workHandler.post {
                 if (!acceptsCallback(gatt)) return@post
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    disconnectAndCleanup("GATT descriptor failed: status=$status; check radio pairing")
+                    pairing.linkFailed("GATT descriptor failed: status=$status; check radio pairing")
                     return@post
                 }
                 opQueue.complete("writeDescriptor:${descriptor.uuid}")
@@ -197,7 +237,7 @@ class BleMeshTransport(
             workHandler.post {
                 if (!acceptsCallback(gatt)) return@post
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    disconnectAndCleanup("GATT write failed: status=$status; check radio pairing")
+                    pairing.linkFailed("GATT write failed: status=$status; check radio pairing")
                     return@post
                 }
                 opQueue.complete("writeCharacteristic:${characteristic.uuid}")
@@ -313,34 +353,65 @@ class BleMeshTransport(
         workHandler.post {
             disconnectAndCleanup("Starting new BLE connection", announceFailure = false)
             try {
-                val device = adapter.getRemoteDevice(normalized)
+                target = adapter.getRemoteDevice(normalized)
                 post(this@BleMeshTransport.status.connecting("Connecting to Meshtastic BLE radio $normalized"))
-                @Suppress("MissingPermission")
-                gatt = if (Build.VERSION.SDK_INT >= 26) {
-                    device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE, BluetoothDevice.PHY_LE_1M_MASK)
-                } else {
-                    device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                }
-                session.replace(gatt)
-                val target = gatt
-                if (target == null) { postState(false, "Android returned null BluetoothGatt for $normalized"); postConnectFailed() }
-                else {
-                    val deadline = Runnable {
-                        if (acceptsCallback(target) && !ready) disconnectAndCleanup("Radio connection/config timed out; disconnect the other app and retry")
-                    }
-                    connectionDeadline = deadline
-                    workHandler.postDelayed(deadline, 30_000L)
-                }
+                watchBond()
+                pairing.begin()
             } catch (security: SecurityException) {
-                postState(false, "BLE connect denied: ${security.message}")
-                postConnectFailed()
+                disconnectAndCleanup("BLE connect denied: ${security.message}")
             } catch (bad: IllegalArgumentException) {
-                postState(false, "Invalid BLE device address: $normalized")
-                postConnectFailed()
+                disconnectAndCleanup("Invalid BLE device address: $normalized")
             } catch (runtime: RuntimeException) {
-                postState(false, "BLE connect failed: ${runtime.message}")
-                postConnectFailed()
+                disconnectAndCleanup("BLE connect failed: ${runtime.message}")
             }
+        }
+    }
+
+    /** Opens the GATT link to [target]. After pairing that began inside a connection, that connection is replaced. */
+    private fun openGatt() {
+        val device = target ?: return
+        if (gatt != null) disconnectAndCleanup("Reconnecting after pairing", announceFailure = false, keepAttempt = true)
+        try {
+            @Suppress("MissingPermission")
+            gatt = if (Build.VERSION.SDK_INT >= 26) {
+                device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE, BluetoothDevice.PHY_LE_1M_MASK)
+            } else {
+                device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            }
+            session.replace(gatt)
+            val opened = gatt
+            if (opened == null) {
+                disconnectAndCleanup("Android returned null BluetoothGatt for ${device.address}")
+                return
+            }
+            val deadline = Runnable {
+                if (acceptsCallback(opened) && !ready) pairing.linkFailed("Radio connection/config timed out; disconnect the other app and retry")
+            }
+            connectionDeadline = deadline
+            workHandler.postDelayed(deadline, 30_000L)
+        } catch (security: SecurityException) {
+            disconnectAndCleanup("BLE connect denied: ${security.message}")
+        } catch (runtime: RuntimeException) {
+            disconnectAndCleanup("BLE connect failed: ${runtime.message}")
+        }
+    }
+
+    /** Bond reports come from Android's Bluetooth app, which is not the system user: the receiver must be exported. */
+    private fun watchBond() {
+        if (watchingBond) return
+        val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) appContext.registerReceiver(bondReceiver, filter, null, workHandler, Context.RECEIVER_EXPORTED)
+        else appContext.registerReceiver(bondReceiver, filter, null, workHandler)
+        watchingBond = true
+    }
+
+    private fun unwatchBond() {
+        if (!watchingBond) return
+        watchingBond = false
+        try {
+            appContext.unregisterReceiver(bondReceiver)
+        } catch (_: RuntimeException) {
+            // Already gone with its context.
         }
     }
 
@@ -562,7 +633,7 @@ class BleMeshTransport(
         workHandler.post {
             if (!acceptsCallback(callbackGatt)) return@post
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                disconnectAndCleanup("fromRadio read failed: status=$status; check radio pairing")
+                pairing.linkFailed("fromRadio read failed: status=$status; check radio pairing")
                 return@post
             }
             opQueue.complete("readCharacteristic:${characteristic.uuid}")
@@ -605,6 +676,8 @@ class BleMeshTransport(
                         return
                     }
                     ready = true
+                    // A link that became ready is never ended by a pairing wait still counting.
+                    pairing.end()
                     connectionDeadline?.let { workHandler.removeCallbacks(it) }
                     connectionDeadline = null
                     post(status.radioReady("Meshtastic BLE config complete id=${event.id}; radio ready"))
@@ -691,7 +764,13 @@ class BleMeshTransport(
         if (delivery.size > 0) scheduleExpiry()
     }
 
-    private fun disconnectAndCleanup(detail: String, announceFailure: Boolean = true) {
+    /** Ends the link and, unless [keepAttempt], the attempt with it: the pairing wait and the watch on the radio's bond. */
+    private fun disconnectAndCleanup(detail: String, announceFailure: Boolean = true, keepAttempt: Boolean = false) {
+        if (!keepAttempt) {
+            pairing.end()
+            unwatchBond()
+            target = null
+        }
         val wasReady = ready
         ready = false
         session.replace(null)

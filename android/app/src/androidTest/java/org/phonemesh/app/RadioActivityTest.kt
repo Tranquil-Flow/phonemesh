@@ -69,6 +69,44 @@ class RadioActivityTest {
         assertTrue(activity!!.isFinishing)
     }
 
+    @Test fun oneTapIsEnoughWhileTheRadioIsBeingPaired() {
+        TestCore.install(connected = false)
+        TestCore.onMain { TestCore.core.connectWaitMs = 100 }
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.onMain { TestCore.radio.found("AA:BB:CC:DD:EE:01", "Kofi", -60) }
+        inst.waitForIdleSync()
+        Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:01")
+        TestCore.onMain { TestCore.radio.pairing(true) }
+        Thread.sleep(500)
+        inst.waitForIdleSync()
+        assertNotNull("still shown as connecting while the code is typed", Views.tagged(activity!!, "connecting"))
+        assertFalse(activity!!.isFinishing)
+        TestCore.onMain { TestCore.radio.pairing(false) }
+        inst.waitForIdleSync()
+        assertNotNull(Views.tagged(activity!!, "connecting"))
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertTrue("connected from the one tap", activity!!.isFinishing)
+        assertEquals(listOf("AA:BB:CC:DD:EE:01"), TestCore.radio.connects)
+    }
+
+    @Test fun refusedPairingEndsConnectingAndTheRadioCanBeTappedAgain() {
+        TestCore.install(connected = false)
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.onMain { TestCore.radio.found("AA:BB:CC:DD:EE:01", "Kofi", -60) }
+        inst.waitForIdleSync()
+        Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:01")
+        TestCore.onMain { TestCore.radio.pairing(true) }
+        inst.waitForIdleSync()
+        assertNotNull(Views.tagged(activity!!, "connecting"))
+        TestCore.onMain { TestCore.radio.pairing(false); TestCore.radio.failConnect() }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(activity!!, "connecting"))
+        assertFalse(activity!!.isFinishing)
+        Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:01")
+        assertEquals(2, TestCore.radio.connects.size)
+        assertNotNull(Views.tagged(activity!!, "connecting"))
+    }
+
     @Test fun leavingTheScreenStopsTheSearch() {
         TestCore.install(connected = false)
         activity = Views.start(RadioActivity::class.java)

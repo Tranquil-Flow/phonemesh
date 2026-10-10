@@ -96,6 +96,8 @@ class AppCore private constructor(
     var connectingAddress: String? = null
         private set
     private var connectingSince = 0L
+    // Android is pairing with that radio: the wait has no end of its own until the radio reports one.
+    private var pairing = false
     // Test hook: tests shorten the connection wait.
     internal var connectWaitMs = CONNECT_WAIT_MS
     private val foundRadios = LinkedHashMap<String, FoundRadio>()
@@ -218,6 +220,7 @@ class AppCore private constructor(
         stopScan()
         connectingAddress = address
         connectingSince = SystemClock.elapsedRealtime()
+        pairing = false
         main.removeCallbacks(connectExpired)
         runCatching { radio.connect(address) }.onFailure { connectingAddress = null }
         // Nothing else reports the end of the wait, so the screens are told when it runs out.
@@ -225,12 +228,15 @@ class AppCore private constructor(
         changed(Change.RADIO)
     }
 
-    /** True while a connection asked for in the last 35 s has not finished (the radio gives up after 30 s). */
+    /**
+     * True while a connection asked for in the last 35 s has not finished (the radio gives up after 30 s), and for
+     * as long as Android is pairing with that radio (the radio gives that up after 90 s).
+     */
     fun isConnecting(address: String): Boolean = !connected && isAttempting(address)
 
     /** Like [isConnecting], but also true while another radio is still connected and this one was just asked for. */
     fun isAttempting(address: String): Boolean = connectingAddress == address &&
-        SystemClock.elapsedRealtime() - connectingSince < connectWaitMs
+        (pairing || SystemClock.elapsedRealtime() - connectingSince < connectWaitMs)
 
     /** The user let the radio go: it is forgotten, so it does not reconnect by itself. */
     fun disconnect() {
@@ -304,7 +310,20 @@ class AppCore private constructor(
         changed(Change.RADIO)
     }
 
+    /** Pairing stops the 35 s clock; when it is over the connection gets its 35 s from then. */
+    override fun onPairing(waiting: Boolean) {
+        if (connectingAddress == null) return
+        pairing = waiting
+        main.removeCallbacks(connectExpired)
+        if (!waiting) {
+            connectingSince = SystemClock.elapsedRealtime()
+            main.postDelayed(connectExpired, connectWaitMs)
+        }
+        changed(Change.RADIO)
+    }
+
     private fun endAttempt() {
+        pairing = false
         connectingAddress = null
         main.removeCallbacks(connectExpired)
     }

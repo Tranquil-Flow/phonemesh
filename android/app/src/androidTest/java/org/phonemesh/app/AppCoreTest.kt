@@ -292,6 +292,69 @@ class AppCoreTest {
         assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
     }
 
+    @Test fun pairingKeepsTheAttemptAliveWellPastTheUsualWaitThenOneTapConnects() {
+        TestCore.install(connected = false)
+        val changes = java.util.Collections.synchronizedList(mutableListOf<AppCore.Change>())
+        main {
+            core.connectWaitMs = 100
+            core.observe { changes += it }
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            changes.clear()
+            radio.pairing(true)
+        }
+        assertTrue("the screens hear that pairing began", changes.contains(AppCore.Change.RADIO))
+        Thread.sleep(500)
+        assertTrue("still connecting after five usual waits", main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+        assertFalse("the region wait must not start a second connection", main { core.reconnectForRegion(); core.autoReconnect() })
+        assertEquals("one connect call", listOf("AA:BB:CC:DD:EE:01"), main { radio.connects.toList() })
+        main { radio.pairing(false) }
+        assertTrue("paired: the same attempt carries on", main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+        main { radio.connected(true) }
+        assertTrue(main { core.connected })
+        assertFalse(main { core.isAttempting("AA:BB:CC:DD:EE:01") })
+        assertEquals(listOf("AA:BB:CC:DD:EE:01"), main { radio.connects.toList() })
+    }
+
+    @Test fun afterPairingTheUsualWaitRunsAgainAndCanRunOut() {
+        TestCore.install(connected = false)
+        val changes = java.util.Collections.synchronizedList(mutableListOf<AppCore.Change>())
+        main {
+            core.connectWaitMs = 150
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            radio.pairing(true)
+        }
+        Thread.sleep(400)
+        main {
+            radio.pairing(false)
+            core.observe { changes += it }
+            assertTrue(core.isConnecting("AA:BB:CC:DD:EE:01"))
+        }
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline && !changes.contains(AppCore.Change.RADIO)) Thread.sleep(20)
+        assertTrue("the screens are told when the wait runs out", changes.contains(AppCore.Change.RADIO))
+        assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+    }
+
+    @Test fun refusedPairingEndsTheAttemptOnce() {
+        TestCore.install(connected = false)
+        main {
+            core.connectWaitMs = 60_000
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            radio.pairing(true)
+            radio.pairing(false)
+            radio.failConnect()
+        }
+        assertFalse(main { core.isAttempting("AA:BB:CC:DD:EE:01") })
+        // A late report about the attempt that ended brings nothing back.
+        main { radio.pairing(true) }
+        assertFalse(main { core.isAttempting("AA:BB:CC:DD:EE:01") })
+        assertEquals(listOf("AA:BB:CC:DD:EE:01"), main { radio.connects.toList() })
+        // The next attempt starts with the usual wait, not a pairing one.
+        main { core.connectWaitMs = 100; core.connect("AA:BB:CC:DD:EE:01", "Kofi") }
+        Thread.sleep(400)
+        assertFalse(main { core.isConnecting("AA:BB:CC:DD:EE:01") })
+    }
+
     @Test fun diagnosticReportsWhileReadyAreNotNewConnections() {
         TestCore.install(connected = true)
         val before = main { core.readyReports }

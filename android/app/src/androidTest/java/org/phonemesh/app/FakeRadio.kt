@@ -58,6 +58,8 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     /** The scan ended without results: a failure or Android's throttling, reported like BleMeshTransport does. */
     fun failScan() = listener.onScanStopped()
     fun failConnect() = listener.onConnectFailed()
+    /** Android's pairing with the radio asked for begins (true) or is over (false), as BleMeshTransport reports it. */
+    fun pairing(waiting: Boolean) = listener.onPairing(waiting)
     fun receive(sender: String, text: String, direct: Boolean, channel: Int = 0) = listener.onText(sender, text, channel, direct)
     fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")
     fun found(address: String, name: String, rssi: Int) = listener.onDevice(address, name, rssi)

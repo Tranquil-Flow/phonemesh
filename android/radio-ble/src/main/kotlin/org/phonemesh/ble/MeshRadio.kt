@@ -10,10 +10,17 @@ interface MeshRadio : AutoCloseable {
 
         /**
          * A connection the caller asked for ended before the radio became ready (no permission, Bluetooth off,
-         * a bad address, a refused or timed-out connection). Progress reports stay on [onState]; a ready
+         * a bad address, a refused or timed-out connection, refused pairing). Progress reports stay on [onState]; a ready
          * connection that drops is [onState] with false.
          */
         fun onConnectFailed() {}
+
+        /**
+         * Android is pairing the phone with the radio asked for (true), which can take as long as the person needs
+         * to type a code; false when that wait is over. The attempt then carries on by itself, or ends with
+         * [onConnectFailed] when pairing was refused or took too long (90 s).
+         */
+        fun onPairing(waiting: Boolean) {}
 
         /** The scan is over: it was stopped, never started, or failed (no scanner, Android throttling). */
         fun onScanStopped() {}

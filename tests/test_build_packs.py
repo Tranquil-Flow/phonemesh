@@ -176,3 +176,28 @@ def test_catalog_out_defaults_only_with_the_default_out(tmp_path):
     assert (
         bp.catalog_target(parse(["--out", str(tmp_path), "--catalog-out", str(target)])) == target
     )
+
+
+PUBLISHED = {
+    "engine-whisper-tiny",
+    "engine-whisper-base",
+    "voice-fr-siwis",
+    "voice-en-US-ljspeech",
+}
+
+
+def test_the_catalog_is_the_published_packs_by_default():
+    assert bp.catalog_ids([]) == PUBLISHED
+
+
+def test_a_pack_that_may_not_be_redistributed_cannot_enter_the_catalog():
+    with pytest.raises(SystemExit, match="voice-en-US-lessac-low"):
+        bp.catalog_ids(["voice-en-US-lessac-low"])
+
+
+def test_other_packs_can_still_be_added_to_a_catalog():
+    assert bp.catalog_ids(["voice-xx-test"]) == PUBLISHED | {"voice-xx-test"}
+
+
+def test_no_default_catalog_pack_is_barred_from_redistribution():
+    assert not set(bp.DEFAULT_CATALOG) & set(bp.NOT_REDISTRIBUTABLE)

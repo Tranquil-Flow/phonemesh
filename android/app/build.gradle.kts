@@ -9,6 +9,17 @@ val screenshotBuild = project.findProperty("phonemesh.screenshots") == "true"
 // Release always uses the phone's own country (ReleaseFlagsTest).
 val fakeCountry = (project.findProperty("phonemesh.fakeCountry") as String?).orEmpty()
 require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phonemesh.fakeCountry must be two capital letters" }
+// Where the app downloads its packs: the address plus a catalog file name. A release build installs a ZIP only if it
+// has the hash in the app's catalog (debug builds skip that, see ALLOW_UNKNOWN_PACKS).
+// -Pphonemesh.packBaseUrl=https://.../ replaces the address in every build type. Without it, release uses the
+// published packs and debug builds use the test pack server on the development machine as the emulator sees it
+// (scripts/test_pack_server.py), which a real phone cannot reach.
+val publishedPackBaseUrl = "https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/"
+val emulatorPackBaseUrl = "http://10.0.2.2:8777/"
+val packBaseUrl = project.findProperty("phonemesh.packBaseUrl") as String?
+require(packBaseUrl == null || Regex("https://[A-Za-z0-9.-]+(:[0-9]+)?/([A-Za-z0-9._~%-]+/)*").matches(packBaseUrl)) {
+    "phonemesh.packBaseUrl must be an https:// address that ends with / (got \"$packBaseUrl\")"
+}
 android {
     namespace = "org.phonemesh.app"
     compileSdk = 35
@@ -23,7 +34,7 @@ android {
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
         buildConfigField("boolean", "SECURE_SCREENS", "true")
         buildConfigField("String", "FAKE_COUNTRY", "\"\"")
-        buildConfigField("String", "PACK_BASE_URL", "\"${project.findProperty("phonemesh.packBaseUrl") ?: "https://packs.invalid/"}\"")
+        buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
     }
     buildFeatures { buildConfig = true }
     compileOptions {
@@ -36,7 +47,7 @@ android {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
             buildConfigField("boolean", "SECURE_SCREENS", (!screenshotBuild).toString())
             buildConfigField("String", "FAKE_COUNTRY", "\"$fakeCountry\"")
-            buildConfigField("String", "PACK_BASE_URL", "\"http://10.0.2.2:8777/\"")
+            buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: emulatorPackBaseUrl}\"")
         }
         release {
             isMinifyEnabled = true

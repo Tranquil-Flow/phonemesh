@@ -25,6 +25,11 @@ DEFAULT_CATALOG = [
     "voice-fr-siwis",
     "voice-en-US-ljspeech",
 ]
+# Built for local comparison only. The licence of the data such a voice was trained on forbids
+# redistribution, so it is never published and can never be put in the app's catalog.
+NOT_REDISTRIBUTABLE = {
+    "voice-en-US-lessac-low": "Blizzard 2013 (Lessac) data is licensed for research use only",
+}
 
 # (key, release tag, file name, size, sha256)
 INPUTS = [
@@ -390,11 +395,21 @@ def catalog_target(args: argparse.Namespace) -> Path:
     return CORE_CATALOG
 
 
+def catalog_ids(include: list[str]) -> set[str]:
+    """The pack ids the generated catalog offers for download: the published packs plus
+    `--catalog-include`, which may not name a pack that must not be redistributed."""
+    barred = sorted(set(include) & set(NOT_REDISTRIBUTABLE))
+    if barred:
+        reasons = "; ".join(f"{pack_id}: {NOT_REDISTRIBUTABLE[pack_id]}" for pack_id in barred)
+        raise SystemExit(f"not redistributable, so not allowed in the catalog: {reasons}")
+    return set(DEFAULT_CATALOG) | set(include)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parser().parse_args(argv)
     catalog_out = catalog_target(args)
     args.out.mkdir(parents=True, exist_ok=True)
-    wanted = set(DEFAULT_CATALOG) | set(args.catalog_include)
+    wanted = catalog_ids(args.catalog_include)
 
     built = []
 

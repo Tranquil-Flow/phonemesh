@@ -34,10 +34,48 @@ An emulator cannot qualify physical BLE/RF behavior.
 
 ## Model packs and multilingual behavior
 
-Models are separate ZIP imports via Android's document picker. The messaging app needs
-no Internet permission. An import is staged privately, bounded to 512 MiB/5000 entries,
-rejects traversal/duplicates and missing required model files, and publishes atomically.
-Original source/voice licences remain applicable; public redistribution needs review.
+Models are separate ZIP packs: a speech engine, and one voice per language. A pack reaches
+the app by download, from a friend's phone, or as a ZIP chosen in Android's document
+picker. Downloading packs is the app's only network use and the only reason it holds the
+`INTERNET` permission. Every pack, however it arrives, is staged privately, bounded to
+512 MiB/5000 entries, rejects traversal/duplicates and missing required model files, and
+publishes atomically.
+
+**Where packs are downloaded from.** The address is
+`https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/` followed by
+the file name in the app's built-in catalog (`GeneratedPackCatalog`). It is HTTPS only;
+GitHub redirects the request to another HTTPS host. Four packs are published there, and
+they are the whole catalog:
+
+| File | Pack |
+|---|---|
+| `phonemesh-engine-whisper-tiny-1.zip` | Whisper Tiny engine |
+| `phonemesh-engine-whisper-base-1.zip` | Whisper Base engine |
+| `phonemesh-voice-fr-siwis-1.zip` | French voice (Siwis) |
+| `phonemesh-voice-en-US-ljspeech-1.zip` | English voice (LJ Speech) |
+
+The catalog holds, for each pack, the ZIP's size and the SHA-256 of its `SHA256SUMS`
+file, which in turn lists the SHA-256 of every file in the pack. A release build installs
+a ZIP only if its `SHA256SUMS` has the hash in the catalog and every file matches
+`SHA256SUMS`; this holds for a downloaded, received or picked ZIP alike, so the server is
+not trusted for the content. A download must also have the catalog's size. Debug builds
+(`ALLOW_UNKNOWN_PACKS`) skip the catalog hash so test packs can be installed: they check
+the size of a download and that every file matches the pack's own `SHA256SUMS`.
+
+The address is a build setting (`android/app/build.gradle.kts`). Release builds use the
+address above. Debug builds use `http://10.0.2.2:8777/`, the test pack server on the
+development machine as the emulator sees it, which a real phone cannot reach; a debug
+build for a phone is made with
+`-Pphonemesh.packBaseUrl=https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/`.
+The property replaces the address in every build type and must be an `https://` address
+ending with `/`, or the build fails. Cleartext traffic is off in release, and allowed in
+debug only to `10.0.2.2`.
+
+The English voice built from the Lessac recordings (`voice-en-US-lessac-low`) is not
+published and not in the catalog: the licence of its training data allows research use
+only and forbids redistribution. `android/scripts/build_packs.py` refuses to add it to a
+catalog. Original source and voice licences remain applicable to the published packs;
+each ZIP carries them in `NOTICE.txt` and `SOURCES.json`.
 
 ```text
 pack.properties          # format=1, languageTag, whisperLanguage, label; optional recognizerModel
@@ -183,7 +221,7 @@ loop shows that story time.
 ## Verification gates
 
 1. JVM codec/import/protobuf tests, including malformed input and exact byte budgets.
-2. APK build, lint, ABI/package inspection and no-INTERNET-permission check.
+2. APK build, lint, ABI/package inspection and the network-boundary check (networking APIs only in `PackDownloads`).
 3. Android emulator launch and real JNI Whisper/Piper tests using synthetic speech only.
 4. Physical phone: BLE handshake, recording/playback, thermal/latency/memory, private
    channel send/receive with two real nodes and user-confirmed delivery.

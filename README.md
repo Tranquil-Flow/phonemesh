@@ -108,4 +108,5 @@ ACK/reconnect UX, microphone/interactive UI, and Android integration. Under-reso
 phoneme research and its recording/transcription permissions belong to v2.
 
 Licensed under the GNU Affero General Public License v3.0 (see `LICENSE`). Third-party components and model licences are listed in the app's notices and in each pack's `NOTICE.txt`.
+The Android app downloads its speech packs over HTTPS from `https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/` and, in release builds, installs a ZIP only if it has the hash in the app's built-in catalog; the published packs and the checks are described in [the Android design](docs/android-design.md#model-packs-and-multilingual-behavior).
 No commits, pushes or staging are performed by this scaffold workflow.

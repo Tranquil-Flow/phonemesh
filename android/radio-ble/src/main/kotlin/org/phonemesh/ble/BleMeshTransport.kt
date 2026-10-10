@@ -73,6 +73,20 @@ class BleMeshTransport(
     private val status = ConnectionStatusReporter()
     private val delivery = DeliveryTracker(now = { android.os.SystemClock.elapsedRealtime() })
     private var expiryTick: Runnable? = null
+    private val regions = RegionSession(
+        ready = { ready },
+        local = { localNodeNum },
+        write = { admin, node, wantResponse ->
+            writeToRadio(MeshtasticProtocol.buildAdmin(admin, node, wantResponse = wantResponse), "admin ${admin.payloadVariantCase}")
+        },
+        later = { task, delay -> workHandler.postDelayed(task, delay); Unit },
+        cancel = { task -> workHandler.removeCallbacks(task) },
+        finish = { done, result ->
+            post(status.diagnostic("Region write: $result"))
+            mainHandler.post { if (!closed.get()) done(result) }
+            Unit
+        },
+    )
 
 
     private val bluetoothManager: BluetoothManager?
@@ -381,6 +395,15 @@ class BleMeshTransport(
         return packetId
     }
 
+    override fun region(): String? = regions.region()
+
+    override fun setRegion(region: String, done: (RegionResult) -> Unit) {
+        checkOpen()
+        // Refused here, on the caller's thread, before anything is handed to the radio.
+        RegionSession.writable(region)
+        workHandler.post { regions.start(region, done) }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         stopScan()
@@ -450,6 +473,9 @@ class BleMeshTransport(
         val nonce = MeshtasticProtocol.newNonce()
         wantedConfigId = nonce
         ready = false
+        // A new handshake: only the settings it delivers count from here on.
+        configuredHopLimit = null
+        regions.reset()
         val packet = MeshtasticProtocol.buildWantConfig(nonce)
         if (packet.size > maxWriteBytes()) {
             disconnectAndCleanup("want_config_id packet exceeds negotiated BLE write limit")
@@ -585,10 +611,16 @@ class BleMeshTransport(
                 localNodeNum = event.nodeNum
                 post(status.diagnostic("Local Meshtastic node ${MeshtasticProtocol.nodeId(event.nodeNum.toLong())}"))
             }
-            is RadioEvent.HopLimit -> {
-                if (event.value in 0..7) configuredHopLimit = event.value
-                else disconnectAndCleanup("Radio supplied an invalid hop limit")
+            is RadioEvent.LoraSettings -> {
+                val hops = event.lora.hopLimit
+                if (hops in 0..7) {
+                    configuredHopLimit = hops
+                    regions.onSettings(event.lora)
+                } else {
+                    disconnectAndCleanup("Radio supplied an invalid hop limit")
+                }
             }
+            is RadioEvent.AdminLora -> regions.onReply(event)
             is RadioEvent.NodeDiscovered -> {
                 val peer = RadioPeer(event.id, event.name)
                 synchronized(peersById) {
@@ -663,6 +695,7 @@ class BleMeshTransport(
         postEmissions(delivery.failPending(detail))
         connectionDeadline?.let { workHandler.removeCallbacks(it) }
         connectionDeadline = null
+        regions.reset()
         localNodeNum = null
         configuredHopLimit = null
         synchronized(peersById) { peersById.clear() }

@@ -3,6 +3,8 @@ package org.phonemesh.app
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.MeshRadio
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.ble.RadioRegions
+import org.phonemesh.ble.RegionResult
 
 /** Test radio: records what the app asks for and lets a test play the radio's side. Main thread only. */
 class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
@@ -35,6 +37,17 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
         val id = nextPacket++
         sent += Sent(text, destinationId, channel, id)
         return id
+    }
+    /** The region the fake radio reports while ready; tests change it to play a restart. */
+    var region: String? = "EU_868"
+    val regionWrites = mutableListOf<String>()
+    var regionResult = RegionResult.SENT
+    override fun region(): String? = if (ready) region else null
+    /** Like BleMeshTransport: a region that is not offered is refused before anything is written. */
+    override fun setRegion(region: String, done: (RegionResult) -> Unit) {
+        require(region in RadioRegions.all) { "not a writable region: $region" }
+        regionWrites += region
+        done(regionResult)
     }
     override fun close() { closed = true }
 

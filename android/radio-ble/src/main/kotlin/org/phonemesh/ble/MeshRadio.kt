@@ -40,4 +40,15 @@ interface MeshRadio : AutoCloseable {
     fun disconnect()
     fun peers(): List<RadioPeer>
     fun send(text: String, destinationId: String, channel: Int): Long
+
+    /** The radio's region from the handshake: "UNSET", a region name, "UNRECOGNIZED", or null before it arrives. */
+    fun region(): String?
+
+    /**
+     * Writes only the LoRa region: reads the radio's LoRa settings (10 s), else uses the handshake's, copies them,
+     * changes the region, and sends set_config inside begin/commit_edit_settings. The radio usually restarts after,
+     * so the link drops; the caller reconnects and checks [region]. [done] runs once, on the main thread.
+     * Throws IllegalArgumentException, and writes nothing, for a [region] that is not in [RadioRegions.all].
+     */
+    fun setRegion(region: String, done: (RegionResult) -> Unit)
 }

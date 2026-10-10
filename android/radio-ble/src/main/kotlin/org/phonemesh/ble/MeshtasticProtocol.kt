@@ -7,6 +7,8 @@ import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import com.google.protobuf.ByteString
+import org.meshtastic.proto.AdminProtos
+import org.meshtastic.proto.ConfigProtos
 import org.meshtastic.proto.MeshProtos
 import org.meshtastic.proto.Portnums
 
@@ -119,7 +121,7 @@ internal object MeshtasticProtocol {
             MeshProtos.FromRadio.PayloadVariantCase.MY_INFO -> RadioEvent.MyInfo(fromRadio.myInfo.myNodeNum)
             MeshProtos.FromRadio.PayloadVariantCase.NODE_INFO -> nodeInfoEvent(fromRadio.nodeInfo)
             MeshProtos.FromRadio.PayloadVariantCase.CONFIG ->
-                if (fromRadio.config.hasLora()) RadioEvent.HopLimit(fromRadio.config.lora.hopLimit) else null
+                if (fromRadio.config.hasLora()) RadioEvent.LoraSettings(fromRadio.config.lora) else null
             MeshProtos.FromRadio.PayloadVariantCase.QUEUESTATUS -> RadioEvent.QueueStatus(
                 fromRadio.queueStatus.res,
                 fromRadio.queueStatus.free,
@@ -144,6 +146,7 @@ internal object MeshtasticProtocol {
         if (!packet.hasDecoded()) return null
         val decoded = packet.decoded
         if (decoded.portnum == Portnums.PortNum.ROUTING_APP) return routingEvent(packet, decoded)
+        if (decoded.portnum == Portnums.PortNum.ADMIN_APP) return adminEvent(packet, decoded)
         if (decoded.portnum != Portnums.PortNum.TEXT_MESSAGE_APP) return null
         val payload = decoded.payload.toByteArray()
         if (payload.isEmpty() || payload.size > MAX_TEXT_BYTES) return null
@@ -183,6 +186,37 @@ internal object MeshtasticProtocol {
         )
     }
 
+    /**
+     * An admin reply (get_config_response) from a radio. The caller checks it came from the local node;
+     * [RadioEvent.AdminLora.lora] is null when the reply carried some other config.
+     */
+    private fun adminEvent(packet: MeshProtos.MeshPacket, decoded: MeshProtos.Data): RadioEvent? {
+        val admin = try {
+            AdminProtos.AdminMessage.parseFrom(decoded.payload)
+        } catch (_: Exception) {
+            return null
+        }
+        if (!admin.hasGetConfigResponse()) return null
+        val lora = admin.getConfigResponse.takeIf { it.hasLora() }?.lora
+        return RadioEvent.AdminLora(packet.`from`.toLong() and BROADCAST_NUM, lora, admin.sessionPasskey)
+    }
+
+    /** One AdminMessage to this phone's own radio, on ADMIN_APP. */
+    fun buildAdmin(admin: AdminProtos.AdminMessage, localNode: Int, packetId: Int = newPacketId(), wantResponse: Boolean = false): ByteArray {
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnum(Portnums.PortNum.ADMIN_APP)
+            .setPayload(admin.toByteString())
+            .setWantResponse(wantResponse)
+            .build()
+        val packet = MeshProtos.MeshPacket.newBuilder()
+            .setTo(localNode)
+            .setId(packetId)
+            .setPriority(MeshProtos.MeshPacket.Priority.RELIABLE)
+            .setDecoded(data)
+            .build()
+        return MeshProtos.ToRadio.newBuilder().setPacket(packet).build().toByteArray()
+    }
+
     fun strictUtf8(bytes: ByteArray): String = StandardCharsets.UTF_8
         .newDecoder()
         .onMalformedInput(CodingErrorAction.REPORT)
@@ -194,7 +228,8 @@ internal object MeshtasticProtocol {
 internal sealed class RadioEvent {
     data class ConfigComplete(val id: Int) : RadioEvent()
     data class MyInfo(val nodeNum: Int) : RadioEvent()
-    data class HopLimit(val value: Int) : RadioEvent()
+    data class LoraSettings(val lora: ConfigProtos.Config.LoRaConfig) : RadioEvent()
+    data class AdminLora(val from: Long, val lora: ConfigProtos.Config.LoRaConfig?, val passkey: ByteString) : RadioEvent()
     data class NodeDiscovered(val nodeNum: Long, val id: String, val name: String) : RadioEvent()
     data class Text(val sender: String, val text: String, val channel: Int, val to: Long) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()

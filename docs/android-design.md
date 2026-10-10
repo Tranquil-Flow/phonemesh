@@ -65,6 +65,16 @@ comparisons do not establish conversational microphone accuracy.
 The import picker initially targets **Pixel/internal storage → Download → Phonemesh**:
 the separate Downloads provider may omit ZIPs copied via USB even when they exist.
 
+While the numbered setup guide shows (`SetupView.Guide`), the chats screen shows only
+the header and the steps: the chat list, the "No messages yet" hint and the ➕ button are
+hidden, and the steps may use the whole height under the header, scrolling only if they
+are taller than that. Step 3's own button ("Try it") opens the group chat, so the hidden
+list is not needed to finish setup. The list, the hint and ➕ appear when the guide ends,
+together with the green "Ready" card (`SetupView.Complete`), and stay from then on. After
+setup a problem card is limited to three quarters of that height, so the chats always
+keep some room. A message that arrives during setup is stored as usual and is seen in the
+list once the guide has ended.
+
 Setup step 1 ("Download the voice") offers two ways, numbered like the two parts of the
 step's how-to picture: **1 · Download** and **2 · From a friend**. A lost-voice card after
 setup shows one picture without numbered parts, so there the same two buttons carry no
@@ -113,11 +123,14 @@ The first screen's story (`StoryTimeline`, drawn by `StoryView`) has 10 s of act
 (`DURATION_MS`), addressed by a story time from 0 to 1 (`StoryTimeline.at`). On screen
 the action plays at that speed, and each of the five numbered steps then rests so that
 it is shown for `STEP_MS` = 4,000 ms; a step whose action already lasted that long
-would not rest. The opening (600 ms) and closing (500 ms) keep their lengths. The loop
-on screen is `LOOP_MS` = 21,100 ms, computed from `STEP_MS`.
+would not rest. The un-numbered caption is shown from the closing (500 ms of action)
+across the loop's seam to the end of the opening (600 ms), and rests between the two for
+the 2,900 ms that are left of `STEP_MS`. The loop on screen is `LOOP_MS` = 24,000 ms,
+six captions of 4,000 ms each, computed from `STEP_MS`.
 
-| Step | Action | Rest | Shown | Rests at action time |
+| Caption | Action | Rest | Shown | Rests at action time |
 |---|---|---|---|---|
+| un-numbered | 500 ms closing + 600 ms opening | 2,900 ms | 4,000 ms | 0 ms (the loop's first instant) |
 | 1 | 2,400 ms | 1,600 ms | 4,000 ms | 2,800 ms |
 | 2 | 1,600 ms | 2,400 ms | 4,000 ms | 3,700 ms |
 | 3 | 1,600 ms | 2,400 ms | 4,000 ms | 6,000 ms |
@@ -131,6 +144,12 @@ still under its caption. Step 2 is the one compromise: the camera's pull-back st
 100 ms before the last letter is typed, so the rest waits for the whole word, with the
 camera 2 % into its move.
 
+The un-numbered caption's rest sits at the start of the loop, on the story's first
+picture (`at(0)`, the whole scene in view), so the first launch begins with it: 2,900 ms
+of rest, the 600 ms opening, then step 1 at 3,500 ms. The story's last picture (`at(1)`)
+shows the same as its first (the two differ only in parts drawn with no opacity), so the
+loop passes from the closing into the rest without a jump.
+
 `StoryTimeline.beat(ms)` maps a time in the loop to the story time and the rest it falls
 in; `paced(ms)` returns the picture. During the action `paced` equals `at` exactly.
 During a rest it is the held picture with one value, the breath (0 to 1, a whole number
@@ -139,7 +158,10 @@ ends of the rest), applied as: a raised phone up to `PHONE_BOB` = 1.5 scene unit
 the bubble up to `BUBBLE_BOB` = 2 higher, her open mouth, the sound bars and his sound
 waves up to `PULSE` = 30 % smaller or fainter, ring radii up to `RING_PULSE` = 10 %
 smaller. A radio light that is on in the held picture keeps blinking at its usual rate.
-Camera, captions, letters and every opacity stay as held.
+Camera, captions, letters and every opacity stay as held. In the un-numbered caption's
+rest nothing is raised or lit, so there the breath lifts the two lowered phones, with the
+hands that hold them, by up to `PHONE_BOB` and brings them back, twice in the rest; no
+light, ring, bubble or sound mark appears.
 
 `StoryView.freezeAt(t)` still takes a story time from 0 to 1 and shows `at(t)` without
 any breath, so screenshots and the reduced-motion frame (`STILL` = 0.54) are unchanged.

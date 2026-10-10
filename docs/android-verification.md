@@ -237,7 +237,7 @@ Spec: `docs/specs/2026-10-07-visual-guide-design.md`.
 - Screen checks: every state passes in light and in dark (`ScreenChecksTest`).
 - Screenshots: `docs/screenshots-phase3/` (21 states in light and dark, and 27 `howto-*.png` stills, from the test-only build without FLAG_SECURE).
 
-Fairphone 3, welcome screen, 25 s, one whole loop of 21.1 s and a little more (`dumpsys gfxinfo`): pending (the owner unlocks the phone first).
+Fairphone 3, welcome screen, 25 s, one whole loop of 24 s and a little more (`dumpsys gfxinfo`): pending (the owner unlocks the phone first).
 
 Fairphone 3, Help page (26 pictures, scrolled), 20 s: pending.
 
@@ -247,10 +247,11 @@ Owner check on the Pixel 8 Pro: pending.
 
 Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10, on the tree with the numbered voice choices, the friend guide and the paced welcome story.
 
-- `scripts/check.sh`: `CHECK_OK`. Release APKs: arm64-v8a 12586361 B, armeabi-v7a 11629121 B, +233963 B over the size before the visual guide (budget 250,000 B).
-- Instrumented tests: 328 selected tests, all passed.
-- `StoryTimelineTest` (JVM): every numbered step stays 4,000 ms in a loop of 21,100 ms, the action's pictures are unchanged, and a rest starts and ends on the picture the action stopped at.
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: arm64-v8a 12586645 B, armeabi-v7a 11629405 B, +234247 B over the size before the visual guide (budget 250,000 B).
+- Instrumented tests: 331 selected tests, all passed.
+- `StoryTimelineTest` (JVM): every numbered step and the opening caption stay 4,000 ms in a loop of 24,000 ms, the action's pictures are unchanged, and a rest starts and ends on the picture the action stopped at.
 - Screenshots: `docs/screenshots-phase3/` now holds 105 files; the two new states, in light and dark, are the voice step after a download that could not reach the internet and the friend guide.
+- During setup the chats screen shows only the steps: the chat list, its empty hint and the plus button are absent until setup ends (`ChatsActivityTest`, `ScreenChecksTest`).
 - Not checked on a screen by a person: the paced story in motion. The tests turn animations off, so the screenshots show its still frame.
 - The sign for "no internet" is a voice download that failed without reaching the server or is waiting for the network; the app holds no permission to ask the phone about its connection.
 

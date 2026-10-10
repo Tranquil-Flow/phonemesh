@@ -13,7 +13,7 @@ import org.phonemesh.core.StoryTimeline
 
 /**
  * The welcome story. Its screen calls [start] in onStart and [stop] in onStop. While running it shows
- * [StoryTimeline.paced]: the action at its own speed, with each numbered step resting so that it stays readable.
+ * [StoryTimeline.paced]: the action at its own speed, with each caption's picture resting so that it stays readable.
  */
 class StoryView(context: Context) : View(context) {
     /** Called on the main thread after the new moment has been published. */

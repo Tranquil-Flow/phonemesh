@@ -84,13 +84,26 @@ class StoryTimelineTest {
         assertEquals(StoryTimeline.at(1f), StoryTimeline.at(2f))
     }
 
-    // Pacing: the same action, then a rest, so every numbered step stays for STEP_MS.
+    // Pacing: the same action with rests, so every numbered step and the un-numbered caption stay for STEP_MS.
 
     private val loop = 0L until StoryTimeline.LOOP_MS
     private val originalMs = listOf(2_400L, 1_600L, 1_600L, 1_000L, 2_300L)
 
-    /** The rests as (first ms, last ms), in order. */
-    private fun rests(): List<LongRange> {
+    /** What the un-numbered caption's action lasts: the opening and the closing. */
+    private val openingMs = 600L
+    private val closingMs = 500L
+    private val openingRestMs = StoryTimeline.STEP_MS - openingMs - closingMs
+
+    /** The five numbered steps' rests, in order; the loop starts with one more, under the un-numbered caption. */
+    private fun rests(): List<LongRange> = allRests().also {
+        assertEquals("the loop begins with the opening's rest", 0L, it.first().first)
+        assertEquals(StoryTimeline.OPENING, StoryTimeline.paced(it.first().last).moment)
+    }.drop(1)
+
+    private fun openingRest(): LongRange = allRests().first()
+
+    /** Every rest as (first ms, last ms), in order. */
+    private fun allRests(): List<LongRange> {
         val found = ArrayList<LongRange>()
         var start = -1L
         for (ms in loop) {
@@ -118,8 +131,8 @@ class StoryTimelineTest {
             else runs += moment to 1L
         }
         assertEquals(listOf(-1, 0, 1, 2, 3, 4, -1), runs.map { it.first })
-        assertEquals("the opening keeps its length", 600L, runs.first().second)
-        assertEquals("the closing keeps its length", 500L, runs.last().second)
+        assertEquals("the opening's rest, then its action at its own length", openingRestMs + openingMs, runs.first().second)
+        assertEquals("the closing keeps its length", closingMs, runs.last().second)
         (0 until StoryTimeline.MOMENTS).forEach { step ->
             val shown = runs[step + 1].second
             assertTrue("step ${step + 1} is shown $shown ms", shown >= StoryTimeline.STEP_MS)
@@ -128,10 +141,11 @@ class StoryTimelineTest {
     }
 
     @Test fun theLoopIsTheOriginalStoryPlusItsRests() {
-        val resting = originalMs.sumOf { maxOf(0L, StoryTimeline.STEP_MS - it) }
+        val resting = openingRestMs + originalMs.sumOf { maxOf(0L, StoryTimeline.STEP_MS - it) }
         assertEquals(StoryTimeline.DURATION_MS + resting, StoryTimeline.LOOP_MS)
-        assertEquals(21_100L, StoryTimeline.LOOP_MS)
-        assertEquals(resting, rests().sumOf { it.last - it.first + 1 })
+        assertEquals(24_000L, StoryTimeline.LOOP_MS)
+        assertEquals("six captions of STEP_MS each", (StoryTimeline.MOMENTS + 1) * StoryTimeline.STEP_MS, StoryTimeline.LOOP_MS)
+        assertEquals(resting, allRests().sumOf { it.last - it.first + 1 })
         assertEquals(originalMs.map { StoryTimeline.STEP_MS - it }, rests().map { it.last - it.first + 1 })
     }
 
@@ -283,10 +297,93 @@ class StoryTimelineTest {
             assertEquals("t=$t", t, StoryTimeline.beat(ms).t, 1e-6f)
             assertEquals("t=$t: a resumed picture begins without idle motion", StoryTimeline.at(StoryTimeline.beat(ms).t), StoryTimeline.paced(ms))
         }
-        assertEquals(0L, StoryTimeline.msOf(0f))
-        assertEquals("before the first rest nothing is added", 2_000L, StoryTimeline.msOf(.2f))
-        assertEquals("a held time maps to the start of its rest", 2_800L, StoryTimeline.msOf(.28f))
-        assertEquals("the still frame: after two rests", 5_400L + 1_600L + 2_400L, StoryTimeline.msOf(StoryTimeline.STILL))
+        assertEquals("the first picture maps to the start of the opening's rest", 0L, StoryTimeline.msOf(0f))
+        assertEquals("the opening's action plays after its rest", openingRestMs + 1L, StoryTimeline.msOf(.0001f))
+        assertEquals("before the first step's rest only the opening's is added", openingRestMs + 2_000L, StoryTimeline.msOf(.2f))
+        assertEquals("a held time maps to the start of its rest", openingRestMs + 2_800L, StoryTimeline.msOf(.28f))
+        assertEquals("the still frame: after three rests", openingRestMs + 5_400L + 1_600L + 2_400L, StoryTimeline.msOf(StoryTimeline.STILL))
         assertEquals(StoryTimeline.LOOP_MS, StoryTimeline.msOf(1f))
+    }
+
+    // The un-numbered caption rests too: at the loop's seam, before the opening's action.
+
+    /** What the eye can tell apart: parts drawn with no opacity do not count. */
+    private fun StoryFrame.visible() = listOf<Any>(
+        moment, camX, camY, camW, herPhoneDx, herPhoneDy, herPhoneAngle, hisPhoneDx, hisPhoneDy, hisPhoneAngle, mouthRx, mouthRy,
+        barsAlpha, bubbleAlpha, arcAlpha, sendRings.map { it.alpha }, receiveRings.map { it.alpha }, herLight, hisLight, wavesAlpha,
+    )
+
+    @Test fun theUnNumberedCaptionStaysOnScreenAsLongAsAStep() {
+        assertEquals(2_900L, openingRestMs)
+        val shown = loop.count { StoryTimeline.paced(it).moment == StoryTimeline.OPENING }.toLong()
+        assertEquals("the closing, the rest and the opening together", StoryTimeline.STEP_MS, shown)
+        val rest = openingRest()
+        assertEquals(0L..openingRestMs - 1, rest.first..rest.last)
+        // Across the seam the caption is unbroken: the closing, then the rest, then the opening.
+        val seam = (StoryTimeline.LOOP_MS - closingMs until StoryTimeline.LOOP_MS + openingRestMs + openingMs)
+        assertTrue(seam.all { StoryTimeline.paced(it).moment == StoryTimeline.OPENING })
+        assertEquals(StoryTimeline.STEP_MS, seam.last - seam.first + 1)
+        assertEquals("step 5 before it", StoryTimeline.MOMENTS - 1, StoryTimeline.paced(seam.first - 1).moment)
+        assertEquals("step 1 after it", 0, StoryTimeline.paced(seam.last + 1).moment)
+    }
+
+    @Test fun theFirstLaunchBeginsWithTheRestOnTheFirstPicture() {
+        assertEquals(StoryBeat(0f, 0, openingRestMs), StoryTimeline.beat(0))
+        assertEquals(StoryTimeline.at(0f), StoryTimeline.paced(0))
+        for (ms in openingRest()) {
+            assertEquals("ms=$ms", StoryBeat(0f, ms, openingRestMs), StoryTimeline.beat(ms))
+            assertEquals("ms=$ms", StoryTimeline.OPENING, StoryTimeline.paced(ms).moment)
+        }
+        // Then the opening's action, from its first instant and at its own speed.
+        assertEquals(StoryBeat(0f, 0, 0), StoryTimeline.beat(openingRestMs))
+        assertEquals(StoryTimeline.at(0f), StoryTimeline.paced(openingRestMs))
+        assertEquals(StoryTimeline.at(.03f), StoryTimeline.paced(openingRestMs + 300))
+        assertEquals(0, StoryTimeline.paced(openingRestMs + openingMs).moment)
+    }
+
+    @Test fun theSeamShowsTheSamePictureOnBothSides() {
+        // The story's last picture and its first differ only in parts that are not drawn (the hidden bubble's place, hidden bars and rings).
+        assertEquals(StoryTimeline.at(0f).visible(), StoryTimeline.at(1f).visible())
+        val first = StoryTimeline.at(0f)
+        assertEquals(listOf(0f, 0f, 0f), listOf(first.barsAlpha, first.bubbleAlpha, first.arcAlpha))
+        assertTrue((first.sendRings + first.receiveRings).all { it.alpha == 0f } && first.wavesAlpha.all { it == 0f })
+        // The rest begins and ends on that picture, so neither the loop's wrap nor the opening's action jumps.
+        val rest = openingRest()
+        assertEquals(first, StoryTimeline.paced(rest.first))
+        assertEquals(first, StoryTimeline.paced(rest.last + 1))
+        assertEquals(first, StoryTimeline.paced(StoryTimeline.LOOP_MS))
+        val before = StoryTimeline.paced(rest.last - 16)
+        assertEquals(first.herPhoneDy, before.herPhoneDy, .02f)
+        assertEquals(first.hisPhoneDy, before.hisPhoneDy, .02f)
+        for (ms in rest.first + 1..rest.last + 1) {
+            assertEquals("ms=$ms", StoryTimeline.paced(ms - 1).herPhoneDy, StoryTimeline.paced(ms).herPhoneDy, .01f)
+            assertEquals("ms=$ms", StoryTimeline.paced(ms - 1).hisPhoneDy, StoryTimeline.paced(ms).hisPhoneDy, .01f)
+        }
+    }
+
+    @Test fun theOpeningRestOnlyLiftsTheTwoLoweredPhones() {
+        val held = StoryTimeline.at(0f)
+        val frames = openingRest().map { StoryTimeline.paced(it) }
+        frames.forEach { frame ->
+            // The bars, the bubble and the rings are not drawn here (no opacity), so their breath is not seen.
+            assertEquals("nothing but the two phones is seen to move", held.visible(),
+                frame.copy(herPhoneDy = held.herPhoneDy, hisPhoneDy = held.hisPhoneDy).visible())
+            assertEquals(held, frame.withMovingPartsOf(held))
+            assertTrue(held.herPhoneDy - frame.herPhoneDy in 0f..StoryTimeline.PHONE_BOB)
+            assertEquals("both phones move together", held.herPhoneDy - frame.herPhoneDy, held.hisPhoneDy - frame.hisPhoneDy, 1e-4f)
+            assertFalse("no radio light comes on", frame.herLight || frame.hisLight)
+        }
+        assertTrue("the rest is not frozen: ${frames.toSet().size} pictures", frames.toSet().size > 100)
+        assertEquals("the phones reach their full lift", StoryTimeline.PHONE_BOB, frames.maxOf { held.herPhoneDy - it.herPhoneDy }, .01f)
+        // Mid-rest, between its two breaths, the picture is the held one again.
+        assertEquals(held.herPhoneDy, frames[frames.size / 2].herPhoneDy, .01f)
+        assertTrue(held.herPhoneDy - frames[frames.size / 4].herPhoneDy > StoryTimeline.PHONE_BOB * .9f)
+    }
+
+    @Test fun theStepRestsAreWhereTheyWere() {
+        // Each numbered step's rest starts the same time after its caption appears as before the opening rested.
+        val captionAt = (0 until StoryTimeline.MOMENTS).map { step -> loop.first { StoryTimeline.paced(it).moment == step } }
+        assertEquals(listOf(2_200L, 700L, 1_400L, 800L, 1_700L), rests().mapIndexed { step, rest -> rest.first - captionAt[step] })
+        assertEquals((0 until StoryTimeline.MOMENTS).map { openingRestMs + openingMs + it * StoryTimeline.STEP_MS }, captionAt)
     }
 }

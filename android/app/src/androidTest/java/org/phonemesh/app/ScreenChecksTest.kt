@@ -57,7 +57,8 @@ class ScreenChecksTest {
     @Test fun welcomeMoment1() = check(minTargets = 5) { ScreenStates.welcome(.2f) }
     @Test fun languageFromSettings() = check(minTargets = 6) { ScreenStates.languageFromSettings() }
     @Test fun chatsStepOneOffline() = check(minTargets = 6) { ScreenStates.chatsStepOneOffline() }
-    @Test fun chatsFriendGuide() = check(minTargets = 6, minTexts = 6) { ScreenStates.chatsFriendGuide() }
+    // Radio status, Help, Settings, Choose the file and Back: during setup there is no chat row and no ➕.
+    @Test fun chatsFriendGuide() = check(minTargets = 5, minTexts = 6) { ScreenStates.chatsFriendGuide() }
     @Test fun chatsStep2() = check(minTargets = 4) { ScreenStates.chatsStep(2) }
     @Test fun chatsStep3() = check(minTargets = 4) { ScreenStates.chatsStep(3) }
     @Test fun chatsRadioLost() = check(minTargets = 3) { ScreenStates.chatsRadioLost() }
@@ -91,22 +92,42 @@ class ScreenChecksTest {
         }
     }
 
-    @Test fun theEmptyHintNeverCoversAChatRowDuringSetup() {
+    @Test fun duringSetupOnlyTheStepsShowAndTheirButtonsAreWhole() {
+        val buttons = listOf(listOf("voice_download", "voice_file"), listOf("radio_search"), listOf("hello_try"))
         for (step in 1..3) {
             activity = ScreenStates.chatsStep(step)
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            val hint = checkNotNull(Views.tagged(activity!!, "empty"))
-            val chats = checkNotNull(Views.tagged(activity!!, "chats")) as android.widget.ListView
-            TestCore.onMain {
-                val hintAt = IntArray(2)
-                val rowAt = IntArray(2)
-                hint.getLocationOnScreen(hintAt)
-                val row = chats.getChildAt(chats.childCount - 1)
-                row.getLocationOnScreen(rowAt)
-                assertTrue("step $step: hint top ${hintAt[1]} is over the row ending at ${rowAt[1] + row.height}", hintAt[1] >= rowAt[1] + row.height)
+            for (hidden in listOf("chats", "empty", "new_chat")) {
+                assertEquals("step $step shows $hidden", null, Views.tagged(activity!!, hidden))
+            }
+            for (tag in buttons[step - 1]) {
+                val button = checkNotNull(Views.tagged(activity!!, tag)) { "step $step has no $tag" }
+                TestCore.onMain {
+                    val seen = android.graphics.Rect()
+                    assertTrue("step $step: $tag is out of sight", button.getGlobalVisibleRect(seen))
+                    assertEquals("step $step: $tag is cut", button.height, seen.height())
+                    assertEquals("step $step: $tag is cut", button.width, seen.width())
+                }
             }
             ScreenStates.finish(activity)
             activity = null
+        }
+    }
+
+    @Test fun theEmptyHintNeverCoversAChatRowBesideAProblemCard() {
+        activity = ScreenStates.chatsRadioLost()
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        val hint = checkNotNull(Views.tagged(activity!!, "empty"))
+        val chats = checkNotNull(Views.tagged(activity!!, "chats")) as android.widget.ListView
+        checkNotNull(Views.tagged(activity!!, "new_chat"))
+        TestCore.onMain {
+            assertTrue("the group row is listed", chats.childCount > 0)
+            val hintAt = IntArray(2)
+            val rowAt = IntArray(2)
+            hint.getLocationOnScreen(hintAt)
+            val row = chats.getChildAt(chats.childCount - 1)
+            row.getLocationOnScreen(rowAt)
+            assertTrue("hint top ${hintAt[1]} is over the row ending at ${rowAt[1] + row.height}", hintAt[1] >= rowAt[1] + row.height)
         }
     }
 

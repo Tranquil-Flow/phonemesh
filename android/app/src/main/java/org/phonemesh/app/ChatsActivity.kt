@@ -34,11 +34,19 @@ import org.phonemesh.core.SetupSteps
 import org.phonemesh.core.SetupView
 import java.util.Date
 
-/** Home: radio status, the numbered setup guide with how-to pictures (then single problem cards), the friend guide, every chat, ➕ for a private chat. */
+/**
+ * Home: radio status, then either the numbered setup guide with how-to pictures and the friend guide, alone, or
+ * (after setup) single problem cards, every chat and ➕ for a private chat.
+ */
 class ChatsActivity : ScreenActivity() {
     private lateinit var radioStatus: ImageView
     private lateinit var cards: LinearLayout
     private lateinit var emptyHint: LinearLayout
+    private lateinit var setupScroll: ScrollView
+    /** The chat list, its empty hint and ➕. */
+    private lateinit var chatsFrame: FrameLayout
+    /** The numbered guide is showing: nothing else is, and it may use the whole height. */
+    private var guiding = false
     private val rows = ChatAdapter()
     private var built = false
     private var importDialog: AlertDialog? = null
@@ -69,10 +77,10 @@ class ChatsActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), 0)
         }
-        // A tall guide must not squeeze the chats to zero. Its pictures and later steps remain scrollable.
-        val setupScroll = object : ScrollView(this) {
+        // Tall problem cards must not squeeze the chats to zero; they remain scrollable. The guide has the screen to itself.
+        setupScroll = object : ScrollView(this) {
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                val height = if (View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.UNSPECIFIED) heightMeasureSpec
+                val height = if (guiding || View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.UNSPECIFIED) heightMeasureSpec
                 else View.MeasureSpec.makeMeasureSpec(View.MeasureSpec.getSize(heightMeasureSpec) * 3 / 4, View.MeasureSpec.AT_MOST)
                 super.onMeasure(widthMeasureSpec, height)
             }
@@ -82,7 +90,7 @@ class ChatsActivity : ScreenActivity() {
         }
         root.addView(setupScroll)
         lateinit var list: ListView
-        // The hint is centred, but a tall setup guide leaves little room: it moves below the chat rows, or out of sight.
+        // The hint is centred, but tall problem cards leave little room: it moves below the chat rows, or out of sight.
         val frame = object : FrameLayout(this) {
             override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
                 super.onLayout(changed, left, top, right, bottom)
@@ -119,6 +127,7 @@ class ChatsActivity : ScreenActivity() {
         }
         frame.addView(add, FrameLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 64), Gravity.END or Gravity.BOTTOM)
             .apply { setMargins(pad(), pad(), pad(), pad()) })
+        chatsFrame = frame
         root.addView(frame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         show(root)
         built = true
@@ -180,15 +189,21 @@ class ChatsActivity : ScreenActivity() {
     override fun render() {
         if (!built) return
         Looks.radio(radioStatus, palette, core.connected)
-        renderCards()
+        val guide = renderCards()
+        if (guide != guiding) {
+            guiding = guide
+            setupScroll.requestLayout()
+        }
+        // During setup only the steps show. The chats, their hint and ➕ come with the green card that ends it.
+        chatsFrame.visibility = if (guide) View.GONE else View.VISIBLE
         val data = core.chatRows()
         rows.items = data
         rows.notifyDataSetChanged()
         emptyHint.visibility = if (data.all { it.last == null }) View.VISIBLE else View.GONE
     }
 
-    /** Three numbered steps, then two seconds of green; afterwards only lost-voice/radio cards. */
-    private fun renderCards() {
+    /** Three numbered steps, then two seconds of green; afterwards only lost-voice/radio cards. True while the steps show. */
+    private fun renderCards(): Boolean {
         cards.removeAllViews()
         cards.removeCallbacks(rerender)
         val now = SystemClock.uptimeMillis()
@@ -199,7 +214,8 @@ class ChatsActivity : ScreenActivity() {
         // The radio step is done only once the radio has its region; until then the region card takes the step's place.
         val region = RegionCards.body(this, palette, core, regionPicture)
         var regionShown = false
-        when (val view = SetupSteps.of(voiceReady, core.radioReady(), settings.firstMessageSent, settings.setupFinished)) {
+        val view = SetupSteps.of(voiceReady, core.radioReady(), settings.firstMessageSent, settings.setupFinished)
+        when (view) {
             is SetupView.Guide -> {
                 regionShown = view.current == SetupStep.RADIO && region != null
                 cards.addView(
@@ -241,6 +257,7 @@ class ChatsActivity : ScreenActivity() {
             cards.addView(doneCard())
             cards.postDelayed(rerender, doneUntil - now)
         }
+        return view is SetupView.Guide
     }
 
     /** Reuse each panel and refresh its speaker when a voice arrives. */

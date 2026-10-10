@@ -54,6 +54,7 @@ object ScreenStates {
         }
         val screen = Views.start(ChatsActivity::class.java)
         expect(Views.tagged(screen, listOf("card_voice", "card_radio", "card_hello")[step - 1]) != null, "step $step card")
+        expect(listOf("chats", "empty", "new_chat").none { Views.tagged(screen, it) != null }, "only the steps: no chat list, hint or plus")
         return screen
     }
 
@@ -90,6 +91,7 @@ object ScreenStates {
         }
         val screen = Views.start(ChatsActivity::class.java)
         expect(Views.tagged(screen, "card_radio") != null && Views.tagged(screen, "step_of") == null, "one radio card without numbers")
+        expect(listOf("chats", "empty", "new_chat").all { Views.tagged(screen, it) != null }, "the chat list, the hint and the plus")
         return screen
     }
 

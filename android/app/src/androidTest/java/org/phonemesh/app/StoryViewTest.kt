@@ -104,7 +104,8 @@ class StoryViewTest {
         val moments = mutableListOf<Int>()
         TestCore.onMain { v.onMoment = { moments += it }; v.start() }
         assertTrue(TestCore.onMain { v.isRunning })
-        Views.waitUntil(3_000) { moments.contains(0) }
+        // Step 1 follows the opening's rest and its 600 ms of action.
+        Views.waitUntil(StoryTimeline.msOf(.06f) + 2_400) { moments.contains(0) }
         TestCore.onMain { v.stop() }
         val seen = TestCore.onMain { moments.size }
         val stopped = picture(v)
@@ -221,6 +222,35 @@ class StoryViewTest {
         assertEquals(emptyList<Int>(), TestCore.onMain { moments.toList() })
         assertFalse("a resting picture is not frozen", held.sameAs(picture(v)))
         Views.waitUntil(2_500) { v.moment == 1 }
+    }
+
+    @Test fun theFirstLaunchRestsOnTheOpeningCaptionAndStillMoves() {
+        StoryView.animationsEnabled = { true }
+        val v = measured()
+        val first = picture(v)
+        val reference = measured()
+        TestCore.onMain { reference.freezeAt(0f) }
+        assertTrue("a new picture is the story's first one", first.sameAs(picture(reference)))
+        TestCore.onMain { reference.freezeAt(1f) }
+        assertTrue("and the story's last one looks the same, so the loop's seam does not jump", first.sameAs(picture(reference)))
+        // Without the rest step 1 would begin after 600 ms; the opening caption now stays 2.9 s longer.
+        val opening = StoryTimeline.msOf(.06f)
+        assertEquals(StoryTimeline.STEP_MS - 500, opening)
+        val moments = mutableListOf<Int>()
+        val started = android.os.SystemClock.uptimeMillis()
+        TestCore.onMain { v.onMoment = { moments += it }; v.start() }
+        Thread.sleep(700)
+        val resting = picture(v)
+        val restingAt = android.os.SystemClock.uptimeMillis() - started
+        val momentsThen = TestCore.onMain { moments.toList() }
+        assertTrue("the picture was taken during the rest: $restingAt ms", restingAt < opening - 600)
+        assertTrue(TestCore.onMain { v.isRunning })
+        assertEquals("the opening caption is still up", emptyList<Int>(), momentsThen)
+        assertFalse("the resting picture is not frozen", first.sameAs(resting))
+        Views.waitUntil(opening + 2_400) { moments.contains(0) }
+        val shownFor = android.os.SystemClock.uptimeMillis() - started
+        assertTrue("step 1 came after the rest: $shownFor ms", shownFor >= opening - 50)
+        TestCore.onMain { v.stop() }
     }
 
     @Test fun resumingLateInTheStoryGoesOnFromThere() {

@@ -33,8 +33,8 @@ data class StoryFrame(
 )
 
 /**
- * Where the paced loop is at one instant: the story time [t], and while a step rests, how many ms ([restMs]) of
- * its [restLength] ms have passed. Both are 0 while the action plays.
+ * Where the paced loop is at one instant: the story time [t], and while the picture rests, how many ms ([restMs])
+ * of the rest's [restLength] ms have passed. Both are 0 while the action plays.
  */
 data class StoryBeat(val t: Float, val restMs: Long, val restLength: Long) {
     val resting: Boolean get() = restLength > 0
@@ -43,16 +43,17 @@ data class StoryBeat(val t: Float, val restMs: Long, val restLength: Long) {
 /**
  * The welcome story's one timeline, from the approved mockup (wax-print round). Story time t runs 0..1 over
  * [DURATION_MS] of action ([at]). On screen the action plays at that speed and each numbered step then rests,
- * so that it stays for [STEP_MS]: [paced] gives the picture for a time in that longer loop of [LOOP_MS].
+ * so that it stays for [STEP_MS]; the un-numbered caption, shown from the closing to the opening, rests between
+ * the two for the same reason. [paced] gives the picture for a time in that longer loop of [LOOP_MS].
  */
 object StoryTimeline {
     /** The action alone, without the rests. */
     const val DURATION_MS = 10_000L
-    /** How long each numbered step stays on screen: its action, then a rest for what is left. The one number to change. */
+    /** How long each caption stays on screen: its action, and a rest for what is left. The one number to change. */
     const val STEP_MS = 4_000L
     /** One breath of the resting picture lasts about this long; a rest holds a whole number of them. */
     const val BREATH_MS = 1_600L
-    /** The most a raised phone lifts while its step rests, in scene units. */
+    /** The most a raised phone lifts while its step rests, and a lowered one while the opening rests, in scene units. */
     const val PHONE_BOB = 1.5f
     /** The most the bubble lifts while its step rests, in scene units. */
     const val BUBBLE_BOB = 2f
@@ -91,8 +92,16 @@ object StoryTimeline {
     private val HOLD_MS = longArrayOf(2_800, 3_700, 6_000, 7_000, 8_900)
     /** A step whose action already lasts [STEP_MS] or longer does not rest. */
     private val REST_MS = LongArray(MOMENTS) { max(0L, STEP_MS - ((BOUNDS[it + 1] - BOUNDS[it]) * DURATION_MS).roundToLong()) }
-    /** The loop on screen: the action and every step's rest. */
-    val LOOP_MS = DURATION_MS + REST_MS.sum()
+    /**
+     * The un-numbered caption is shown from the closing, across the loop's seam, to the end of the opening. It
+     * rests at the seam, on the story's first picture, so the first launch starts with the rest as well.
+     */
+    private val OPENING_REST_MS = max(0L, STEP_MS - ((BOUNDS.first() + 1f - BOUNDS.last()) * DURATION_MS).roundToLong())
+    /** Every rest in the loop's order, as the action time it holds and its length: the opening's, then each step's. */
+    private val HOLDS = longArrayOf(0L) + HOLD_MS
+    private val RESTS = longArrayOf(OPENING_REST_MS) + REST_MS
+    /** The loop on screen: the action and every rest. */
+    val LOOP_MS = DURATION_MS + RESTS.sum()
 
     fun moment(t: Float): Int {
         val next = BOUNDS.indexOfFirst { t < it }
@@ -102,25 +111,26 @@ object StoryTimeline {
     /** The story time shown [ms] into the paced loop (any ms; the loop repeats), and the rest it is in, if any. */
     fun beat(ms: Long): StoryBeat {
         var action = Math.floorMod(ms, LOOP_MS)
-        for (step in 0 until MOMENTS) {
-            val rested = action - HOLD_MS[step]
+        for (rest in HOLDS.indices) {
+            val rested = action - HOLDS[rest]
             if (rested < 0) break
-            if (rested < REST_MS[step]) return StoryBeat(HOLD_MS[step] / DURATION_MS.toFloat(), rested, REST_MS[step])
-            action -= REST_MS[step]
+            if (rested < RESTS[rest]) return StoryBeat(HOLDS[rest] / DURATION_MS.toFloat(), rested, RESTS[rest])
+            action -= RESTS[rest]
         }
         return StoryBeat(action / DURATION_MS.toFloat(), 0, 0)
     }
 
-    /** When the paced loop first shows story time [t]: for a time a step rests on, the start of that rest. */
+    /** When the paced loop first shows story time [t]: for a time the picture rests on, the start of that rest. */
     fun msOf(t: Float): Long {
         val action = (t.coerceIn(0f, 1f) * DURATION_MS).roundToLong()
-        return action + (0 until MOMENTS).filter { HOLD_MS[it] < action }.sumOf { REST_MS[it] }
+        return action + HOLDS.indices.filter { HOLDS[it] < action }.sumOf { RESTS[it] }
     }
 
     /**
      * The picture [ms] into the paced loop. While the action plays it is exactly [at]. While a step rests it is
      * the held picture, breathing: a raised phone and the bubble lift a little and come back, her open mouth, the
      * sound bars, the sound waves and the radio rings ease off and come back, and a lit radio light keeps blinking.
+     * While the opening rests nothing is raised or lit, so the two lowered phones lift a little and come back.
      * The breath is 0 when a rest starts and when it ends, so the action goes on from the picture it stopped at.
      */
     fun paced(ms: Long): StoryFrame {
@@ -128,14 +138,17 @@ object StoryTimeline {
         if (!beat.resting) return at(beat.t)
         val breaths = max(1, (beat.restLength / BREATH_MS.toFloat()).roundToInt())
         val breath = ((1 - cos(2 * PI * breaths * beat.restMs / beat.restLength)) / 2).toFloat()
-        return frame(beat.t, beat.t + beat.restMs / DURATION_MS.toFloat(), breath)
+        return frame(beat.t, beat.t + beat.restMs / DURATION_MS.toFloat(), breath, lowered = moment(beat.t) == OPENING)
     }
 
     /** The action's picture at story time [time] (0..1). */
-    fun at(time: Float): StoryFrame = time.coerceIn(0f, 1f).let { frame(it, it, 0f) }
+    fun at(time: Float): StoryFrame = time.coerceIn(0f, 1f).let { frame(it, it, 0f, lowered = false) }
 
-    /** [blinkTime] runs on through a rest; [breath] is 0..1, and 0 leaves the action's picture untouched. */
-    private fun frame(t: Float, blinkTime: Float, breath: Float): StoryFrame {
+    /**
+     * [blinkTime] runs on through a rest; [breath] is 0..1, and 0 leaves the action's picture untouched. With
+     * [lowered] the breath lifts both phones wherever they are; otherwise each phone only as far as it is raised.
+     */
+    private fun frame(t: Float, blinkTime: Float, breath: Float, lowered: Boolean): StoryFrame {
         val pulse = 1f - PULSE * breath
         val ringPulse = 1f - RING_PULSE * breath
         val her = ease(window(t, .06f, .14f, .40f, .48f))
@@ -149,11 +162,13 @@ object StoryTimeline {
         val waves = window(t, .72f, .75f, .89f, .93f)
         val bubble = bubble(t)
         val camera = camera(t)
+        val herLift = PHONE_BOB * breath * (if (lowered) 1f else her)
+        val hisLift = PHONE_BOB * breath * (if (lowered) 1f else his)
         return StoryFrame(
             moment = moment(t),
             camX = camera[0], camY = camera[1], camW = camera[2],
-            herPhoneDx = lerp(6f, 0f, her), herPhoneDy = lerp(46f, 0f, her) - PHONE_BOB * breath * her, herPhoneAngle = lerp(20f, 0f, her),
-            hisPhoneDx = lerp(-6f, 0f, his), hisPhoneDy = lerp(48f, 0f, his) - PHONE_BOB * breath * his, hisPhoneAngle = lerp(-20f, 0f, his),
+            herPhoneDx = lerp(6f, 0f, her), herPhoneDy = lerp(46f, 0f, her) - herLift, herPhoneAngle = lerp(20f, 0f, her),
+            hisPhoneDx = lerp(-6f, 0f, his), hisPhoneDy = lerp(48f, 0f, his) - hisLift, hisPhoneAngle = lerp(-20f, 0f, his),
             mouthRx = 2.6f - talk * .6f * syllable * pulse,
             mouthRy = .8f + talk * 2.6f * syllable * pulse,
             barsAlpha = window(t, .14f, .17f, .28f, .34f),

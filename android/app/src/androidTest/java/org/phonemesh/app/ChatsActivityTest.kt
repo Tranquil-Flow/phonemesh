@@ -8,7 +8,6 @@ import android.graphics.Canvas
 import android.graphics.Rect
 import android.net.Uri
 import android.text.TextUtils
-import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -60,19 +59,71 @@ class ChatsActivityTest {
         }
     }
 
-    @Test fun setupLeavesRoomForChatsAndCanScrollToLaterSteps() {
+    /** The chat list, the empty hint and ➕, shown or not. */
+    private fun chatParts(screen: Activity) = listOf("chats", "empty", "new_chat").map { Views.tagged(screen, it) != null }
+
+    /** The setup area's height when it is offered exactly the height of what it holds. */
+    private fun setupHeightFor(screen: Activity): Pair<Int, Int> = TestCore.onMain {
+        val scroll = Views.descendants(screen.window.decorView).first { it.tag == "setup_scroll" } as ScrollView
+        val content = scroll.getChildAt(0).height
+        scroll.measure(android.view.View.MeasureSpec.makeMeasureSpec(scroll.width, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(content, android.view.View.MeasureSpec.AT_MOST))
+        val measured = scroll.measuredHeight
+        scroll.requestLayout()
+        content to measured
+    }
+
+    @Test fun duringSetupOnlyTheStepsShowAndTheyUseTheWholeHeight() {
         TestCore.install(voices = emptyList(), connected = false)
         val chats = start()
         saveSetupPicture(chats, "voice-before-scroll")
-        val list = Views.tagged(chats, "chats") as ListView
-        assertTrue("setup cannot squeeze chats out: list height=${list.height}, screen height=${chats.window.decorView.height}",
-            TestCore.onMain { list.height >= Ui.dp(chats, 76) && list.childCount > 0 })
+        assertEquals("no chat list, no hint, no plus during setup", listOf(false, false, false), chatParts(chats))
+        assertNull(Views.withText(chats, "Pas encore de messages"))
+        assertNull(Views.withText(chats, "Groupe"))
+        val (content, height) = setupHeightFor(chats)
+        assertTrue("the guide has a height", content > 0)
+        assertEquals("the guide may use all the height it is offered", content, height)
         val scroll = Views.all(chats).filterIsInstance<ScrollView>().single()
+        val root = TestCore.onMain { scroll.parent as android.view.View }
+        // The guide is as tall as what it holds, or it reaches the bottom of the screen's own area.
+        assertTrue("the guide stops short: top ${scroll.top}, bottom ${scroll.bottom}, content $content, screen ${root.height} less ${root.paddingBottom}",
+            TestCore.onMain { scroll.height == content || scroll.bottom == root.height - root.paddingBottom })
+        // The current step's two buttons are whole, not cut by the setup area's edge.
+        for (tag in listOf("voice_download", "voice_file")) {
+            val button = Views.tagged(chats, tag)!!
+            val seen = Rect()
+            assertTrue(tag, TestCore.onMain { button.getGlobalVisibleRect(seen) })
+            assertEquals("$tag is cut", button.height, seen.height())
+        }
         TestCore.onMain { scroll.fullScroll(android.view.View.FOCUS_DOWN) }
         Views.waitUntil {
             Views.descendants(chats.window.decorView).first { it.tag == "step_row:3" }.getGlobalVisibleRect(Rect())
         }
         saveSetupPicture(chats, "voice-after-scroll")
+    }
+
+    @Test fun theChatsWaitBehindTheStepsAndStepThreeOpensTheGroup() {
+        TestCore.install()
+        TestCore.onMain { TestCore.radio.receive("!0000aaaa", "[pm1:fr] En privé", true) }
+        val group = core.groupChatId()
+        val direct = core.history.chats().single { it.kind == ChatKind.DIRECT }.id
+        val chats = start()
+        assertNotNull("step 3 is the current step", Views.tagged(chats, "card_hello"))
+        assertEquals(listOf(false, false, false), chatParts(chats))
+        assertNull(Views.tagged(chats, "chat:$group"))
+        assertNull("a message that came in during setup waits behind the steps", Views.tagged(chats, "chat:$direct"))
+        // The step's own button is the way into the group chat.
+        Views.tap(chats, "hello_try")
+        Views.waitUntil { resumedNow() is ConversationActivity }
+        assertEquals("Groupe", Views.textOf(Views.tagged(checkNotNull(Views.resumed()), "title")!!))
+        Views.finish(Views.resumed())
+        Views.waitUntil { resumedNow() === chats }
+        assertEquals("still setup: nothing was sent", listOf(false, false, false), chatParts(chats))
+        TestCore.onMain { core.setDraft(group, "Bonjour"); assertTrue(core.send(group)) }
+        assertNotNull(Views.tagged(chats, "setup_done"))
+        assertEquals("the list and the plus are back; the hint is not, there are messages", listOf(true, false, true), chatParts(chats))
+        assertNotNull(Views.tagged(chats, "chat:$group"))
+        assertEquals("1", Views.textOf(Views.tagged(chats, "unread:$direct")!!))
     }
 
     @Test fun theQuestionMarkOpensHelp() {
@@ -119,6 +170,7 @@ class ChatsActivityTest {
         assertNotNull(Views.tagged(chats, "step_row:2"))
         assertNotNull(Views.tagged(chats, "step_row:3"))
         assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
+        assertEquals("step 1 shows only the steps", listOf(false, false, false), chatParts(chats))
 
         TestCore.onMain {
             Fixtures.installReady(context)
@@ -140,6 +192,7 @@ class ChatsActivityTest {
         Views.tap(chats, "part:3")
         assertNotNull(Views.tagged(chats, "howto:search"))
         assertEquals("Touchez « Trouver la radio ».", Views.textOf(Views.tagged(chats, "howto_sentence")!!))
+        assertEquals("step 2 shows only the steps", listOf(false, false, false), chatParts(chats))
 
         TestCore.onMain { TestCore.radio.connected(true) }
         assertNotNull(Views.tagged(chats, "card_hello"))
@@ -148,6 +201,7 @@ class ChatsActivityTest {
         assertNotNull(Views.tagged(chats, "step_done:2"))
         assertEquals("Radio connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
         assertNotNull(Views.tagged(chats, "howto:hello"))
+        assertEquals("step 3 shows only the steps", listOf(false, false, false), chatParts(chats))
         saveSetupPicture(chats, "step3")
         Views.tap(chats, "hello_try")
         Views.waitUntil { resumedNow() is ConversationActivity }
@@ -157,16 +211,20 @@ class ChatsActivityTest {
         val group = TestCore.onMain { core.groupChatId() }
         TestCore.onMain { core.setDraft(group, "Bonjour"); assertTrue(core.send(group)) }
         assertNotNull("synchronous send observers see completion", Views.tagged(chats, "setup_done"))
+        assertEquals("the chats are back with the green card", listOf(true, false, true), chatParts(chats))
+        assertNotNull(Views.tagged(chats, "chat:$group"))
         inst.waitForIdleSync()
         saveSetupPicture(chats, "complete")
         assertTrue(core.settings.setupFinished)
         TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
         Views.waitUntil(4_000) { Views.descendants(chats.window.decorView).none { it.tag == "setup_done" && it.isShown } }
         listOf("card_voice", "card_radio", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
+        assertEquals(listOf(true, false, true), chatParts(chats))
         assertTrue(core.canTalk())
         Views.finish(chats)
         val reopened = start()
         assertNull("setup never returns on reopening", Views.tagged(reopened, "step_of"))
+        assertEquals(listOf(true, false, true), chatParts(reopened))
         assertNull(Views.tagged(reopened, "setup_done"))
     }
 
@@ -180,6 +238,10 @@ class ChatsActivityTest {
         assertNotNull(Views.tagged(chats, "howto:lost"))
         inst.waitForIdleSync()
         saveSetupPicture(chats, "lost-radio")
+        assertEquals("a problem card leaves the list, the hint and the plus in place", listOf(true, true, true), chatParts(chats))
+        assertNotNull(Views.tagged(chats, "chat:${core.groupChatId()}"))
+        val (content, height) = setupHeightFor(chats)
+        assertEquals("a problem card keeps its height limit, so the chats keep their room", content * 3 / 4, height)
         assertNull(Views.tagged(chats, "step_of"))
         assertNull(Views.tagged(chats, "step_row:1"))
         TestCore.onMain { TestCore.radio.connected(true) }
@@ -236,6 +298,8 @@ class ChatsActivityTest {
 
     @Test fun unreadClearsWhenTheChatIsOpened() {
         TestCore.install()
+        // After setup: during it the chats screen shows only the steps.
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
         TestCore.onMain {
             TestCore.radio.receive("!0000aaaa", "[pm1:fr] Un", true)
             TestCore.radio.receive("!0000aaaa", "[pm1:fr] Deux", true)
@@ -252,6 +316,8 @@ class ChatsActivityTest {
 
     @Test fun plusOpensAPrivateChatWithAHeardRadio() {
         TestCore.install()
+        // After setup: during it the chats screen shows only the steps.
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
         val chats = start()
         Views.tap(chats, "new_chat")
         assertEquals("Aucune radio entendue.", Views.textOf(Views.tagged(chats, "note")!!))
@@ -267,6 +333,8 @@ class ChatsActivityTest {
 
     @Test fun veryLongNamesAndMessagesStayOnOneLine() {
         TestCore.install()
+        // After setup: during it the chats screen shows only the steps.
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
         val longName = "Kofi Mensah Agbodjan, radio du grand marché"
         TestCore.onMain {
             TestCore.radio.setPeers(listOf(RadioPeer("!0000aaaa", longName)))
@@ -534,9 +602,12 @@ class ChatsActivityTest {
 
     @Test fun theEmptyStateShowsUntilAMessageArrives() {
         TestCore.install()
+        // After setup: during it the chats screen shows only the steps.
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
         val chats = start()
         assertNotNull(Views.tagged(chats, "empty"))
         assertNotNull(Views.withText(chats, "Pas encore de messages"))
+        assertEquals(listOf(true, true, true), chatParts(chats))
         TestCore.onMain { TestCore.radio.receive("!0000aaaa", "[pm1:fr] Enfin", false) }
         assertNull(Views.tagged(chats, "empty"))
     }

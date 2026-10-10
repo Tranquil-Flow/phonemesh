@@ -35,7 +35,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
     private val baseUrl: String = BuildConfig.PACK_BASE_URL,
     private val install: (InputStream) -> PackInfo = { store.install(it) }) {
     private val dm = context.getSystemService(DownloadManager::class.java)
-    private val prefs = context.getSharedPreferences("pack-downloads", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val catalog get() = GeneratedPackCatalog.entries
 
     private fun downloadsDir(): File = checkNotNull(context.getExternalFilesDir(DIR)) { "Stockage indisponible" }
@@ -55,6 +55,7 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         if (decision != DownloadDecision.Start) return@synchronized decision
         pending()[entry.id]?.let { forget(entry.id, it) }
         destination(entry).delete()
+        unreachable = false
         val request = DownloadManager.Request(Uri.parse(baseUrl + entry.fileName))
             .setDestinationInExternalFilesDir(context, DIR, entry.fileName)
             .setAllowedOverMetered(true)
@@ -135,11 +136,13 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         return when (status) {
             DownloadManager.STATUS_SUCCESSFUL -> {
                 if (!prefs.edit().remove(packId).commit()) return null
+                unreachable = false
                 val entry = catalog.firstOrNull { it.id == packId }
                 Outcome.Claimed(packId, id, entry, runCatching { downloadedFile(localUri) ?: entry?.let { destination(it) } }.getOrNull())
             }
             DownloadManager.STATUS_FAILED -> {
                 Log.w(TAG, "download of $packId failed, reason $reason")
+                if (PackDownloadText.unreachable(reason)) unreachable = true
                 forget(packId, id)
                 Outcome.Done(Result.failure(PackDownloadFailure(PackDownloadText.failure(reason))))
             }
@@ -213,13 +216,33 @@ class PackDownloads(private val context: Context, private val store: PackStore,
         return file.takeIf { it.parentFile == downloadsDir().canonicalFile }
     }
 
-    private companion object {
-        const val DIR = "downloads"
-        const val TAG = "PackDownloads"
+    companion object {
+        private const val DIR = "downloads"
+        private const val TAG = "PackDownloads"
+        private const val PREFS = "pack-downloads"
+        /** The last download failed without reaching the server; cleared by the next start or success. */
+        @Volatile private var unreachable = false
+
+        /** A download failed for lack of a connection, or one is paused waiting for the network. Needs no permission. */
+        fun noInternet(context: Context): Boolean {
+            if (unreachable) return true
+            val ids = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all.values.filterIsInstance<Long>()
+            if (ids.isEmpty()) return false
+            return runCatching {
+                val query = DownloadManager.Query().setFilterById(*ids.toLongArray()).setFilterByStatus(DownloadManager.STATUS_PAUSED)
+                context.getSystemService(DownloadManager::class.java).query(query).use { c ->
+                    val reason = c.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)
+                    var waiting = false
+                    while (c.moveToNext()) waiting = waiting || PackDownloadText.waitsForInternet(c.getInt(reason))
+                    waiting
+                }
+            }.getOrDefault(false)
+        }
+
         /** Shared by every instance: two instances must never collect the same download. */
-        val LOCK = Any()
+        private val LOCK = Any()
         /** Pack id → file name of each download claimed and being installed by some instance; guarded by [LOCK]. */
-        val installing = HashMap<String, String?>()
+        private val installing = HashMap<String, String?>()
     }
 }
 
@@ -244,6 +267,14 @@ internal object PackDownloadText {
         val locale = Locale(entry.id.removePrefix("voice-").substringBefore('-'))
         return locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) }
     }
+
+    /** A failed download's reason that means the server was never reached (an answer from it is not this). */
+    fun unreachable(reason: Int): Boolean =
+        reason == DownloadManager.ERROR_HTTP_DATA_ERROR || reason == DownloadManager.ERROR_CANNOT_RESUME
+
+    /** A paused download's reason that means it is waiting for a connection. */
+    fun waitsForInternet(reason: Int): Boolean =
+        reason == DownloadManager.PAUSED_WAITING_FOR_NETWORK || reason == DownloadManager.PAUSED_WAITING_TO_RETRY
 
     fun failure(reason: Int): UiText = UiText(
         when (reason) {

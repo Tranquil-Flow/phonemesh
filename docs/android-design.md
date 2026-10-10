@@ -65,11 +65,86 @@ comparisons do not establish conversational microphone accuracy.
 The import picker initially targets **Pixel/internal storage → Download → Phonemesh**:
 the separate Downloads provider may omit ZIPs copied via USB even when they exist.
 
+Setup step 1 ("Download the voice") offers two ways, numbered like the two parts of the
+step's how-to picture: **1 · Download** and **2 · From a friend**. A lost-voice card after
+setup shows one picture without numbered parts, so there the same two buttons carry no
+numbers.
+
+- **Download** starts the pack download, as before.
+- **From a friend** opens a short guide inside the step's card; it never opens the file
+  picker by itself. The guide shows two small how-to pictures with one sentence each
+  (the friend opens Settings → "Share the app"; accept the file on this phone, then tap
+  it), a secondary **Choose the file** button that opens the document picker described
+  above, and **Back**. The system back button also closes the guide. The open guide
+  survives rotation and closes by itself once the voice is installed. A received pack
+  that is tapped and opened with Phonemesh still goes straight to the "install this
+  pack?" question.
+- The guide's two sentences have no recorded clip, so their speaker button appears only
+  when a voice is ready to read them; the step's own two sentences keep their clips.
+
+**Emphasis without internet.** The app does not hold `ACCESS_NETWORK_STATE` and does not
+add it, so it cannot ask the phone whether it is online. Its only sign is its own pack
+download: one that failed without reaching the server (`ERROR_HTTP_DATA_ERROR`,
+`ERROR_CANNOT_RESUME`), or one that `DownloadManager` reports paused waiting for the
+network. While that sign is present, "From a friend" is the filled button and Download
+is outlined. Otherwise Download is the filled button. The sign is cleared by the next
+download start or success. The decision is `SetupPlan.voiceChoices` (pure Kotlin) fed by
+`DeviceAccess.noInternet()`, which tests replace.
+
+**A running download.** Its progress bar takes the place of the Download button, and
+"From a friend" always stays under the bar (outlined unless the sign above is present).
+An offline phone can show a download that sits at 0 % without reporting a pause for the
+network, so the sign alone cannot be what keeps the second way reachable. A pack
+installed from a file while its own download is still running ends that download; the
+downloads of other packs go on.
+
+On the sender's side, the note shown when "Share the app" opens the share sheet suggests
+Quick Share first and Bluetooth when it is missing.
+
 Wire messages remain readable `[pm1:en-US] ...` TEXT_MESSAGE_APP text, capped at 200
 UTF-8 bytes including the tag. Canonical tags, Unicode preview safeguards and explicit
 language selection are preserved. The Android codec can represent additional Piper
 language tags; the initial Python/Kokoro registry still accepts only its own supported
 intersection. Unsupported receivers must not silently switch language.
+
+## Welcome story pacing
+
+The first screen's story (`StoryTimeline`, drawn by `StoryView`) has 10 s of action
+(`DURATION_MS`), addressed by a story time from 0 to 1 (`StoryTimeline.at`). On screen
+the action plays at that speed, and each of the five numbered steps then rests so that
+it is shown for `STEP_MS` = 4,000 ms; a step whose action already lasted that long
+would not rest. The opening (600 ms) and closing (500 ms) keep their lengths. The loop
+on screen is `LOOP_MS` = 21,100 ms, computed from `STEP_MS`.
+
+| Step | Action | Rest | Shown | Rests at action time |
+|---|---|---|---|---|
+| 1 | 2,400 ms | 1,600 ms | 4,000 ms | 2,800 ms |
+| 2 | 1,600 ms | 2,400 ms | 4,000 ms | 3,700 ms |
+| 3 | 1,600 ms | 2,400 ms | 4,000 ms | 6,000 ms |
+| 4 | 1,000 ms | 3,000 ms | 4,000 ms | 7,000 ms |
+| 5 | 2,300 ms | 1,700 ms | 4,000 ms | 8,900 ms |
+
+A step rests on the last picture before it starts to change into the next step's, not
+on the instant its caption changes: the caption changes while a camera move or a fade
+is under way. What is left of the step's action (200 to 900 ms) plays after the rest,
+still under its caption. Step 2 is the one compromise: the camera's pull-back starts
+100 ms before the last letter is typed, so the rest waits for the whole word, with the
+camera 2 % into its move.
+
+`StoryTimeline.beat(ms)` maps a time in the loop to the story time and the rest it falls
+in; `paced(ms)` returns the picture. During the action `paced` equals `at` exactly.
+During a rest it is the held picture with one value, the breath (0 to 1, a whole number
+of raised-cosine cycles of about `BREATH_MS` = 1,600 ms, so it is 0 with no speed at both
+ends of the rest), applied as: a raised phone up to `PHONE_BOB` = 1.5 scene units higher,
+the bubble up to `BUBBLE_BOB` = 2 higher, her open mouth, the sound bars and his sound
+waves up to `PULSE` = 30 % smaller or fainter, ring radii up to `RING_PULSE` = 10 %
+smaller. A radio light that is on in the held picture keeps blinking at its usual rate.
+Camera, captions, letters and every opacity stay as held.
+
+`StoryView.freezeAt(t)` still takes a story time from 0 to 1 and shows `at(t)` without
+any breath, so screenshots and the reduced-motion frame (`STILL` = 0.54) are unchanged.
+A frozen or stopped picture resumes from `StoryTimeline.msOf(t)`, the first instant the
+loop shows that story time.
 
 ## Privacy and lifecycle
 

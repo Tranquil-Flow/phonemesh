@@ -10,11 +10,13 @@ class FakeAccess : DeviceAccess {
     var bluetooth = true
     var microphone = true
     var country: String? = null
-    fun reset() { radioMissing = emptyList(); bluetooth = true; microphone = true; country = null }
+    var offline = false
+    fun reset() { radioMissing = emptyList(); bluetooth = true; microphone = true; country = null; offline = false }
     override fun radioPermissionsMissing() = radioMissing
     override fun bluetoothOn() = bluetooth
     override fun microphoneAllowed() = microphone
     override fun countryCode() = country
+    override fun noInternet() = offline
 }
 
 /** Puts an AppCore with fakes in place of the real one: test history, test settings, fixture packs. */

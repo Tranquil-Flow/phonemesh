@@ -658,6 +658,8 @@ class AppCore private constructor(
                 val input = app.contentResolver.openInputStream(uri) ?: throw FileNotFoundException("no stream")
                 val installed = ProgressInputStream(input, IMPORT_PROGRESS_STEP) { bytes -> main.post { note(PackMessages.importProgress(bytes)) } }
                     .use { store.install(it) }
+                // The pack is here: its own download, if one is still running or waiting, has nothing left to bring.
+                runCatching { downloads().cancel(installed.id) }.onFailure { Log.w(TAG, "cancel failed", it) }
                 speech.releaseEngine()
                 if (installed.kind == PackKind.ENGINE) settings.engine = installed.id
                 UiText(R.string.pack_imported, listOf(packName(installed)))

@@ -24,4 +24,23 @@ class SetupPlanTest {
         val missing = SetupPlan.missing(catalog, listOf(installed("engine-whisper-tiny")), "voice-en-US-ljspeech", "en-US")
         assertEquals(14, SetupPlan.megabytes(missing))
     }
+
+    @Test fun withInternetDownloadIsTheMainChoice() =
+        assertEquals(VoiceChoices(download = true, friendFirst = false),
+            SetupPlan.voiceChoices(missing = true, downloading = false, noInternet = false))
+    @Test fun withoutInternetTheFriendIsTheMainChoice() =
+        assertEquals(VoiceChoices(download = true, friendFirst = true),
+            SetupPlan.voiceChoices(missing = true, downloading = false, noInternet = true))
+    @Test fun nothingToDownloadLeavesOnlyTheFriend() {
+        assertEquals(VoiceChoices(download = false, friendFirst = false),
+            SetupPlan.voiceChoices(missing = false, downloading = false, noInternet = false))
+        assertEquals(VoiceChoices(download = false, friendFirst = true),
+            SetupPlan.voiceChoices(missing = false, downloading = false, noInternet = true))
+    }
+    @Test fun aRunningDownloadHidesOnlyDownloadAndKeepsTheFriend() =
+        assertEquals(VoiceChoices(download = false, friendFirst = false),
+            SetupPlan.voiceChoices(missing = true, downloading = true, noInternet = false))
+    @Test fun aDownloadWaitingForInternetStillOffersTheFriend() =
+        assertEquals(VoiceChoices(download = false, friendFirst = true),
+            SetupPlan.voiceChoices(missing = true, downloading = true, noInternet = true))
 }

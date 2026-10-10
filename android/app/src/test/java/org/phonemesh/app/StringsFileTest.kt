@@ -50,4 +50,29 @@ class StringsFileTest {
         assertEquals("parti", french["status_sent"])
         assertEquals("Pas trouvée ? Allumez la radio. Approchez le téléphone.", french["radio_help"])
     }
+
+    @Test fun stepOneNamesItsTwoNumberedChoicesAndTheFriendGuide() {
+        assertEquals("%1\$d · %2\$s", english["setup_option"])
+        assertEquals(english["setup_option"], french["setup_option"])
+        assertEquals("Download", english["setup_download"])
+        assertEquals("Télécharger", french["setup_download"])
+        assertEquals("From a friend", english["setup_file"])
+        assertEquals("D'un ami", french["setup_file"])
+        assertEquals("Choose the file", english["setup_choose_file"])
+        assertEquals("Choisir le fichier", french["setup_choose_file"])
+        assertEquals("Your friend taps Settings, then “Share the app”.", english["setup_guide_send"])
+        assertEquals("Votre ami touche Réglages, puis « Partager l'application ».", french["setup_guide_send"])
+        assertEquals("Accept the file here. Then tap it.", english["setup_guide_accept"])
+        assertEquals("Acceptez le fichier ici. Puis touchez-le.", french["setup_guide_accept"])
+        // The guide's sentence names the sender's real labels.
+        assertTrue(english.getValue("setup_guide_send").contains(english.getValue("settings")))
+        assertTrue(english.getValue("setup_guide_send").contains(english.getValue("share_app")))
+        assertTrue(french.getValue("setup_guide_send").contains(french.getValue("settings")))
+        assertTrue(french.getValue("setup_guide_send").contains(french.getValue("share_app")))
+    }
+
+    @Test fun theSenderIsPointedAtTheFastChoiceThenBluetooth() {
+        assertEquals("Choose Quick Share. If missing, choose Bluetooth.", english["share_choose"])
+        assertEquals("Choisissez Quick Share. Sinon, choisissez Bluetooth.", french["share_choose"])
+    }
 }

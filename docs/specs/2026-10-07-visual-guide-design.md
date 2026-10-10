@@ -33,7 +33,7 @@ Top to bottom:
 - **The caption row:** a numbered circle, one short sentence, and a speaker button that reads the sentence aloud. Five dots under it mark the five moments.
 - **One row per language:** a large yellow speaker button (at least 64 dp square) that only plays the language's name, and beside it the language name with a chevron, which chooses it. The two are separate touch targets with a gap between them.
 
-**The story** loops every 10 seconds. One timeline drives every part:
+**The story** has 10 seconds of action. One timeline drives every part; the times below are action time:
 
 | Time | Moment | What moves | Caption (EN) |
 |---|---|---|---|
@@ -44,6 +44,18 @@ Top to bottom:
 | 6.2–7.2 s | 4 Text | camera moves to him; the bubble rises to his phone, which he holds to his ear | "His phone turns the text back into voice" |
 | 7.2–9.5 s | 5 Listen | the bubble fades out by 7.6 s; sound waves come from his phone until 9.5 s | "He hears her message" |
 | 9.5–10 s | closing | camera pulls back out | opening caption |
+
+**Pacing (owner request, 2026-10-10).** The action keeps the speed above, but every numbered step stays on screen for 4 seconds so that its caption can be read: the step's action plays, then the picture rests for what is left of the 4 seconds, then the next action begins. The opening and closing keep their lengths, so the loop on screen lasts 21.1 seconds. 4 seconds is one constant (`StoryTimeline.STEP_MS`).
+
+| Step | Action before the rest | Rest | Action after the rest | The picture it rests on (action time) |
+|---|---|---|---|---|
+| 1 Speak | 2.2 s | 1.6 s | 0.2 s | 2.8 s: phone raised, she is speaking, sound bars full, just before they fade and the typing starts |
+| 2 Text | 0.7 s | 2.4 s | 0.9 s | 3.7 s: "Bonjour" complete in its bubble, before the bubble leaves for the radio (the camera's pull-back begins at 3.6 s and has moved 2 % of its way) |
+| 3 Radio | 1.4 s | 2.4 s | 0.2 s | 6.0 s: both radios in view, the bubble at his radio, rings closing in, both lights blinking, just before the camera leaves for him |
+| 4 Text | 0.8 s | 3.0 s | 0.2 s | 7.0 s: camera on him, "Bonjour" at his raised phone, just before the letters go |
+| 5 Listen | 1.7 s | 1.7 s | 0.6 s | 8.9 s: sound waves at full strength, just before they fade and the camera pulls back |
+
+A resting picture is not frozen. It breathes: a raised phone lifts by at most 1.5 scene units and the bubble by at most 2 and come back; her open mouth, the sound bars and his sound waves ease off by at most 30 % and come back; the radio rings draw in by at most 10 % and come back; a radio light that is on keeps blinking. One breath lasts 1.2 to 1.7 seconds, and each rest holds one or two whole breaths, so the picture is exactly the held one when the rest starts and when it ends. Nothing else moves, and the caption does not change during a rest. The reduced-motion frame is unchanged.
 
 The scene, in the wax-print style: a warm sky fading from orange to pale yellow, a sun drawn as three rings (yellow, bright yellow, orange) high in the middle, two green hills, two small houses with brown roofs, terracotta ground with a zigzag band (dark brown, yellow and red triangles) along the bottom edge. Outlines are dark brown rather than black. She wears an indigo dress printed with orange and yellow rings and an orange-red headwrap; he wears a kente-striped shirt (yellow, green, red and dark brown) with a yellow collar and a dark cap. Each holds the phone with a drawn arm. The radios are amber with a small screen, a knob and a status light that blinks bright green. There are no palm trees, no phone mast and no distance marker. Nobody blinks.
 
@@ -61,7 +73,7 @@ The same screen opens from Settings → Language, with the chosen language's row
 
 Setup becomes three numbered steps:
 
-1. **Download the voice:** the current voice card's content (size, Download / File, progress).
+1. **Download the voice:** the current voice card's content (size, progress) and two buttons numbered like the two parts of the step's picture: "1 · Download" and "2 · From a friend". The second opens a short guide in the card (the friend shares the app from Settings; accept the file here, then tap it), with a secondary "Choose the file" button for the file picker and "Back". Nothing opens the file picker by itself. When a pack download could not reach the internet, "From a friend" is the filled button and Download is outlined; otherwise Download is filled. While a download runs, its progress bar takes the place of the Download button and "From a friend" stays under it.
 2. **Connect your radio:** turn the radio on, keep it close, tap "Find radio".
 3. **Say hello (new):** hold the microphone and say something. Tapping it opens the group chat; the microphone there shows a one-time hint ("Hold to talk") pointing at it.
 
@@ -98,7 +110,7 @@ Radio and Conversation get the same back arrow in their top bar. The language sc
 
 All of it stays framework-only (no AndroidX, no Compose) and adds no dependencies.
 
-- **`StoryTimeline`** (pure Kotlin, no Android types): given a time from 0 to 1, returns every value the picture needs (phone positions, mouth opening, bubble position, scale and visible letters, ring radii and opacities, light states, camera rectangle, current moment). It holds all the timing in one place and is unit-tested.
+- **`StoryTimeline`** (pure Kotlin, no Android types): given a time from 0 to 1, returns every value the picture needs (phone positions, mouth opening, bubble position, scale and visible letters, ring radii and opacities, light states, camera rectangle, current moment). It also maps a time in the paced loop to the action time and the rest it falls in, and returns the resting picture. It holds all the timing in one place and is unit-tested.
 - **`StoryView`** (a `View`): draws the scene on a `Canvas` from `Path`s and `Paint`s built once, reading positions from `StoryTimeline`. A `Choreographer` frame callback advances time while the view is attached and its screen is started. It draws the reduced-motion frame when `ValueAnimator.areAnimatorsEnabled()` is false. Its content description is the opening caption.
 - **`StoryCaption`**: the caption row; it listens to `StoryView` for moment changes and plays the matching clip through the existing clip player.
 - **`SetupSteps`** (pure Kotlin): from voice ready, radio connected, message sent and guide finished, returns the current step, the done steps and whether to show the guide, a single problem card or nothing. Unit-tested. `ChatsActivity` renders what it returns.
@@ -114,7 +126,7 @@ Budget: no more than 150 KB added to the APK for all drawings, clips and code to
 
 ## Testing
 
-- Unit tests: `StoryTimeline` (each moment starts and ends at the listed times; the bubble is hidden only outside 2.8–7.6 s; letters never exceed "Bonjour"; ring radii stay within their limit; the camera ends where it starts), `SetupSteps` (every combination of the four inputs, including loss of voice or radio after setup), and the `Settings` additions.
+- Unit tests: `StoryTimeline` (each moment starts and ends at the listed times; the bubble is hidden only outside 2.8–7.6 s; letters never exceed "Bonjour"; ring radii stay within their limit; the camera ends where it starts; each numbered step is shown for 4 seconds; the action plays at its original speed; a rest keeps its step and moves only within the limits above, starting and ending on the held picture), `SetupSteps` (every combination of the four inputs, including loss of voice or radio after setup), and the `Settings` additions.
 - The existing every-screen checks (touch size, content descriptions, wording) cover the new screens, in light and dark. Touch targets are at least 48 dp; the language speaker buttons at least 64 dp.
 - The screenshot build captures: welcome at moments 1, 3 and 5 and in reduced motion; chats at each setup step and after setup with the radio lost; settings in light and dark; and the conversation with the microphone hint.
 - On the Pixel 8 Pro (owner-approved installs and screenshots only), the owner checks that tapping a speaker plays the name without leaving the screen, and that the animation runs smoothly. On the Fairphone 3 (adb measurements allowed), `dumpsys gfxinfo` frame statistics for the welcome screen show the animation holds its frame rate; the result is recorded with the size numbers.
@@ -150,7 +162,7 @@ The owner asked that every step and every problem shows, with a moving picture, 
 | Scene | Where | Sentence (EN) | What moves |
 |---|---|---|---|
 | download | step 1 | Download the French voice. One time only. | A phone mast sends Wi-Fi waves; dots travel into the phone, which fills; green check. |
-| friend | step 1, File button | No internet? A friend can send you the voice by Bluetooth. | The voice (orange box with sound bars) hops from the friend's phone to yours, with the Bluetooth sign between them. |
+| friend | step 1, part 2 ("From a friend"); also the friend guide's first picture | No internet? A friend can send you the voice by Bluetooth. | The voice (orange box with sound bars) hops from the friend's phone to yours, with the Bluetooth sign between them. |
 | power | step 2, part 1 | Turn on the radio. | A finger presses the button; the light blinks. |
 | close | step 2, part 2 | Keep the radio close to the phone. | The radio moves next to the phone. |
 | search | step 2, part 3 | Tap "Find radio". | The phone sends rings until it finds the radio, then they link. |
@@ -197,7 +209,7 @@ The owner asked that every step and every problem shows, with a moving picture, 
 - **`Tips`** (pure Kotlin): which tip to show from the moments seen and tips stored. Unit-tested.
 - **`HelpActivity`**: the Help page.
 - **`Settings`** gains `tipsShown`.
-- **Speaking the sentences:** the two step 1 scenes (download, friend) get recorded clips per language, since the voice is not downloaded yet. Every other sentence is read by the app's own downloaded voice, the one that reads messages, so it costs no APK space.
+- **Speaking the sentences:** the two step 1 scenes (download, friend) get recorded clips per language, since the voice is not downloaded yet. The friend guide reuses the friend and allow pictures with its own two sentences, which have no clips: their speaker shows only when a voice is ready. Every other sentence is read by the app's own downloaded voice, the one that reads messages, so it costs no APK space.
 
 ### Size and testing
 

@@ -20,6 +20,9 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.core.DownloadDecision
+import org.phonemesh.core.GeneratedPackCatalog
+import org.phonemesh.core.PackStore
 import java.io.File
 
 /** Fake radio and speech, fixture packs. */
@@ -536,5 +539,236 @@ class ChatsActivityTest {
         assertNotNull(Views.withText(chats, "Pas encore de messages"))
         TestCore.onMain { TestCore.radio.receive("!0000aaaa", "[pm1:fr] Enfin", false) }
         assertNull(Views.tagged(chats, "empty"))
+    }
+
+    /** A filled button writes in the background colour, an outlined one in the text colour. */
+    private fun filled(screen: Activity, tag: String): Boolean {
+        val button = checkNotNull(Views.tagged(screen, tag)) { "No view tagged $tag" } as android.widget.Button
+        return TestCore.onMain {
+            val palette = Palette(screen)
+            assertTrue("$tag is neither filled nor outlined", button.currentTextColor == palette.background || button.currentTextColor == palette.text)
+            button.currentTextColor == palette.background
+        }
+    }
+
+    /** Counts file pickers the screen asks for, and answers "cancelled" so none really opens. */
+    private fun pickerMonitor(): android.app.Instrumentation.ActivityMonitor = inst.addMonitor(
+        android.content.IntentFilter(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            addDataType("application/zip")
+        }, android.app.Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null), true)
+
+    @Test fun stepOneButtonsCarryTheNumbersOfThePicturesTwoParts() {
+        TestCore.install(voices = emptyList(), connected = false)
+        val chats = start()
+        assertEquals("1", Views.textOf(Views.tagged(chats, "part:1")!!))
+        assertEquals("2", Views.textOf(Views.tagged(chats, "part:2")!!))
+        val download = Views.tagged(chats, "voice_download")!!
+        val friend = Views.tagged(chats, "voice_file")!!
+        assertEquals("1 · Télécharger", Views.textOf(download))
+        assertEquals("2 · D'un ami", Views.textOf(friend))
+        assertEquals("1 · Télécharger", download.contentDescription.toString())
+        assertEquals("2 · D'un ami", friend.contentDescription.toString())
+        assertTrue("option 1 stays above option 2", TestCore.onMain { download.bottom <= friend.top })
+        assertTrue("with internet, Download is the filled button", filled(chats, "voice_download"))
+        assertFalse(filled(chats, "voice_file"))
+        assertNull("the guide is closed until asked for", Views.tagged(chats, "voice_guide"))
+    }
+
+    @Test fun theFriendButtonOpensAGuideAndOnlyItsOwnButtonOpensThePicker() {
+        TestCore.install(voices = emptyList(), connected = false)
+        val chats = start()
+        val picker = pickerMonitor()
+        try {
+            Views.tap(chats, "voice_file")
+            val guide = checkNotNull(Views.tagged(chats, "voice_guide")) { "the friend guide" }
+            assertEquals("the guide never opens the picker by itself", 0, picker.hits)
+            assertSame(chats, Views.resumed())
+            val card = Views.tagged(chats, "card_voice")!!
+            assertTrue("the guide sits in the step's card", TestCore.onMain { Views.descendants(card).any { it === guide } })
+            assertEquals("ÉTAPE 1 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+            assertNotNull(Views.withText(chats, "2 · D'un ami"))
+            val shown = TestCore.onMain { Views.descendants(guide).filter { it.isShown } }
+            assertEquals(listOf("howto:friend", "howto:allow"), shown.filterIsInstance<HowToView>().map { it.tag })
+            assertEquals(listOf("Votre ami touche Réglages, puis « Partager l'application ».", "Acceptez le fichier ici. Puis touchez-le."),
+                shown.filter { it.tag == "howto_sentence" }.map { Views.textOf(it) })
+            assertTrue("no voice yet, so no speaker", shown.none { it.tag == "howto_say" })
+            assertNull("the step's own picture and its parts make room", Views.tagged(chats, "howto:download"))
+            assertNull(Views.tagged(chats, "part:1"))
+            assertNull(Views.tagged(chats, "voice_download"))
+            assertNull(Views.tagged(chats, "voice_file"))
+            assertEquals("Choisir le fichier", Views.textOf(Views.tagged(chats, "voice_pick")!!))
+            assertFalse("choosing a file is the lesser way", filled(chats, "voice_pick"))
+            assertEquals("Retour", Views.textOf(Views.tagged(chats, "voice_guide_back")!!))
+            // A render (a radio event, a download tick) keeps the guide and still opens nothing.
+            TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
+            assertSame(guide, Views.tagged(chats, "voice_guide"))
+            assertEquals(0, picker.hits)
+
+            Views.tap(chats, "voice_pick")
+            assertEquals("the existing picker, once", 1, picker.hits)
+            assertNotNull("the guide stays while the picker is open or cancelled", Views.tagged(chats, "voice_guide"))
+
+            Views.tap(chats, "voice_guide_back")
+            assertNull(Views.tagged(chats, "voice_guide"))
+            assertNotNull(Views.tagged(chats, "howto:download"))
+            assertNotNull(Views.tagged(chats, "voice_download"))
+            assertNotNull(Views.tagged(chats, "voice_file"))
+            assertEquals(1, picker.hits)
+        } finally {
+            inst.removeMonitor(picker)
+        }
+    }
+
+    @Test fun theSystemBackClosesTheGuideAndAnInstalledVoiceEndsIt() {
+        TestCore.install(voices = emptyList(), connected = false)
+        val chats = start()
+        Views.tap(chats, "voice_file")
+        assertNotNull(Views.tagged(chats, "voice_guide"))
+        @Suppress("DEPRECATION")
+        TestCore.onMain { chats.onBackPressed() }
+        inst.waitForIdleSync()
+        assertNull(Views.tagged(chats, "voice_guide"))
+        assertFalse("back only closed the guide", TestCore.onMain { chats.isFinishing })
+        assertNotNull(Views.tagged(chats, "voice_download"))
+
+        Views.tap(chats, "voice_file")
+        assertNotNull(Views.tagged(chats, "voice_guide"))
+        TestCore.onMain {
+            Fixtures.installReady(context)
+            chats.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertNull("the voice arrived: the guide is over", Views.tagged(chats, "voice_guide"))
+        assertNotNull(Views.tagged(chats, "card_radio"))
+        // Losing the voice later starts from the two choices, not from a guide left open.
+        TestCore.onMain {
+            TestCore.clearPacks()
+            chats.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertNotNull(Views.tagged(chats, "voice_download"))
+        assertNull(Views.tagged(chats, "voice_guide"))
+    }
+
+    @Test fun theGuideSurvivesRotationAndSoDoesClosingIt() {
+        TestCore.install(voices = emptyList(), connected = false)
+        val first = start()
+        val picker = pickerMonitor()
+        try {
+            Views.tap(first, "voice_file")
+            TestCore.onMain { first.recreate() }
+            Views.waitUntil { resumedNow().let { it is ChatsActivity && it !== first } }
+            val second = Views.resumed() as ChatsActivity
+            activity = second
+            inst.waitForIdleSync()
+            assertNotNull("the guide comes back", Views.tagged(second, "voice_guide"))
+            assertNotNull(Views.tagged(second, "voice_pick"))
+            assertEquals("coming back opens no picker", 0, picker.hits)
+            Views.tap(second, "voice_guide_back")
+            TestCore.onMain { second.recreate() }
+            Views.waitUntil { resumedNow().let { it is ChatsActivity && it !== second } }
+            val third = Views.resumed() as ChatsActivity
+            activity = third
+            inst.waitForIdleSync()
+            assertNull(Views.tagged(third, "voice_guide"))
+            assertNotNull(Views.tagged(third, "voice_download"))
+            assertEquals(0, picker.hits)
+        } finally {
+            inst.removeMonitor(picker)
+        }
+    }
+
+    @Test fun withoutInternetTheFriendIsTheFilledButton() {
+        TestCore.install(voices = emptyList(), connected = false)
+        TestCore.access.offline = true
+        val chats = start()
+        assertTrue("no internet: the friend is the main way", filled(chats, "voice_file"))
+        assertFalse(filled(chats, "voice_download"))
+        val download = Views.tagged(chats, "voice_download")!!
+        val friend = Views.tagged(chats, "voice_file")!!
+        assertEquals("1 · Télécharger", Views.textOf(download))
+        assertEquals("2 · D'un ami", Views.textOf(friend))
+        assertTrue("the numbers keep their order", TestCore.onMain { download.bottom <= friend.top })
+        TestCore.onMain {
+            TestCore.access.offline = false
+            chats.onCoreChange(AppCore.Change.PACKS)
+        }
+        assertTrue("internet again: Download is the main way", filled(chats, "voice_download"))
+        assertFalse(filled(chats, "voice_file"))
+    }
+
+    @Test fun aLostVoiceCardOffersTheSameTwoWaysWithoutNumbers() {
+        TestCore.install(voices = emptyList())
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        assertNotNull(Views.tagged(chats, "card_voice"))
+        assertNull("a problem card has no step numbers", Views.tagged(chats, "step_of"))
+        assertNull("and its single picture has no numbered parts", Views.tagged(chats, "part:1"))
+        assertEquals("Télécharger", Views.textOf(Views.tagged(chats, "voice_download")!!))
+        assertEquals("D'un ami", Views.textOf(Views.tagged(chats, "voice_file")!!))
+        Views.tap(chats, "voice_file")
+        assertNotNull(Views.tagged(chats, "voice_guide"))
+        assertNotNull(Views.withText(chats, "D'un ami"))
+        assertNotNull(Views.tagged(chats, "voice_pick"))
+        Views.tap(chats, "voice_guide_back")
+        assertNotNull(Views.tagged(chats, "howto:download"))
+    }
+
+    /** A download that sits at 0 % and reports no pause for the network: nothing listens on port 9. */
+    private fun startStuckVoiceDownload() {
+        val downloads = PackDownloads(context, PackStore(Fixtures.packDir(context), GeneratedPackCatalog.entries), "http://10.0.2.2:9/")
+        TestCore.onMain { core.missingVoicePacks() }.forEach { assertEquals(DownloadDecision.Start, downloads.start(it)) }
+    }
+
+    @Test fun theFriendStaysUnderADownloadThatShowsOnlyItsBar() {
+        TestCore.install(voices = emptyList(), connected = false)
+        startStuckVoiceDownload()
+        val chats = start()
+        assertFalse("the phone has given no sign of being offline", TestCore.access.offline)
+        val bar = Views.tagged(chats, "voice_bar") as android.widget.ProgressBar
+        assertEquals(0, TestCore.onMain { bar.progress })
+        assertNull("the running download takes the place of Download", Views.tagged(chats, "voice_download"))
+        val friend = checkNotNull(Views.tagged(chats, "voice_file")) { "option 2 under the bar" }
+        assertEquals("2 · D'un ami", Views.textOf(friend))
+        assertTrue(TestCore.onMain { friend.isShown && friend.isEnabled })
+        assertFalse("outlined: the download is the way in progress", filled(chats, "voice_file"))
+        val progress = Views.tagged(chats, "voice_progress")!!
+        assertEquals("↓ 0 %", Views.textOf(progress))
+        assertTrue("under the bar", TestCore.onMain { progress.bottom <= friend.top })
+        assertTrue(TestCore.onMain { friend.height } >= Ui.dp(context, 48))
+        assertEquals(emptyList<String>(), A11yCheck.problems(chats))
+        // A download tick redraws the card and keeps both.
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.PACKS) }
+        assertNotNull(Views.tagged(chats, "voice_bar"))
+        Views.tap(chats, "voice_file")
+        assertNotNull("option 2 opens the friend guide", Views.tagged(chats, "voice_guide"))
+        assertNotNull(Views.tagged(chats, "voice_pick"))
+        Views.tap(chats, "voice_guide_back")
+        assertNotNull("back to the bar, the download still running", Views.tagged(chats, "voice_bar"))
+        assertNotNull(Views.tagged(chats, "voice_file"))
+        assertEquals(setOf("engine-whisper-tiny", "voice-fr-siwis"), core.downloads().pending().keys)
+    }
+
+    @Test fun aFriendsFileInstallsWhileADownloadRunsAndEndsThatPacksDownload() {
+        TestCore.install(voices = emptyList(), connected = false)
+        startStuckVoiceDownload()
+        val chats = start()
+        Views.tap(chats, "voice_file")
+        TestCore.onMain { chats.onNewIntent(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(FixturePackProvider.VOICE), "application/zip")) }
+        inst.waitForIdleSync()
+        val dialog = checkNotNull(chats.importDialogForTest) { "a file is still confirmed first" }
+        assertTrue("nothing installed before confirming", core.store.list().isEmpty())
+        TestCore.onMain { dialog.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+        inst.waitForIdleSync()
+        core.awaitWorkForTest()
+        inst.waitForIdleSync()
+        assertEquals(listOf("voice-fr-siwis"), core.store.list().map { it.id })
+        assertEquals("Pack importé : Français", Views.textOf(Views.tagged(chats, "note")!!))
+        assertEquals("the installed pack's download is over; the other goes on", setOf("engine-whisper-tiny"), core.downloads().pending().keys)
+        // The engine is still missing, so step 1 stays, with its bar and the guide the user opened.
+        assertNotNull(Views.tagged(chats, "card_voice"))
+        assertNotNull(Views.tagged(chats, "voice_guide"))
+        Views.tap(chats, "voice_guide_back")
+        assertNotNull(Views.tagged(chats, "voice_bar"))
+        assertNotNull(Views.tagged(chats, "voice_file"))
     }
 }

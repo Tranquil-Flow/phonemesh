@@ -19,7 +19,11 @@
     <string name="setup_voice_title">Voix française</string>
     <string name="setup_voice_card">%1$s · %2$d Mo · une seule fois</string>
     <string name="setup_download">Télécharger</string>
-    <string name="setup_file">Fichier</string>
+    <string name="setup_file">D\'un ami</string>
+    <string name="setup_option">%1$d · %2$s</string>
+    <string name="setup_choose_file">Choisir le fichier</string>
+    <string name="setup_guide_send">Votre ami touche Réglages, puis « Partager l\'application ».</string>
+    <string name="setup_guide_accept">Acceptez le fichier ici. Puis touchez-le.</string>
     <string name="progress_percent">↓ %1$d %%</string>
     <string name="step_of">ÉTAPE %1$d SUR %2$d</string>
     <string name="step_voice">Télécharger la voix</string>
@@ -136,7 +140,7 @@
     <string name="pack_remove">Retirer</string>
     <string name="pack_remove_cd">Retirer %1$s</string>
     <string name="pack_installed_label">Installé</string>
-    <string name="share_choose">Choisissez l\'application pour partager.</string>
+    <string name="share_choose">Choisissez Quick Share. Sinon, choisissez Bluetooth.</string>
     <!-- How-to pictures -->
     <string name="howto_part">Partie %1$d</string>
     <string name="howto_download">Téléchargez la voix française. Une seule fois.</string>

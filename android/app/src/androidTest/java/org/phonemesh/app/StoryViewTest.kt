@@ -207,4 +207,32 @@ class StoryViewTest {
         Thread.sleep(300)
         assertTrue(stopped.sameAs(picture(v)))
     }
+
+    @Test fun aRestingStepKeepsItsCaptionAndStillMoves() {
+        StoryView.animationsEnabled = { true }
+        val v = measured()
+        val moments = mutableListOf<Int>()
+        // Step 1 rests on .28 for 1.6 s; without the rest the story would be at step 2 after 200 ms.
+        TestCore.onMain { v.freezeAt(.28f); v.freezeAt(null); v.onMoment = { moments += it }; v.start() }
+        val held = picture(v)
+        Thread.sleep(700)
+        assertTrue(TestCore.onMain { v.isRunning })
+        assertEquals("the step is still resting", 0, TestCore.onMain { v.moment })
+        assertEquals(emptyList<Int>(), TestCore.onMain { moments.toList() })
+        assertFalse("a resting picture is not frozen", held.sameAs(picture(v)))
+        Views.waitUntil(2_500) { v.moment == 1 }
+    }
+
+    @Test fun resumingLateInTheStoryGoesOnFromThere() {
+        StoryView.animationsEnabled = { true }
+        val v = measured()
+        // Step 5 at .85 lies more than one unpaced loop (10 s) into the paced one.
+        assertTrue(StoryTimeline.msOf(.85f) > StoryTimeline.DURATION_MS)
+        val moments = mutableListOf<Int>()
+        TestCore.onMain { v.freezeAt(.85f); v.freezeAt(null); v.onMoment = { moments += it }; v.start() }
+        Thread.sleep(300)
+        assertTrue(TestCore.onMain { v.isRunning })
+        assertEquals(4, TestCore.onMain { v.moment })
+        assertEquals(emptyList<Int>(), TestCore.onMain { moments.toList() })
+    }
 }

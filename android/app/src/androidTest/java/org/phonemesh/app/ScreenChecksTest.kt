@@ -34,8 +34,8 @@ class ScreenChecksTest {
     @Test fun everyRequestedStateHasACapture() {
         val names = listOf(
             "01-welcome-1", "01-welcome-3", "01-welcome-5", "01-welcome-still",
-            "01-language-from-settings", "02-chats-step1", "02-chats-step2", "02-chats-step3",
-            "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
+            "01-language-from-settings", "02-chats-step1", "02-chats-step1-offline", "02-chats-friend-guide",
+            "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
             "05-conversation-mic-hint", "06-draft-too-long", "06-draft-cut", "07-recording",
             "07-recording-tip", "08-radio", "09-settings", "10-help", "11-note-picture",
         )
@@ -56,6 +56,8 @@ class ScreenChecksTest {
 
     @Test fun welcomeMoment1() = check(minTargets = 5) { ScreenStates.welcome(.2f) }
     @Test fun languageFromSettings() = check(minTargets = 6) { ScreenStates.languageFromSettings() }
+    @Test fun chatsStepOneOffline() = check(minTargets = 6) { ScreenStates.chatsStepOneOffline() }
+    @Test fun chatsFriendGuide() = check(minTargets = 6, minTexts = 6) { ScreenStates.chatsFriendGuide() }
     @Test fun chatsStep2() = check(minTargets = 4) { ScreenStates.chatsStep(2) }
     @Test fun chatsStep3() = check(minTargets = 4) { ScreenStates.chatsStep(3) }
     @Test fun chatsRadioLost() = check(minTargets = 3) { ScreenStates.chatsRadioLost() }

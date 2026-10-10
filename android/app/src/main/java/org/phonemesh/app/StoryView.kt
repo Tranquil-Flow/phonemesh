@@ -8,9 +8,13 @@ import android.os.SystemClock
 import android.view.Choreographer
 import android.view.View
 import android.view.ViewOutlineProvider
+import org.phonemesh.core.StoryFrame
 import org.phonemesh.core.StoryTimeline
 
-/** The welcome story. Its screen calls [start] in onStart and [stop] in onStop. */
+/**
+ * The welcome story. Its screen calls [start] in onStart and [stop] in onStop. While running it shows
+ * [StoryTimeline.paced]: the action at its own speed, with each numbered step resting so that it stays readable.
+ */
 class StoryView(context: Context) : View(context) {
     /** Called on the main thread after the new moment has been published. */
     var onMoment: ((Int) -> Unit)? = null
@@ -18,15 +22,17 @@ class StoryView(context: Context) : View(context) {
         private set
     val isRunning: Boolean get() = running
     private val scene = StoryScene()
-    private var time = 0f
+    private var frame = StoryTimeline.at(0f)
+    /** Where the picture is in the paced loop, in ms. */
+    private var elapsed = 0L
     private var startedAt = 0L
     private var running = false
     private var frozen: Float? = null
     private val tick = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
-            val elapsed = (SystemClock.uptimeMillis() - startedAt) % StoryTimeline.DURATION_MS
-            show(elapsed.toFloat() / StoryTimeline.DURATION_MS)
+            elapsed = (SystemClock.uptimeMillis() - startedAt) % StoryTimeline.LOOP_MS
+            show(StoryTimeline.paced(elapsed))
             // A moment observer may stop or freeze the picture synchronously.
             if (running) Choreographer.getInstance().postFrameCallback(this)
         }
@@ -46,11 +52,11 @@ class StoryView(context: Context) : View(context) {
         if (running) return
         val still = frozen ?: if (animationsEnabled()) null else StoryTimeline.STILL
         if (still != null) {
-            show(still)
+            hold(still)
             return
         }
         running = true
-        startedAt = SystemClock.uptimeMillis() - (time * StoryTimeline.DURATION_MS).toLong()
+        startedAt = SystemClock.uptimeMillis() - elapsed
         Choreographer.getInstance().postFrameCallback(tick)
     }
 
@@ -59,18 +65,26 @@ class StoryView(context: Context) : View(context) {
         Choreographer.getInstance().removeFrameCallback(tick)
     }
 
-    /** Holds the picture at [t] (0..1). Null lets the next [start] resume. */
+    /**
+     * Holds the picture at story time [t] (0..1 over the action, as [StoryTimeline.at]; rests are not part of it).
+     * Null lets the next [start] resume, from the first instant the paced loop shows that story time.
+     */
     fun freezeAt(t: Float?) {
         frozen = t?.coerceIn(0f, 1f)
         frozen?.let {
             stop()
-            show(it)
+            hold(it)
         }
     }
 
-    private fun show(t: Float) {
-        time = t
-        val now = StoryTimeline.moment(t)
+    private fun hold(t: Float) {
+        elapsed = StoryTimeline.msOf(t) % StoryTimeline.LOOP_MS
+        show(StoryTimeline.at(t))
+    }
+
+    private fun show(next: StoryFrame) {
+        frame = next
+        val now = next.moment
         if (now != moment) {
             moment = now
             onMoment?.invoke(now)
@@ -84,7 +98,6 @@ class StoryView(context: Context) : View(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
-        val frame = StoryTimeline.at(time)
         val scale = width / frame.camW
         canvas.save()
         canvas.scale(scale, scale)

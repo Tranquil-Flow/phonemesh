@@ -16,6 +16,12 @@ interface DeviceAccess {
 
     /** The phone's country from the mobile network, else the SIM; ISO code, any case; null when neither is known. */
     fun countryCode(): String?
+
+    /**
+     * True when a voice download could not reach the internet. The app holds no permission to ask the phone about
+     * its connection, so a download that failed or is waiting for the network is the only sign there is.
+     */
+    fun noInternet(): Boolean
 }
 
 class PhoneAccess(private val context: Context) : DeviceAccess {
@@ -35,4 +41,6 @@ class PhoneAccess(private val context: Context) : DeviceAccess {
         val phone = context.getSystemService(TelephonyManager::class.java) ?: return null
         return listOf(phone.networkCountryIso, phone.simCountryIso).firstOrNull { !it.isNullOrBlank() }
     }
+
+    override fun noInternet(): Boolean = PackDownloads.noInternet(context)
 }

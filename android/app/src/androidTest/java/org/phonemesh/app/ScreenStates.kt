@@ -57,6 +57,31 @@ object ScreenStates {
         return screen
     }
 
+    /** Step 1 on a phone whose download could not reach the internet: the friend is the filled button. */
+    fun chatsStepOneOffline(): Activity {
+        TestCore.install(voices = emptyList(), connected = false)
+        TestCore.access.offline = true
+        val screen = Views.start(ChatsActivity::class.java)
+        expect(Views.tagged(screen, "card_voice") != null, "step 1 card")
+        val friend = Views.tagged(screen, "voice_file") as? android.widget.Button
+        val download = Views.tagged(screen, "voice_download") as? android.widget.Button
+        val background = TestCore.onMain { Palette(screen).background }
+        expect(friend != null && TestCore.onMain { friend.currentTextColor } == background, "the friend button is filled")
+        expect(download != null && TestCore.onMain { download.currentTextColor } != background, "the Download button is outlined")
+        return screen
+    }
+
+    /** Step 1 after "From a friend" was tapped: the two-picture guide, Choose the file, Back. */
+    fun chatsFriendGuide(): Activity {
+        val screen = chatsStep(1)
+        Views.tap(screen, "voice_file")
+        expect(Views.tagged(screen, "voice_guide") != null, "the friend guide")
+        expect(Views.tagged(screen, "howto:friend") != null && Views.tagged(screen, "howto:allow") != null, "both guide pictures")
+        expect(Views.tagged(screen, "voice_pick") != null && Views.tagged(screen, "voice_guide_back") != null, "Choose the file and Back")
+        expect(Views.resumed() === screen, "no picker opened")
+        return screen
+    }
+
     fun chatsRadioLost(): Activity {
         TestCore.install(connected = false)
         TestCore.onMain {
@@ -422,6 +447,8 @@ object ScreenStates {
         "01-welcome-still" to { language() },
         "01-language-from-settings" to { languageFromSettings() },
         "02-chats-step1" to { chatsStep(1) },
+        "02-chats-step1-offline" to { chatsStepOneOffline() },
+        "02-chats-friend-guide" to { chatsFriendGuide() },
         "02-chats-step2" to { chatsStep(2) },
         "02-chats-step3" to { chatsStep(3) },
         "02-chats-radio-lost" to { chatsRadioLost() },

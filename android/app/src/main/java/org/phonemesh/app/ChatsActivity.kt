@@ -34,7 +34,7 @@ import org.phonemesh.core.SetupSteps
 import org.phonemesh.core.SetupView
 import java.util.Date
 
-/** Home: radio status, the numbered setup guide with how-to pictures (then single problem cards), every chat, ➕ for a private chat. */
+/** Home: radio status, the numbered setup guide with how-to pictures (then single problem cards), the friend guide, every chat, ➕ for a private chat. */
 class ChatsActivity : ScreenActivity() {
     private lateinit var radioStatus: ImageView
     private lateinit var cards: LinearLayout
@@ -55,6 +55,10 @@ class ChatsActivity : ScreenActivity() {
     private val regionPicture by lazy { RegionPicture(this) }
     /** The connection (AppCore.readyReports) the country list was last opened for by itself. */
     private var askedCountryFor = -1
+    /** The voice step shows how to get the voice from a friend, in place of its two choices; kept across rotation. */
+    private var friendGuide = false
+    /** The guide's pictures, with and without the choice's number, kept so renders never restart them. */
+    private val friendGuides = HashMap<Boolean, View>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -118,6 +122,7 @@ class ChatsActivity : ScreenActivity() {
         root.addView(frame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         show(root)
         built = true
+        friendGuide = savedInstanceState?.getBoolean(STATE_FRIEND_GUIDE) == true
         if (core.settings.language == null) {
             // First launch: onStart shows the language screen; this screen recreates in the chosen language (ScreenActivity.onStart).
             importWaitsForLanguage = true
@@ -141,6 +146,7 @@ class ChatsActivity : ScreenActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_WAITS_FOR_LANGUAGE, importWaitsForLanguage)
         outState.putInt(STATE_ASKED_COUNTRY, askedCountryFor)
+        outState.putBoolean(STATE_FRIEND_GUIDE, friendGuide)
         pendingImport?.let { outState.putString(STATE_PENDING_IMPORT, it.toString()) }
     }
 
@@ -188,6 +194,7 @@ class ChatsActivity : ScreenActivity() {
         val now = SystemClock.uptimeMillis()
         val missing = core.missingVoicePacks()
         val voiceReady = missing.isEmpty() && core.readiness() is Readiness.Ready
+        if (voiceReady) friendGuide = false
         val settings = core.settings
         // The radio step is done only once the radio has its region; until then the region card takes the step's place.
         val region = RegionCards.body(this, palette, core, regionPicture)
@@ -197,8 +204,10 @@ class ChatsActivity : ScreenActivity() {
                 regionShown = view.current == SetupStep.RADIO && region != null
                 cards.addView(
                     if (region != null && regionShown) StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current), regionPicture, null, region)
+                    else if (view.current == SetupStep.VOICE && friendGuide) StepCard.current(this, palette, view.current, view.done.size,
+                        stepTitle(view.current), friendGuideView(numbered = true), null, friendGuideActions())
                     else StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current),
-                        panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing)))
+                        panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing, numbered = true)))
                 SetupSteps.ORDER.filter { it != view.current }.forEach { step ->
                     val done = step in view.done
                     cards.addView(StepCard.row(this, palette, step, done, stepTitle(step), if (done) doneDetail(step) else stepHint(step, missing)))
@@ -212,8 +221,12 @@ class ChatsActivity : ScreenActivity() {
                 if (step == SetupStep.RADIO && region != null) {
                     regionShown = true
                     cards.addView(StepCard.problem(this, palette, step, stepTitle(step), regionPicture, region))
+                } else if (step == SetupStep.VOICE && friendGuide) {
+                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), friendGuideView(numbered = false), friendGuideActions()))
                 } else {
-                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))), stepActions(step, missing)))
+                    // One picture without numbered parts, so the two choices carry no numbers either.
+                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))),
+                        stepActions(step, missing, numbered = false)))
                 }
             }
             SetupView.Hidden -> Unit
@@ -261,8 +274,8 @@ class ChatsActivity : ScreenActivity() {
         SetupStep.HELLO -> getString(R.string.step_hello_done)
     }
 
-    private fun stepActions(step: SetupStep, missing: List<CatalogEntry>): View = when (step) {
-        SetupStep.VOICE -> voiceActions(missing)
+    private fun stepActions(step: SetupStep, missing: List<CatalogEntry>, numbered: Boolean): View = when (step) {
+        SetupStep.VOICE -> voiceActions(missing, numbered)
         SetupStep.RADIO -> Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search, filled = true).apply {
             tag = "radio_search"
             setOnClickListener { openRadio() }
@@ -273,11 +286,19 @@ class ChatsActivity : ScreenActivity() {
         }.let { padded(it) }
     }
 
-    /** Download progress, or the existing Download and File actions. */
-    private fun voiceActions(missing: List<CatalogEntry>): View {
+    /** A choice's name; in the numbered guide it starts with the number of its part of the step's picture. */
+    private fun choice(number: Int, name: Int, numbered: Boolean): String =
+        if (numbered) getString(R.string.setup_option, number, getString(name)) else getString(name)
+
+    /**
+     * The step's two choices: 1 downloads (a running download shows its progress there instead), 2 opens the
+     * friend guide and is always on offer. Without internet the friend is the filled button.
+     */
+    private fun voiceActions(missing: List<CatalogEntry>, numbered: Boolean): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
         val full = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT) }
         val percent = core.voiceDownloadPercent()
+        val choices = SetupPlan.voiceChoices(missing.isNotEmpty(), percent != null, core.access.noInternet())
         if (percent != null) {
             box.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
                 tag = "voice_bar"
@@ -286,19 +307,57 @@ class ChatsActivity : ScreenActivity() {
                 progressTintList = ColorStateList.valueOf(palette.text)
             }, full())
             box.addView(Ui.text(this, getString(R.string.progress_percent, percent), palette.text, bold = true).apply { tag = "voice_progress" })
-            return box
         }
-        if (missing.isNotEmpty()) {
-            box.addView(Ui.button(this, palette, getString(R.string.setup_download), R.drawable.ic_download, filled = true).apply {
+        if (choices.download) {
+            box.addView(Ui.button(this, palette, choice(1, R.string.setup_download, numbered), R.drawable.ic_download, filled = !choices.friendFirst).apply {
                 tag = "voice_download"
                 setOnClickListener { core.downloadVoice(); render() }
             }, full())
         }
-        box.addView(Ui.button(this, palette, getString(R.string.setup_file), R.drawable.ic_folder).apply {
+        box.addView(Ui.button(this, palette, choice(2, R.string.setup_file, numbered), R.drawable.ic_person, filled = choices.friendFirst).apply {
             tag = "voice_file"
-            setOnClickListener { pickFile() }
-        }, full().apply { if (missing.isNotEmpty()) topMargin = pad() / 2 })
+            setOnClickListener { friendGuide = true; render() }
+        }, full().apply { if (box.childCount > 0) topMargin = pad() / 2 })
         return box
+    }
+
+    /** The friend guide: the choice's name, then two small pictures with one sentence each. Opens nothing by itself. */
+    private fun friendGuideView(numbered: Boolean): View = friendGuides.getOrPut(numbered) {
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "voice_guide"
+            addView(Ui.text(this@ChatsActivity, choice(2, R.string.setup_file, numbered), palette.text, bold = true))
+            listOf("friend" to R.string.setup_guide_send, "allow" to R.string.setup_guide_accept).forEach { (scene, words) ->
+                addView(howTo(scene, compact = true, sentence = { getString(words) }),
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
+            }
+        }
+    }.also { guide -> (guide as ViewGroup).let { group -> (0 until group.childCount).forEach { (group.getChildAt(it) as? HowToPanel)?.update() } } }
+
+    /** The lesser way (the file picker, for a file already on the phone) and the way back to the two choices. */
+    private fun friendGuideActions(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
+        val full = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT) }
+        box.addView(Ui.button(this, palette, getString(R.string.setup_choose_file), R.drawable.ic_folder).apply {
+            tag = "voice_pick"
+            setOnClickListener { pickFile() }
+        }, full())
+        box.addView(Ui.button(this, palette, getString(R.string.back), R.drawable.ic_back).apply {
+            tag = "voice_guide_back"
+            setOnClickListener { closeFriendGuide() }
+        }, full().apply { if (box.childCount > 0) topMargin = pad() / 2 })
+        return box
+    }
+
+    private fun closeFriendGuide() {
+        friendGuide = false
+        render()
+    }
+
+    /** Back leaves the friend guide before it leaves the screen. */
+    @Deprecated("Platform callback")
+    override fun onBackPressed() {
+        if (friendGuide) closeFriendGuide() else @Suppress("DEPRECATION") super.onBackPressed()
     }
 
     private fun padded(button: View): View = LinearLayout(this).apply {
@@ -488,6 +547,7 @@ class ChatsActivity : ScreenActivity() {
         const val STATE_WAITS_FOR_LANGUAGE = "waits_for_language"
         const val STATE_PENDING_IMPORT = "pending_import"
         const val STATE_ASKED_COUNTRY = "asked_country"
+        const val STATE_FRIEND_GUIDE = "friend_guide"
         const val REQUEST_FILE = 101
         const val DONE_MS = 2_000L
     }

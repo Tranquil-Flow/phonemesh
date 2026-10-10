@@ -22,7 +22,11 @@
     <string name="setup_voice_title">English voice</string>
     <string name="setup_voice_card">%1$s · %2$d MB · one time only</string>
     <string name="setup_download">Download</string>
-    <string name="setup_file">File</string>
+    <string name="setup_file">From a friend</string>
+    <string name="setup_option">%1$d · %2$s</string>
+    <string name="setup_choose_file">Choose the file</string>
+    <string name="setup_guide_send">Your friend taps Settings, then “Share the app”.</string>
+    <string name="setup_guide_accept">Accept the file here. Then tap it.</string>
     <string name="progress_percent">↓ %1$d%%</string>
     <string name="step_of">STEP %1$d OF %2$d</string>
     <string name="step_voice">Download the voice</string>
@@ -139,7 +143,7 @@
     <string name="pack_remove">Remove</string>
     <string name="pack_remove_cd">Remove %1$s</string>
     <string name="pack_installed_label">Installed</string>
-    <string name="share_choose">Choose an app to share.</string>
+    <string name="share_choose">Choose Quick Share. If missing, choose Bluetooth.</string>
     <!-- How-to pictures -->
     <string name="howto_part">Part %1$d</string>
     <string name="howto_download">Download the English voice. One time only.</string>

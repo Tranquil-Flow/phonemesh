@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.test.platform.app.InstrumentationRegistry
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.core.StoryTimeline
 
 /** Each screen in a realistic state, built on the fake radio and speech. Used by ScreenChecksTest and ScreenshotTour. */
 object ScreenStates {
@@ -20,11 +21,90 @@ object ScreenStates {
 
     private fun expect(condition: Boolean, what: String) = check(condition) { "Screen state not reached: $what" }
 
-    fun chatsSetup(): Activity {
-        TestCore.install(voices = emptyList(), connected = false)
+    /** Finish lifecycle cleanup before the next state clears and reuses the test preferences. */
+    fun finish(activity: Activity?) {
+        Views.finish(activity)
+        if (activity != null) Views.waitUntil { activity.isDestroyed }
+    }
+
+    /** The welcome screen held at [t] (StoryTimeline time). */
+    fun welcome(t: Float): Activity {
+        val screen = language()
+        val picture = Views.tagged(screen, "story") as StoryView
+        TestCore.onMain { picture.freezeAt(t) }
+        inst.waitForIdleSync()
+        return screen
+    }
+
+    fun languageFromSettings(): Activity {
+        TestCore.install(language = "fr")
+        val screen = Views.start(LanguageActivity::class.java)
+        expect(Views.tagged(screen, "back") != null, "the back arrow")
+        return screen
+    }
+
+    fun chatsSetup(): Activity = chatsStep(1)
+
+    fun chatsStep(step: Int): Activity {
+        require(step in 1..3)
+        when (step) {
+            1 -> TestCore.install(voices = emptyList(), connected = false)
+            2 -> TestCore.install(connected = false)
+            else -> TestCore.install()
+        }
         val screen = Views.start(ChatsActivity::class.java)
-        expect(Views.tagged(screen, "card_voice") != null, "voice setup card")
-        expect(Views.tagged(screen, "step_row:2") != null, "radio step row")
+        expect(Views.tagged(screen, listOf("card_voice", "card_radio", "card_hello")[step - 1]) != null, "step $step card")
+        return screen
+    }
+
+    fun chatsRadioLost(): Activity {
+        TestCore.install(connected = false)
+        TestCore.onMain {
+            TestCore.core.settings.firstMessageSent = true
+            TestCore.core.settings.setupFinished = true
+        }
+        val screen = Views.start(ChatsActivity::class.java)
+        expect(Views.tagged(screen, "card_radio") != null && Views.tagged(screen, "step_of") == null, "one radio card without numbers")
+        return screen
+    }
+
+    fun conversationMicHint(): Activity {
+        TestCore.install()
+        val group = TestCore.onMain {
+            TestCore.radio.receive("!0000aaaa", "[pm1:fr] Bonjour", false)
+            TestCore.radio.receive("!0000aaaa", "[pm1:fr] On se retrouve au marché ?", false)
+            TestCore.radio.receive("!0000aaaa", "[pm1:fr] À midi", false)
+            TestCore.core.groupChatId()
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        expect(Views.tagged(screen, "mic_hint") != null, "the microphone hint")
+        expect(tagsOf(screen, "message:").size == 3, "three incoming messages without a first send")
+        return screen
+    }
+
+    fun recordingTip(): Activity {
+        val screen = recordingLocked()
+        expect(Views.tagged(screen, "tip:cancel") != null, "the first-recording tip")
+        return screen
+    }
+
+    fun noteWithPicture(): Activity {
+        TestCore.install()
+        TestCore.onMain {
+            TestCore.core.settings.firstMessageSent = true
+            TestCore.core.settings.setupFinished = true
+        }
+        val screen = Views.start(ChatsActivity::class.java)
+        TestCore.onMain { TestCore.core.note(UiText(R.string.pack_damaged)) }
+        inst.waitForIdleSync()
+        expect(Views.tagged(screen, "howto:damaged") != null, "the note's picture")
+        return screen
+    }
+
+    fun help(): Activity {
+        TestCore.install()
+        val screen = Views.start(HelpActivity::class.java)
+        expect(Views.tagged(screen, "help:power") != null, "the Help rows")
         return screen
     }
 
@@ -121,16 +201,42 @@ object ScreenStates {
         group
     }
 
-    val all: List<Pair<String, () -> Activity>> = listOf(
-        "01-language" to { language() },
-        "02-chats-setup" to { chatsSetup() },
+    private val states: List<Pair<String, () -> Activity>> = listOf(
+        "01-welcome-1" to { welcome(.2f) },
+        "01-welcome-3" to { welcome(StoryTimeline.STILL) },
+        "01-welcome-5" to { welcome(.85f) },
+        "01-welcome-still" to { language() },
+        "01-language-from-settings" to { languageFromSettings() },
+        "02-chats-step1" to { chatsStep(1) },
+        "02-chats-step2" to { chatsStep(2) },
+        "02-chats-step3" to { chatsStep(3) },
+        "02-chats-radio-lost" to { chatsRadioLost() },
         "03-chats" to { chatsRows() },
         "04-chats-english" to { chatsRows("en-US") },
         "05-conversation" to { conversation() },
+        "05-conversation-mic-hint" to { conversationMicHint() },
         "06-draft-too-long" to { draftTooLong() },
+        "06-draft-cut" to { draftCut() },
         "07-recording" to { recordingLocked() },
+        "07-recording-tip" to { recordingTip() },
         "08-radio" to { radio() },
         "09-settings" to { settings() },
-        "10-draft-cut" to { draftCut() },
+        "10-help" to { help() },
+        "11-note-picture" to { noteWithPicture() },
     )
+
+    /** Force both themes, independently of the emulator's appearance setting. */
+    val all: List<Pair<String, () -> Activity>> = states.map { (name, state) ->
+        name to { inTheme(ThemeMode.LIGHT, state) }
+    }
+
+    val dark: List<Pair<String, () -> Activity>> = states.map { (name, state) ->
+        "$name-dark" to { inTheme(ThemeMode.DARK, state) }
+    }
+
+    private fun inTheme(theme: ThemeMode, state: () -> Activity): Activity {
+        val previous = TestCore.nextTheme
+        TestCore.nextTheme = theme
+        return try { state() } finally { TestCore.nextTheme = previous }
+    }
 }

@@ -157,6 +157,7 @@ class SettingsActivity : ScreenActivity() {
                 }
                 addView(Ui.icon(this@SettingsActivity, icon, ink, 32))
                 addView(Ui.text(this@SettingsActivity, getString(label), ink, bold = true).apply {
+                    gravity = Gravity.CENTER
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 })
             }

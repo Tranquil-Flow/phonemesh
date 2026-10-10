@@ -25,6 +25,7 @@ object TestCore {
     lateinit var speech: FakeSpeech
     val access = FakeAccess()
     val core: AppCore get() = AppCore.get(context)
+    @Volatile var nextTheme = ThemeMode.AUTO
 
     fun install(language: String? = "fr", voices: List<String> = listOf("fr"), connected: Boolean = true, realSpeech: Boolean = false): AppCore {
         onMain {
@@ -35,7 +36,7 @@ object TestCore {
             clearPacks()
             if (voices.isNotEmpty()) Fixtures.installReady(context, voices)
             access.reset()
-            build(language, realSpeech)
+            build(language, realSpeech, nextTheme)
             if (connected) radio.connected(true)
         }
         return core
@@ -49,7 +50,7 @@ object TestCore {
         return core
     }
 
-    private fun build(language: String?, realSpeech: Boolean) {
+    private fun build(language: String?, realSpeech: Boolean, theme: ThemeMode? = null) {
         val chosenSpeech: Speech = if (realSpeech) DeviceSpeech(context) else FakeSpeech().also { speech = it }
         val built = AppCore.create(
             context.applicationContext,
@@ -57,12 +58,15 @@ object TestCore {
             speech = chosenSpeech, historyName = HISTORY, prefsName = PREFS, access = access,
         )
         if (language != null) built.settings.language = language
+        // Only a fresh install overrides appearance; restart must retain the saved choice.
+        if (theme != null) built.settings.theme = theme
         AppCore.replaceForTest(built)
     }
 
     fun uninstall() {
         onMain {
             StoryView.animationsEnabled = StoryView.systemAnimations
+            nextTheme = ThemeMode.AUTO
             AppCore.replaceForTest(null)
         }
         context.deleteDatabase(HISTORY)

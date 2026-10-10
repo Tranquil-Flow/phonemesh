@@ -22,7 +22,8 @@ class AppBoundaryTest {
         val chats=Views.start(ChatsActivity::class.java)
         try {
             assertNotNull(Views.tagged(chats,"card_voice"))
-            assertNotNull(Views.tagged(chats,"card_radio"))
+            // The numbered guide has one current card; the later radio step is a slim row.
+            assertNotNull(Views.tagged(chats,"step_row:2"))
             val conversation=Views.launch<ConversationActivity>(ConversationActivity.intent(context,TestCore.core.groupChatId()))
             val mic=checkNotNull(Views.tagged(conversation,"mic"))
             assertTrue(mic.alpha<0.5f)

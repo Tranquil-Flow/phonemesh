@@ -72,8 +72,18 @@ class ChatsActivity : ScreenActivity() {
             addView(cards)
         }
         root.addView(setupScroll)
-        val frame = FrameLayout(this)
-        val list = ListView(this).apply {
+        lateinit var list: ListView
+        // The hint is centred, but a tall setup guide leaves little room: it moves below the chat rows, or out of sight.
+        val frame = object : FrameLayout(this) {
+            override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+                super.onLayout(changed, left, top, right, bottom)
+                if (emptyHint.visibility != View.VISIBLE) return
+                val rowsEnd = (0 until list.childCount).maxOfOrNull { list.getChildAt(it).bottom } ?: 0
+                if (emptyHint.top < rowsEnd) emptyHint.offsetTopAndBottom(rowsEnd - emptyHint.top)
+                if (emptyHint.bottom > height) emptyHint.offsetTopAndBottom(height - emptyHint.top)
+            }
+        }
+        list = ListView(this).apply {
             tag = "chats"
             adapter = rows
             divider = null

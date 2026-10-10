@@ -237,12 +237,14 @@ class ConversationActivity : ScreenActivity() {
             addView(Ui.text(this@ConversationActivity, getString(R.string.mic_hint), palette.onAccent, bold = true).apply {
                 background = Ui.outline(this@ConversationActivity, palette.accent, palette.outline)
                 setPadding(pad(), pad() / 2, pad(), pad() / 2)
-            })
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(Ui.icon(this@ConversationActivity, R.drawable.ic_hint_tail, palette.accent, 16).apply {
                 layoutParams = LinearLayout.LayoutParams(Ui.dp(this@ConversationActivity, 16), Ui.dp(this@ConversationActivity, 8))
             })
         }
-        column.addView(micHint)
+        // Both nested hint layouts wrap their content; MATCH_PARENT otherwise ties
+        // the sentence to the microphone's width after its height was measured.
+        column.addView(micHint, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         column.addView(lockHint)
         val micSize = Ui.dp(this, MIC_DP)
         mic = FrameLayout(this).apply {

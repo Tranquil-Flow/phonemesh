@@ -18,5 +18,6 @@ install_build -Pphonemesh.screenshots=true
 python3 "$root/android/scripts/run_instrumentation.py" --serial "$serial" --classes org.phonemesh.app.ScreenshotTour \
   --expected 1 --receipt "$root/.local/receipts/ui-screenshots.txt"
 mkdir -p "$root/docs/screenshots-phase3"
+rm -f "$root/docs/screenshots-phase3/"*.png
 adb -s "$serial" pull /sdcard/Android/data/org.phonemesh.app/files/screenshots-phase3/. "$root/docs/screenshots-phase3/"
 ls -l "$root/docs/screenshots-phase3"

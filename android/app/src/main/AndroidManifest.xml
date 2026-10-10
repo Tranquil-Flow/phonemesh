@@ -25,6 +25,7 @@
         <activity android:name=".RadioActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".HelpActivity" android:exported="false" />
+        <activity android:name=".RegionActivity" android:exported="false" />
         <activity android:name=".ConversationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <provider android:name=".ShareProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true" />

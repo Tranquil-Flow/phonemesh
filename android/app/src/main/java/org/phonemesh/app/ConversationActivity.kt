@@ -27,6 +27,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ScrollView
 import android.widget.TextView
 import org.phonemesh.core.DraftFit
 import org.phonemesh.core.DraftRules
@@ -71,6 +72,10 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var playDraft: ImageButton
     private lateinit var send: Button
     private lateinit var tipBox: FrameLayout
+    private lateinit var regionScroll: ScrollView
+    private lateinit var regionSlot: FrameLayout
+    /** One region picture for the screen, so renders never restart it. */
+    private val regionPicture by lazy { RegionPicture(this) }
     private var tip: Tip? = null
 
     /** Typing and pasting stop at one radio part; deleting is always allowed. */
@@ -114,6 +119,7 @@ class ConversationActivity : ScreenActivity() {
             transcriptMode = ListView.TRANSCRIPT_MODE_NORMAL
         }
         root.addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(regionArea())
         root.addView(draftArea())
         tipBox = FrameLayout(this).apply {
             visibility = View.GONE
@@ -152,6 +158,22 @@ class ConversationActivity : ScreenActivity() {
         }
         bar.addView(radioStatus, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)))
         return bar
+    }
+
+    /** The region card's place above the draft. It takes half the screen at most and scrolls, so Send stays in reach. */
+    private fun regionArea(): View {
+        regionSlot = FrameLayout(this).apply { setPadding(pad(), pad() / 2, pad(), 0) }
+        regionScroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val height = if (View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.UNSPECIFIED) heightMeasureSpec
+                else View.MeasureSpec.makeMeasureSpec(View.MeasureSpec.getSize(heightMeasureSpec) / 2, View.MeasureSpec.AT_MOST)
+                super.onMeasure(widthMeasureSpec, height)
+            }
+        }.apply {
+            visibility = View.GONE
+            addView(regionSlot)
+        }
+        return regionScroll
     }
 
     private fun draftArea(): View {
@@ -447,6 +469,15 @@ class ConversationActivity : ScreenActivity() {
         draftText.contentDescription = draft
         micBar.visibility = if (drafting) View.GONE else View.VISIBLE
         draftBar.visibility = if (drafting) View.VISIBLE else View.GONE
+        // A draft that cannot go out yet is explained: the radio has no region, or its region is being set.
+        regionSlot.removeAllViews()
+        val regionCard = if (drafting && (core.region.blocksSending || core.region.phase != RegionPhase.Idle)) {
+            RegionCards.card(this, palette, core, regionPicture)
+        } else {
+            null
+        }
+        regionCard?.let { regionSlot.addView(it) }
+        regionScroll.visibility = if (regionCard != null) View.VISIBLE else View.GONE
         renderDraftState()
         renderMic(recordingHere)
         if (started != null) renderTip(when {
@@ -509,7 +540,7 @@ class ConversationActivity : ScreenActivity() {
         cutNotice.visibility = if (core.draftWasCut(chatId) && !editing) View.VISIBLE else View.GONE
         draftBox.background = Ui.outline(this, palette.background, if (tooLongNow) palette.bad else palette.outline,
             strokeDp = if (tooLongNow) 3 else 2, dashed = true)
-        Ui.enable(send, fit == DraftFit.FITS)
+        Ui.enable(send, fit == DraftFit.FITS && !core.region.blocksSending)
         val playing = core.playingId == AppCore.DRAFT_PLAYBACK
         playDraft.setImageResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play)
         playDraft.imageTintList = ColorStateList.valueOf(if (playing) palette.good else palette.text)

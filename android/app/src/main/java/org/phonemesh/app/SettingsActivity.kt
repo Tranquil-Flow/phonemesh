@@ -13,12 +13,13 @@ import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.PackKind
 import org.phonemesh.core.SetupPlan
 
-/** Settings: language, appearance, the Fast/Accurate speech cards, voice packs, share the app, licences. */
+/** Settings: language, appearance, the Fast/Accurate speech cards, voice packs, share the app, licences, For helpers. */
 class SettingsActivity : ScreenActivity() {
     private lateinit var languageValue: TextView
     private lateinit var packList: LinearLayout
     private lateinit var themes: LinearLayout
     private lateinit var engineList: LinearLayout
+    private lateinit var helpers: View
     private var licencesDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,6 +48,12 @@ class SettingsActivity : ScreenActivity() {
             tag = "licences"
             setOnClickListener { showLicences() }
         }, spaced())
+        // The connected radio's region list, for someone who knows the radio rules; nothing is set without their tick.
+        helpers = Ui.button(this, palette, getString(R.string.region_for_helpers), R.drawable.ic_radio_on).apply {
+            tag = "settings_helpers"
+            setOnClickListener { startActivity(RegionActivity.helpers(this@SettingsActivity)) }
+        }
+        column.addView(helpers, spaced())
         show(ScrollView(this).apply { addView(column) })
     }
 
@@ -77,6 +84,7 @@ class SettingsActivity : ScreenActivity() {
 
     override fun render() {
         languageValue.text = core.currentLanguage().endonym
+        helpers.visibility = if (core.connected) View.VISIBLE else View.GONE
         renderThemes()
         val downloads = core.downloads()
         val pending = runCatching { downloads.pending() }.getOrDefault(emptyMap())

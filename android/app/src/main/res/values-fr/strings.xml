@@ -174,4 +174,34 @@
     <string name="help_talking">Parler</string>
     <string name="help_problems">Problèmes</string>
     <string name="help_rare">Problèmes rares</string>
+    <!-- Radio region -->
+    <string name="region_set">Régler cette radio pour %1$s ?</string>
+    <string name="region_yes">Oui</string>
+    <string name="region_other">Autre pays</string>
+    <string name="region_is_set">Cette radio est réglée pour %1$s.</string>
+    <string name="region_change_to">La régler pour %1$s ?</string>
+    <string name="region_change">Changer</string>
+    <string name="region_keep">Garder</string>
+    <string name="region_elsewhere">une autre partie du monde</string>
+    <string name="region_unknown">Pas encore de règles radio pour %1$s.</string>
+    <string name="region_unknown_here">Pas encore de règles radio ici.</string>
+    <string name="region_ask">Demandez à quelqu\'un qui les connaît.</string>
+    <string name="region_for_helpers">Pour les aides</string>
+    <string name="region_working">Réglage de la radio…</string>
+    <string name="region_ready">Radio prête pour %1$s.</string>
+    <string name="region_ready_helper">Radio réglée sur %1$s.</string>
+    <string name="region_no_return">La radio n\'est pas revenue.</string>
+    <string name="region_no_return_hint">Éteignez-la puis rallumez-la.</string>
+    <string name="region_not_taken">La radio n\'a pas pris le réglage.</string>
+    <string name="region_ask_helper">Demandez à une aide.</string>
+    <string name="region_not_changed">La radio n\'a pas été changée.</string>
+    <string name="region_try_again">Réessayer</string>
+    <string name="region_listen">Écouter</string>
+    <string name="region_choose_country">Choisissez votre pays</string>
+    <string name="region_not_here">Mon pays n\'est pas là</string>
+    <string name="helper_title">Choisir la région radio</string>
+    <string name="helper_line">Seulement si vous connaissez les règles.</string>
+    <string name="helper_tick">J\'ai vérifié les règles radio pour %1$s.</string>
+    <string name="helper_tick_here">J\'ai vérifié les règles radio ici.</string>
+    <string name="helper_set">Régler</string>
 </resources>

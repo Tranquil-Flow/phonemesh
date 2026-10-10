@@ -177,4 +177,34 @@
     <string name="help_talking">Talking</string>
     <string name="help_problems">Problems</string>
     <string name="help_rare">Rare problems</string>
+    <!-- Radio region -->
+    <string name="region_set">Set up this radio for %1$s?</string>
+    <string name="region_yes">Yes</string>
+    <string name="region_other">Other country</string>
+    <string name="region_is_set">This radio is set for %1$s.</string>
+    <string name="region_change_to">Change it to %1$s?</string>
+    <string name="region_change">Change</string>
+    <string name="region_keep">Keep</string>
+    <string name="region_elsewhere">another part of the world</string>
+    <string name="region_unknown">No radio rules for %1$s yet.</string>
+    <string name="region_unknown_here">No radio rules for this country yet.</string>
+    <string name="region_ask">Ask someone who knows them.</string>
+    <string name="region_for_helpers">For helpers</string>
+    <string name="region_working">Setting up the radio…</string>
+    <string name="region_ready">Radio ready for %1$s.</string>
+    <string name="region_ready_helper">Radio set to %1$s.</string>
+    <string name="region_no_return">The radio did not come back.</string>
+    <string name="region_no_return_hint">Turn it off and on again.</string>
+    <string name="region_not_taken">The radio did not take the setting.</string>
+    <string name="region_ask_helper">Ask a helper.</string>
+    <string name="region_not_changed">The radio was not changed.</string>
+    <string name="region_try_again">Try again</string>
+    <string name="region_listen">Listen</string>
+    <string name="region_choose_country">Choose your country</string>
+    <string name="region_not_here">My country is not here</string>
+    <string name="helper_title">Choose the radio region</string>
+    <string name="helper_line">Only choose if you know the rules.</string>
+    <string name="helper_tick">I checked the radio rules for %1$s.</string>
+    <string name="helper_tick_here">I checked the radio rules here.</string>
+    <string name="helper_set">Set</string>
 </resources>

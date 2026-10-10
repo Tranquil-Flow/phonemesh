@@ -263,6 +263,9 @@ class AppCore private constructor(
     /** Connected, and the region check has nothing to ask and nothing running. */
     fun radioReady(): Boolean = connected && region.settled
 
+    /** The connected radio's region as its last handshake reported it; null while it is away. */
+    fun radioRegionNow(): String? = if (connected) radio.region() else null
+
     fun peers(): List<RadioPeer> = radio.peers()
 
     private fun knownName(id: String): String? =

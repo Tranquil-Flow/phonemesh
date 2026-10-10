@@ -172,6 +172,23 @@ class SettingsActivityTest {
         assertEquals(emptyList<String>(), A11yCheck.problems(activity!!))
     }
 
+    /** For helpers is offered only while a radio is connected; opening the list writes nothing. */
+    @Test fun forHelpersShowsOnlyWithARadioAndOpensTheRegionList() {
+        TestCore.install(connected = false)
+        activity = Views.start(SettingsActivity::class.java)
+        assertNull(Views.tagged(activity!!, "settings_helpers"))
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertEquals("Pour les aides", Views.textOf(Views.tagged(activity!!, "settings_helpers")!!))
+        assertEquals(emptyList<String>(), A11yCheck.problems(activity!!))
+        Views.tap(activity!!, "settings_helpers")
+        Views.waitUntil {
+            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull() is RegionActivity
+        }
+        assertNotNull(Views.tagged(Views.resumed()!!, "regions"))
+        assertTrue(TestCore.radio.regionWrites.isEmpty())
+        Views.finish(Views.resumed())
+    }
+
     @Test fun licencesOpenInADialog() {
         TestCore.install()
         activity = Views.start(SettingsActivity::class.java)

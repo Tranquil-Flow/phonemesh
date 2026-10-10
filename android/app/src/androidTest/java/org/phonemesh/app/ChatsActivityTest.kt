@@ -508,6 +508,27 @@ class ChatsActivityTest {
         }
     }
 
+    /** Step 2 counts only once the radio has a region; connecting alone does not tick it, and nothing is written. */
+    @Test fun stepTwoWaitsForTheRadioRegion() {
+        TestCore.install(connected = false)
+        TestCore.access.country = "TG"
+        TestCore.onMain {
+            core.settings.radioAddress = "AA:BB:CC:DD:EE:01"
+            TestCore.radio.region = "UNSET"
+            TestCore.radio.connected(true)
+        }
+        val chats = start()
+        assertNotNull(Views.tagged(chats, "card_radio"))
+        assertNotNull(Views.tagged(chats, "card_region"))
+        assertNull(Views.tagged(chats, "step_done:2"))
+        assertNull(Views.tagged(chats, "card_hello"))
+        TestCore.onMain { TestCore.radio.connected(false); TestCore.radio.region = "EU_868"; TestCore.radio.connected(true) }
+        assertNotNull(Views.tagged(chats, "card_hello"))
+        assertNotNull(Views.tagged(chats, "step_done:2"))
+        assertNull(Views.tagged(chats, "card_region"))
+        assertTrue(TestCore.radio.regionWrites.isEmpty())
+    }
+
     @Test fun theEmptyStateShowsUntilAMessageArrives() {
         TestCore.install()
         val chats = start()

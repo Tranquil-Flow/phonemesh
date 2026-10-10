@@ -27,6 +27,7 @@ import org.phonemesh.core.CatalogEntry
 import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.PackRejected
 import org.phonemesh.core.Readiness
+import org.phonemesh.core.RegionStep
 import org.phonemesh.core.SetupPlan
 import org.phonemesh.core.SetupStep
 import org.phonemesh.core.SetupSteps
@@ -50,6 +51,10 @@ class ChatsActivity : ScreenActivity() {
     /** One panel per step or problem, kept so renders never restart a picture. */
     private val panels = HashMap<String, HowToPanel>()
     private val rerender = Runnable { render() }
+    /** One region picture for the screen, so renders never restart it. */
+    private val regionPicture by lazy { RegionPicture(this) }
+    /** The connection (AppCore.readyReports) the country list was last opened for by itself. */
+    private var askedCountryFor = -1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +125,7 @@ class ChatsActivity : ScreenActivity() {
         }
         // A recreate (rotation, process death) must not replay the intent that already ran; only the recreate after the
         // first-launch language choice does, and a question that was open comes back.
+        askedCountryFor = savedInstanceState?.getInt(STATE_ASKED_COUNTRY, -1) ?: -1
         val waited = savedInstanceState?.getBoolean(STATE_WAITS_FOR_LANGUAGE) == true
         if (savedInstanceState == null || waited) openFromIntent(intent)
         else savedInstanceState.getString(STATE_PENDING_IMPORT)?.let { askToInstall(Uri.parse(it)) }
@@ -134,6 +140,7 @@ class ChatsActivity : ScreenActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_WAITS_FOR_LANGUAGE, importWaitsForLanguage)
+        outState.putInt(STATE_ASKED_COUNTRY, askedCountryFor)
         pendingImport?.let { outState.putString(STATE_PENDING_IMPORT, it.toString()) }
     }
 
@@ -182,10 +189,16 @@ class ChatsActivity : ScreenActivity() {
         val missing = core.missingVoicePacks()
         val voiceReady = missing.isEmpty() && core.readiness() is Readiness.Ready
         val settings = core.settings
-        when (val view = SetupSteps.of(voiceReady, core.connected, settings.firstMessageSent, settings.setupFinished)) {
+        // The radio step is done only once the radio has its region; until then the region card takes the step's place.
+        val region = RegionCards.body(this, palette, core, regionPicture)
+        var regionShown = false
+        when (val view = SetupSteps.of(voiceReady, core.radioReady(), settings.firstMessageSent, settings.setupFinished)) {
             is SetupView.Guide -> {
-                cards.addView(StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current),
-                    panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing)))
+                regionShown = view.current == SetupStep.RADIO && region != null
+                cards.addView(
+                    if (region != null && regionShown) StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current), regionPicture, null, region)
+                    else StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current),
+                        panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing)))
                 SetupSteps.ORDER.filter { it != view.current }.forEach { step ->
                     val done = step in view.done
                     cards.addView(StepCard.row(this, palette, step, done, stepTitle(step), if (done) doneDetail(step) else stepHint(step, missing)))
@@ -196,9 +209,20 @@ class ChatsActivity : ScreenActivity() {
                 doneUntil = now + DONE_MS
             }
             is SetupView.Problems -> view.lost.forEach { step ->
-                cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))), stepActions(step, missing)))
+                if (step == SetupStep.RADIO && region != null) {
+                    regionShown = true
+                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), regionPicture, region))
+                } else {
+                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))), stepActions(step, missing)))
+                }
             }
             SetupView.Hidden -> Unit
+        }
+        // No country known: the list opens by itself, once per connection. Choosing there writes nothing.
+        if (regionShown && core.region.phase == RegionPhase.Idle && core.region.step() == RegionStep.ChooseCountry &&
+            askedCountryFor != core.readyReports) {
+            askedCountryFor = core.readyReports
+            startActivity(RegionActivity.countries(this))
         }
         if (now < doneUntil) {
             cards.addView(doneCard())
@@ -463,6 +487,7 @@ class ChatsActivity : ScreenActivity() {
     private companion object {
         const val STATE_WAITS_FOR_LANGUAGE = "waits_for_language"
         const val STATE_PENDING_IMPORT = "pending_import"
+        const val STATE_ASKED_COUNTRY = "asked_country"
         const val REQUEST_FILE = 101
         const val DONE_MS = 2_000L
     }

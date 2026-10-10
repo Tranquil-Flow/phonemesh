@@ -1,0 +1,24 @@
+# Phonemesh radio countries. Fields are separated by " | ". Lines starting with # are comments.
+# Adding a country = one line in [countries], with the regulator document that allows the band.
+#
+# Flag parts, separated by ";". Colours are six hex digits.
+#   h:a,b,c      equal horizontal stripes, top to bottom      v:a,b,c   equal vertical stripes, pole side first
+#   canton:a     a square in the top pole-side corner         hoist:a   a band down the pole side (h: flags only)
+#   star:a       one five-pointed star                        stars:N:a a ring of N stars
+# A flag these parts cannot draw gets no line; the app then shows a globe.
+
+[countries]
+# code | region | flag | source
+DE | EU_868 | h:000000,dd0000,ffce00 | Bundesnetzagentur Vfg. 91/2025 (November 2025), Tabelle 2, Band Nr. 54: 869.4-869.65 MHz, 500 mW ERP, frequency access and interference mitigation techniques [7] or duty cycle <= 10 %
+TG | EU_868 | h:006a4e,ffce00,006a4e,ffce00,006a4e; canton:d21034; star:ffffff | ARCEP Togo Décision N°226/ARCEP/DG/22 (30 Dec 2022), Annex 2: 869.4-869.65 MHz, 500 mW ERP, 10 % duty cycle
+
+[regions]
+# region | flag-of | name   (picture for a radio's current region; no legal meaning)
+US | country:US |
+EU_868 | flag:v:003399; stars:12:ffcc00 | Europe
+EU_433 | flag:v:003399; stars:12:ffcc00 | Europe
+
+[flags]
+# code | flag   (picture only; these countries are NOT supported)
+US | h:b22234,ffffff,b22234,ffffff,b22234,ffffff,b22234,ffffff,b22234,ffffff,b22234,ffffff,b22234; canton:3c3b6e; star:ffffff
+BJ | h:fcd116,e8112d; hoist:008751

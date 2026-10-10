@@ -169,4 +169,9 @@
     <string name="howto_allow_button">Autoriser</string>
     <string name="note_close">Fermer</string>
     <string name="howto_on">ON</string>
+    <string name="help">Aide</string>
+    <string name="help_setup">Pour commencer</string>
+    <string name="help_talking">Parler</string>
+    <string name="help_problems">Problèmes</string>
+    <string name="help_rare">Problèmes rares</string>
 </resources>

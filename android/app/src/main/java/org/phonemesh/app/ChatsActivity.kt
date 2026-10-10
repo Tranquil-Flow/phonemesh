@@ -143,6 +143,10 @@ class ChatsActivity : ScreenActivity() {
         bar.addView(radioStatus, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)))
         bar.addView(Ui.text(this, getString(R.string.chats_title), palette.text, 24f, bold = true),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() / 2 })
+        bar.addView(Ui.iconButton(this, palette, R.drawable.ic_help, getString(R.string.help)).apply {
+            tag = "help"
+            setOnClickListener { startActivity(Intent(this@ChatsActivity, HelpActivity::class.java)) }
+        })
         bar.addView(Ui.iconButton(this, palette, R.drawable.ic_gear, getString(R.string.settings)).apply {
             tag = "settings"
             setOnClickListener { startActivity(Intent(this@ChatsActivity, SettingsActivity::class.java)) }

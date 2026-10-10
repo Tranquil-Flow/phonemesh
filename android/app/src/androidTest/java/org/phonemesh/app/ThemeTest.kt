@@ -23,7 +23,8 @@ class ThemeTest {
     }
 
     @Test fun everyIconLoadsAtItsDeclaredSize() {
-        assertEquals(32, Icons.all.size)
+        assertEquals(33, Icons.all.size)
+        assertEquals(1, Icons.all.count { context.resources.getResourceEntryName(it) == "ic_help" })
         assertEquals(1, Icons.all.count { context.resources.getResourceEntryName(it) == "ic_hint_tail" })
         Icons.all.forEach {
             val drawable = checkNotNull(context.getDrawable(it))

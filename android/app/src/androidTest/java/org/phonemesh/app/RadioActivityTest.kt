@@ -43,6 +43,17 @@ class RadioActivityTest {
         assertEquals("Pas trouvée ? Allumez la radio. Approchez le téléphone.", Views.textOf(Views.tagged(activity!!, "radio_help")!!))
     }
 
+    @Test fun pairingPictureStaysOffEvenWhileAFakeRadioConnects() {
+        assertFalse("real V4 pairing evidence is still required", HowTo.showPair)
+        TestCore.install(connected = false)
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.onMain { TestCore.radio.found("AA:BB:CC:DD:EE:01", "Kofi", -60) }
+        inst.waitForIdleSync()
+        Views.clickRow(activity!!, "radio:AA:BB:CC:DD:EE:01")
+        assertTrue(TestCore.onMain { TestCore.core.isAttempting("AA:BB:CC:DD:EE:01") })
+        assertTrue(TestCore.onMain { Views.descendants(activity!!.window.decorView).none { it.tag == "howto:pair" } })
+    }
+
     @Test fun tappingARadioConnectsRemembersItAndReturns() {
         TestCore.install(connected = false)
         activity = Views.start(RadioActivity::class.java)

@@ -72,6 +72,19 @@ class ChatsActivityTest {
         saveSetupPicture(chats, "voice-after-scroll")
     }
 
+    @Test fun theQuestionMarkOpensHelp() {
+        TestCore.install()
+        val chats = start()
+        val help = checkNotNull(Views.tagged(chats, "help"))
+        assertTrue(TestCore.onMain { help.width >= Ui.dp(chats, 48) && help.height >= Ui.dp(chats, 48) })
+        assertEquals("Aide", help.contentDescription)
+        Views.tap(chats, "help")
+        Views.waitUntil { resumedNow() is HelpActivity }
+        val page = checkNotNull(Views.resumed())
+        Views.tap(page, "back")
+        Views.waitUntil { resumedNow() === chats }
+    }
+
     @Test fun firstLaunchAsksForTheLanguageThenShowsTheChats() {
         TestCore.install(language = null)
         val first = Views.start(ChatsActivity::class.java)
@@ -444,7 +457,13 @@ class ChatsActivityTest {
         } finally {
             Views.finish(top)
         }
-        assertSame("covering must preserve the picture before its deadline", picture, Views.tagged(chats, "howto:damaged"))
+        val returned = TestCore.onMain {
+            "elapsed=${android.os.SystemClock.elapsedRealtime() - shownAt}, " +
+                "resumed=${resumedNow() === chats}, decorShown=${chats.window.decorView.isShown}, " +
+                "pictureAttached=${picture.isAttachedToWindow}, pictureShown=${picture.isShown}"
+        }
+        assertSame("covering must preserve the picture before its deadline ($returned)",
+            picture, Views.tagged(chats, "howto:damaged"))
         val remaining = 12_500L - (android.os.SystemClock.elapsedRealtime() - shownAt)
         if (remaining > 0L) Thread.sleep(remaining)
         assertNull("returning must not cancel or restart the twelve-second deadline", Views.tagged(chats, "note_box"))

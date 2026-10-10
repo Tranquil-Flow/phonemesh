@@ -172,4 +172,9 @@
     <string name="howto_allow_button">Allow</string>
     <string name="note_close">Close</string>
     <string name="howto_on">ON</string>
+    <string name="help">Help</string>
+    <string name="help_setup">Getting started</string>
+    <string name="help_talking">Talking</string>
+    <string name="help_problems">Problems</string>
+    <string name="help_rare">Rare problems</string>
 </resources>

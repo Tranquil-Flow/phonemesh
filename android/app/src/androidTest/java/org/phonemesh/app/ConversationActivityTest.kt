@@ -42,6 +42,54 @@ class ConversationActivityTest {
     private fun open(chatId: Long): ConversationActivity =
         Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId)).also { activity = it }
 
+    /** The top bar laid out again as on a 360 dp wide phone: the title's lines and cut letters, with the other parts checked whole. */
+    private fun titleAt360(a: Activity): Pair<Int, Int> = TestCore.onMain {
+        val title = Views.descendants(a.window.decorView).first { it.tag == "title" } as android.widget.TextView
+        val people = Views.descendants(a.window.decorView).first { it.tag == "people" }
+        val radio = Views.descendants(a.window.decorView).first { it.tag == "radio_status" }
+        val bar = title.parent as View
+        val width = Ui.dp(context, 360)
+        val (peopleWide, radioWide) = people.width to radio.width
+        bar.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        bar.layout(0, 0, width, bar.measuredHeight)
+        assertTrue("the people count is shown", people.isShown && peopleWide > 0)
+        assertEquals("the people count keeps its width", peopleWide, people.width)
+        assertEquals("the radio icon keeps its width", radioWide, radio.width)
+        assertTrue("title, people count, radio icon, in that order and inside the bar: ${title.right} ${people.left} ${people.right} ${radio.left} ${radio.right} $width",
+            title.right <= people.left && people.right <= radio.left && radio.right <= width)
+        val result = title.lineCount to title.layout.getEllipsisCount(0)
+        val sp = context.resources.displayMetrics.scaledDensity
+        assertTrue("letters no smaller than body text: ${title.textSize}", title.textSize >= Ui.BODY_SP * sp - 0.5f)
+        // With room again the letters are full size again.
+        val wide = Ui.dp(context, 600)
+        bar.measure(View.MeasureSpec.makeMeasureSpec(wide, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        bar.layout(0, 0, wide, bar.measuredHeight)
+        assertEquals(20f * sp, title.textSize, 0.5f)
+        bar.requestLayout()
+        result
+    }
+
+    @Test fun theGroupTitleFitsANarrowPhoneAndALongChannelNameIsCutAtItsEnd() {
+        TestCore.install(connected = false)
+        val group = TestCore.onMain { core.groupChatId() }
+        val a = open(group)
+        val title = Views.tagged(a, "title")!!
+        assertEquals("Tout le monde ici", Views.textOf(title))
+        assertEquals("one line, nothing cut", 1 to 0, titleAt360(a))
+        // The radio's owner named the channel: the open chat takes the name when the radio connects.
+        TestCore.onMain {
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            TestCore.radio.channelName = "Marché de Kpalimé et les villages autour"
+            TestCore.radio.connected(true)
+        }
+        inst.waitForIdleSync()
+        assertEquals("Marché de Kpalimé et les villages autour", Views.textOf(title))
+        assertTrue("written by people: exempt from the word rules", Ui.isContent(title))
+        val (lines, cut) = titleAt360(a)
+        assertEquals(1, lines)
+        assertTrue("cut at the end", cut > 0)
+    }
+
     @Test fun aCutDraftSaysSoAndCanStillBeSent() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }

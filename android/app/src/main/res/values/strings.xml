@@ -39,7 +39,7 @@
     <string name="setup_radio_hint">Turn on the radio. Keep it close.</string>
     <string name="setup_search">Find radio</string>
     <string name="setup_done">Ready</string>
-    <string name="group_name">Group</string>
+    <string name="group_name">Everyone nearby</string>
     <string name="unnamed_radio">Radio %1$s</string>
     <string name="no_messages">No messages yet</string>
     <string name="new_private_chat">New private chat</string>

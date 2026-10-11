@@ -36,7 +36,7 @@
     <string name="setup_radio_hint">Allumez la radio. Gardez-la près.</string>
     <string name="setup_search">Trouver la radio</string>
     <string name="setup_done">Prêt</string>
-    <string name="group_name">Groupe</string>
+    <string name="group_name">Tout le monde ici</string>
     <string name="unnamed_radio">Radio %1$s</string>
     <string name="no_messages">Pas encore de messages</string>
     <string name="new_private_chat">Nouvelle discussion privée</string>

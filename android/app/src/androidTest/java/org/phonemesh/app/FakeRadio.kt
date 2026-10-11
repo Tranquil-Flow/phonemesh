@@ -35,6 +35,9 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     /** The name the fake radio announces for itself while ready. */
     var ownName: String? = null
     override fun ownName(): String? = if (ready) ownName else null
+    /** The name the fake radio's owner gave its primary channel, read while ready. */
+    var channelName: String? = null
+    override fun channelName(): String? = if (ready) channelName else null
     override fun send(text: String, destinationId: String, channel: Int): Long {
         check(ready) { "Meshtastic radio is not ready" }
         val id = nextPacket++

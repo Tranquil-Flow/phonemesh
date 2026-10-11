@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.meshtastic.proto.ChannelProtos
 import org.meshtastic.proto.MeshProtos
 import org.meshtastic.proto.Portnums
 
@@ -131,6 +132,37 @@ class MeshtasticProtocolTest {
         assertNull("no own number yet", MeshtasticProtocol.ownName(record(0x8d88, "Meshtastic 8d88"), null, null))
         assertNull("a record with no name is not a name", MeshtasticProtocol.ownName(record(0x8d88, " "), 0x8d88L, "Old"))
         assertEquals("the short name, as chats show it", "8d88", MeshtasticProtocol.ownName(record(0x8d88, "", "8d88"), 0x8d88L, null))
+    }
+
+    @Test
+    fun channelNameIsOnlyANameTheOwnerChose() {
+        assertEquals("Marché", MeshtasticProtocol.channelName("Marché"))
+        assertEquals("Marché", MeshtasticProtocol.channelName(" Marché "))
+        assertNull("Meshtastic's default channel has no name", MeshtasticProtocol.channelName(""))
+        assertNull(MeshtasticProtocol.channelName("  "))
+        val presets = listOf(
+            "LongFast", "LongSlow", "MediumFast", "MediumSlow", "ShortFast", "ShortSlow", "ShortTurbo", "LongModerate", "VeryLongSlow", "LongTurbo",
+        )
+        for (preset in presets) {
+            assertNull(preset, MeshtasticProtocol.channelName(preset))
+            assertNull(preset, MeshtasticProtocol.channelName(preset.uppercase()))
+            assertNull(preset, MeshtasticProtocol.channelName(" ${preset.lowercase()} "))
+        }
+        assertEquals("a name that only begins like a preset is a name", "LongFast2", MeshtasticProtocol.channelName("LongFast2"))
+        assertEquals("Fast", MeshtasticProtocol.channelName("Fast"))
+    }
+
+    @Test
+    fun onlyThePrimaryChannelRecordNamesTheGroup() {
+        fun record(index: Int, name: String) = MeshtasticProtocol.parseFromRadio(
+            MeshProtos.FromRadio.newBuilder().setChannel(
+                ChannelProtos.Channel.newBuilder().setIndex(index).setSettings(ChannelProtos.ChannelSettings.newBuilder().setName(name)),
+            ).build(),
+        )
+        assertEquals(RadioEvent.PrimaryChannel("Marché"), record(0, "Marché"))
+        assertEquals(RadioEvent.PrimaryChannel(null), record(0, ""))
+        assertEquals(RadioEvent.PrimaryChannel(null), record(0, "LongFast"))
+        assertNull("another channel is not the group", record(1, "Admin"))
     }
 
     @Test

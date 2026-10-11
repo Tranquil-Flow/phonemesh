@@ -311,6 +311,8 @@ class AppCore private constructor(
         if (becameReady) endAttempt()
         readyAddress = if (becameReady) settings.radioAddress else readyAddress.takeIf { connected }
         if (becameReady) rememberOwnName(fresh = true)
+        // The handshake that made it ready carried its channels: the group takes the primary one's name, or loses it.
+        if (becameReady) readyAddress?.let { settings.setRadioChannelName(it, radio.channelName()) }
         // Only a real change of the link reaches the region check: ready means a new handshake has finished.
         if (becameReady) region.onReady()
         if (was && !connected) region.onLost()
@@ -381,8 +383,9 @@ class AppCore private constructor(
 
     // ---- Chats
 
+    /** The group is named after the chosen radio's primary channel when its owner named it, as that radio last reported. */
     fun chatTitle(chat: Chat): String = when {
-        chat.kind == ChatKind.GROUP -> text(UiText(R.string.group_name))
+        chat.kind == ChatKind.GROUP -> settings.radioAddress?.let { settings.radioChannelName(it) } ?: text(UiText(R.string.group_name))
         chat.name.isNotBlank() -> chat.name
         else -> text(unnamedRadio(chat.address))
     }

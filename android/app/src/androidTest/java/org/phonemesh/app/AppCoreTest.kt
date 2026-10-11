@@ -147,6 +147,28 @@ class AppCoreTest {
         assertEquals(2, core.history.messages(chat.id).size)
     }
 
+    @Test fun theGroupIsEveryoneNearbyUntilTheRadioNamesItsChannel() {
+        TestCore.install(language = "en", connected = false)
+        fun title() = main { core.chatTitle(core.history.chat(core.groupChatId())!!) }
+        assertEquals("Everyone nearby", title())
+        main { core.settings.language = "fr" }
+        assertEquals("no radio yet", "Tout le monde ici", title())
+        main { core.connect("AA:BB:CC:DD:EE:01", "Kofi"); radio.channelName = "Marché"; radio.connected(true) }
+        assertEquals("Marché", title())
+        assertEquals("Marché", main { core.chatRows().single().title })
+        main { radio.connected(false) }
+        assertEquals("kept while the radio is away", "Marché", title())
+        TestCore.restart()
+        assertEquals("kept when the app starts without it", "Marché", title())
+        // Another radio has its own channel; one that names none shows the plain title, also after it had a name.
+        main { core.connect("AA:BB:CC:DD:EE:02", "Ama"); radio.channelName = null; radio.connected(true) }
+        assertEquals("Tout le monde ici", title())
+        main { radio.connected(false); core.connect("AA:BB:CC:DD:EE:01", "Kofi") }
+        assertEquals("Marché", title())
+        main { radio.channelName = null; radio.connected(true) }
+        assertEquals("the owner took the name away", "Tout le monde ici", title())
+    }
+
     /** Review Focus 3, and the history surviving a restart. */
     @Test fun waitingMessagesBecomeUnconfirmedAfterARestart() {
         TestCore.install()

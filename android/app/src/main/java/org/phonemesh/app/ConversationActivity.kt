@@ -14,6 +14,7 @@ import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.text.format.DateFormat
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -155,8 +156,11 @@ class ConversationActivity : ScreenActivity() {
             tag = "title"
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL
+            // A narrow phone gets smaller letters before any are cut; the bar's own height lets them grow back.
+            setAutoSizeTextTypeUniformWithConfiguration(Ui.BODY_SP.toInt(), 20, 1, TypedValue.COMPLEX_UNIT_SP)
         })
-        bar.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
+        bar.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = pad() })
         people = Looks.peopleBadge(this, palette).apply { tag = "people" }
         bar.addView(people)
         radioStatus = ImageView(this).apply {

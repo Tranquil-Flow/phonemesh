@@ -120,6 +120,8 @@ internal object MeshtasticProtocol {
             MeshProtos.FromRadio.PayloadVariantCase.CONFIG_COMPLETE_ID -> RadioEvent.ConfigComplete(fromRadio.configCompleteId)
             MeshProtos.FromRadio.PayloadVariantCase.MY_INFO -> RadioEvent.MyInfo(fromRadio.myInfo.myNodeNum)
             MeshProtos.FromRadio.PayloadVariantCase.NODE_INFO -> nodeInfoEvent(fromRadio.nodeInfo)
+            MeshProtos.FromRadio.PayloadVariantCase.CHANNEL ->
+                if (fromRadio.channel.index == 0) RadioEvent.PrimaryChannel(channelName(fromRadio.channel.settings.name)) else null
             MeshProtos.FromRadio.PayloadVariantCase.CONFIG ->
                 if (fromRadio.config.hasLora()) RadioEvent.LoraSettings(fromRadio.config.lora) else null
             MeshProtos.FromRadio.PayloadVariantCase.QUEUESTATUS -> RadioEvent.QueueStatus(
@@ -148,6 +150,14 @@ internal object MeshtasticProtocol {
      */
     fun ownName(event: RadioEvent.NodeDiscovered, local: Long?, known: String?): String? =
         if (event.nodeNum != local) known else event.name.takeIf { it != event.id }
+
+    /**
+     * A channel's name when the radio's owner chose one. Blank is Meshtastic's default channel, which apps show as
+     * the radio preset ("LongFast", "MediumSlow", ...); a name that is just a preset counts as none too.
+     */
+    fun channelName(name: String): String? = name.trim().takeIf { it.isNotEmpty() && !presetName.matches(it) }
+
+    private val presetName = Regex("(very)?(long|medium|short)(fast|slow|moderate|turbo)", RegexOption.IGNORE_CASE)
 
     private fun packetEvent(packet: MeshProtos.MeshPacket): RadioEvent? {
         if (!packet.hasDecoded()) return null
@@ -237,6 +247,7 @@ internal sealed class RadioEvent {
     data class MyInfo(val nodeNum: Int) : RadioEvent()
     data class LoraSettings(val lora: ConfigProtos.Config.LoRaConfig) : RadioEvent()
     data class AdminLora(val from: Long, val lora: ConfigProtos.Config.LoRaConfig?, val passkey: ByteString) : RadioEvent()
+    data class PrimaryChannel(val name: String?) : RadioEvent()
     data class NodeDiscovered(val nodeNum: Long, val id: String, val name: String) : RadioEvent()
     data class Text(val sender: String, val text: String, val channel: Int, val to: Long) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()

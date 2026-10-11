@@ -79,7 +79,7 @@ class ChatsActivityTest {
         saveSetupPicture(chats, "voice-before-scroll")
         assertEquals("no chat list, no hint, no plus during setup", listOf(false, false, false), chatParts(chats))
         assertNull(Views.withText(chats, "Pas encore de messages"))
-        assertNull(Views.withText(chats, "Groupe"))
+        assertNull(Views.withText(chats, "Tout le monde ici"))
         val (content, height) = setupHeightFor(chats)
         assertTrue("the guide has a height", content > 0)
         assertEquals("the guide may use all the height it is offered", content, height)
@@ -115,7 +115,7 @@ class ChatsActivityTest {
         // The step's own button is the way into the group chat.
         Views.tap(chats, "hello_try")
         Views.waitUntil { resumedNow() is ConversationActivity }
-        assertEquals("Groupe", Views.textOf(Views.tagged(checkNotNull(Views.resumed()), "title")!!))
+        assertEquals("Tout le monde ici", Views.textOf(Views.tagged(checkNotNull(Views.resumed()), "title")!!))
         Views.finish(Views.resumed())
         Views.waitUntil { resumedNow() === chats }
         assertEquals("still setup: nothing was sent", listOf(false, false, false), chatParts(chats))
@@ -288,12 +288,53 @@ class ChatsActivityTest {
         assertEquals(listOf("chat:$group", "chat:$direct"), list)
         assertEquals("3", Views.textOf(Views.tagged(chats, "people:$group")!!))
         assertEquals("Personnes entendues : 3", Views.tagged(chats, "people:$group")!!.contentDescription)
-        assertNotNull(Views.withText(chats, "Groupe"))
+        assertNotNull(Views.withText(chats, "Tout le monde ici"))
         assertNotNull(Views.withText(chats, "Ama : Salut"))
         assertNotNull(Views.withText(chats, "Kofi"))
         assertEquals("En attente", Views.tagged(chats, "last_status:$direct")!!.contentDescription)
         assertEquals("2", Views.textOf(Views.tagged(chats, "unread:$group")!!))
         assertEquals("Non lus : 2", Views.tagged(chats, "unread:$group")!!.contentDescription)
+    }
+
+    @Test fun theGroupRowShowsItsWholeTitleOnANarrowPhoneAndTakesTheChannelName() {
+        TestCore.install(connected = false)
+        // After setup: during it the chats screen shows only the steps.
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        // A message heard: the row is at its fullest, with a time and an unread count beside the title.
+        TestCore.onMain { TestCore.radio.receive("!0000bbbb", "[pm1:fr] Salut", false) }
+        val group = TestCore.onMain { core.groupChatId() }
+        val chats = start()
+        val row = Views.tagged(chats, "chat:$group")!!
+        assertEquals("Tout le monde ici", row.contentDescription)
+        val title = Views.withText(chats, "Tout le monde ici")!!
+        assertTrue(Ui.isContent(title))
+        // Laid out again as on a 360 dp wide phone: one line, no letter cut, the people count whole beside it.
+        TestCore.onMain {
+            val people = Views.descendants(row).first { it.tag == "people:$group" }
+            val width = Ui.dp(context, 360)
+            val peopleWide = people.width
+            row.measure(android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
+                android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED))
+            row.layout(0, 0, width, row.measuredHeight)
+            assertEquals(1, title.lineCount)
+            assertEquals("nothing cut", 0, title.layout.getEllipsisCount(0))
+            assertTrue(peopleWide > 0)
+            assertEquals("the people count keeps its width", peopleWide, people.width)
+            val line = people.parent as android.view.View
+            val beside = (row as android.view.ViewGroup).let { it.getChildAt(it.childCount - 1) }
+            assertTrue("the people count stays inside its line", people.right <= line.width)
+            assertTrue("the time and unread count stay inside the row", beside.width > 0 && beside.right <= width - row.paddingRight)
+            row.requestLayout()
+        }
+        TestCore.onMain {
+            core.connect("AA:BB:CC:DD:EE:01", "Kofi")
+            TestCore.radio.channelName = "Marché"
+            TestCore.radio.connected(true)
+        }
+        inst.waitForIdleSync()
+        assertEquals("Marché", Views.tagged(chats, "chat:$group")!!.contentDescription)
+        assertNotNull(Views.withText(chats, "Marché"))
+        assertNull(Views.withText(chats, "Tout le monde ici"))
     }
 
     @Test fun unreadClearsWhenTheChatIsOpened() {

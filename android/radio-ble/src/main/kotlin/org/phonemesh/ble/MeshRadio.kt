@@ -51,6 +51,9 @@ interface MeshRadio : AutoCloseable {
     /** The name the connected radio announces for itself, the one other radios show; null while away or when it has none. */
     fun ownName(): String?
 
+    /** The name the connected radio's owner gave its primary channel; null while away or when it is Meshtastic's default channel. */
+    fun channelName(): String?
+
     /** The radio's region from the handshake: "UNSET", a region name, "UNRECOGNIZED", or null before it arrives. */
     fun region(): String?
 

@@ -1,6 +1,7 @@
 package org.phonemesh.app
 
 import android.content.Context
+import org.phonemesh.core.Tip
 
 /** The few choices the app remembers, in its own preferences file. */
 class Settings(context: Context, name: String = PREFS) : RegionMemory {
@@ -42,10 +43,18 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = prefs.getBoolean(SETUP_FINISHED, false)
         set(value) { prefs.edit().putBoolean(SETUP_FINISHED, value).apply() }
 
-    /** Keys of one-time tips already closed. Never mutate Android's stored string sets. */
+    /** Keys of the tips learned: closed, or their action done. Never mutate Android's stored string sets. */
     var tipsShown: Set<String>
         get() = prefs.getStringSet(TIPS_SHOWN, emptySet()).orEmpty().toSet()
         set(value) { prefs.edit().putStringSet(TIPS_SHOWN, value.toSet()).apply() }
+
+    /** In how many moments each tip was shown and left unused, stored as "key:count"; anything else reads as nothing. */
+    var tipShowings: Map<String, Int>
+        get() = prefs.getStringSet(TIP_SHOWINGS, null).orEmpty().mapNotNull { entry ->
+            val count = entry.substringAfter(':').toIntOrNull()?.takeIf { it > 0 }
+            Tip.entries.firstOrNull { it.key == entry.substringBefore(':') }?.let { tip -> count?.let { tip.key to it } }
+        }.toMap()
+        set(value) { prefs.edit().putStringSet(TIP_SHOWINGS, value.map { "${it.key}:${it.value}" }.toSet()).apply() }
 
     /** Countries the person chose Keep for on this radio. Never mutate Android's stored string sets. */
     override fun kept(address: String): Set<String> = prefs.getStringSet(KEPT + address, null).orEmpty().toSet()
@@ -93,6 +102,7 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val FIRST_MESSAGE_SENT = "firstMessageSent"
         private const val SETUP_FINISHED = "setupFinished"
         private const val TIPS_SHOWN = "tipsShown"
+        private const val TIP_SHOWINGS = "tipShowings"
         private const val KEPT = "keptRegions."
         private const val RADIO_COUNTRY = "radioCountry."
         private const val HELPER_SET = "helperSet"

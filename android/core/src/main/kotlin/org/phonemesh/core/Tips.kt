@@ -1,6 +1,6 @@
 package org.phonemesh.core
 
-/** The moment a one-time tip belongs to. */
+/** The moment a tip belongs to. */
 enum class TipPlace { RECORDING, DRAFT, CHAT }
 
 /** Priority order within each place; keys are the talking pictures. */
@@ -17,9 +17,17 @@ enum class Tip(val key: String, val place: TipPlace) {
 data class TipFacts(val sent: Boolean, val failed: Boolean, val received: Boolean, val direct: Boolean)
 
 object Tips {
-    /** The first unseen tip whose moment has happened. */
-    fun next(place: TipPlace, facts: TipFacts, shown: Set<String>): Tip? =
-        Tip.entries.firstOrNull { it.place == place && it.key !in shown && due(it, facts) }
+    /** A tip left unused is offered again, in this many moments at most. */
+    const val MAX_SHOWINGS = 3
+
+    /**
+     * The tip for a moment: not [learned] (its action was done, or it was closed), its moment has happened, and of
+     * those the one shown in the fewest moments so far ([showings]); the first in priority order when equal.
+     */
+    fun next(place: TipPlace, facts: TipFacts, learned: Set<String>, showings: Map<String, Int> = emptyMap()): Tip? =
+        Tip.entries
+            .filter { it.place == place && it.key !in learned && (showings[it.key] ?: 0) < MAX_SHOWINGS && due(it, facts) }
+            .minByOrNull { showings[it.key] ?: 0 }
 
     private fun due(tip: Tip, facts: TipFacts): Boolean = when (tip) {
         Tip.CANCEL, Tip.LOCK, Tip.LISTEN -> true

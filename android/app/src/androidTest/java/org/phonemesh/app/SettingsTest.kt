@@ -96,6 +96,18 @@ class SettingsTest {
         assertEquals(setOf("cancel", "lock"), Settings(context, NAME).tipsShown)
     }
 
+    @Test fun tipShowingsAreRememberedAndGarbageIsIgnored() {
+        val first = Settings(context, NAME)
+        assertEquals(emptyMap<String, Int>(), first.tipShowings)
+        first.tipShowings = mapOf("cancel" to 1)
+        first.tipShowings = first.tipShowings + ("lock" to 2) + ("cancel" to 2)
+        assertEquals(mapOf("cancel" to 2, "lock" to 2), Settings(context, NAME).tipShowings)
+        assertEquals("the learned tips are stored apart", emptySet<String>(), first.tipsShown)
+        context.getSharedPreferences(NAME, Context.MODE_PRIVATE).edit()
+            .putStringSet("tipShowings", setOf("listen:3", "future:1", "lock", "cancel:x", "failed:0", "arrive:-2", ":2", "delivery:1:1")).commit()
+        assertEquals(mapOf("listen" to 3), Settings(context, NAME).tipShowings)
+    }
+
     @Test fun regionMemoryIsPerRadio() {
         val settings = Settings(context, NAME)
         settings.keep("AA", "TG")

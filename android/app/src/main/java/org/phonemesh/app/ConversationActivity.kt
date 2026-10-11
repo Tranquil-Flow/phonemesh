@@ -47,6 +47,8 @@ class ConversationActivity : ScreenActivity() {
     private var started: AppCore? = null
     private var editing = false
     private var pressing = false
+    /** The touch now on the microphone began as a hold; one that began as a tap is left to onMicClick, to its end. */
+    private var holding = false
     private var downX = 0f
     private var downY = 0f
     private var downAt = 0L
@@ -79,6 +81,8 @@ class ConversationActivity : ScreenActivity() {
     /** One region picture for the screen, so renders never restart it. */
     private val regionPicture by lazy { RegionPicture(this) }
     private var tip: Tip? = null
+    /** The moment that has had its tip: closing or using it brings no other one until the moment changes. */
+    private var tipped: TipPlace? = null
 
     /** Typing and pasting stop at one radio part; deleting is always allowed. */
     private val fitFilter = InputFilter { source, start, end, dest, dstart, dend ->
@@ -341,7 +345,7 @@ class ConversationActivity : ScreenActivity() {
             tag = "draft_play"
             background = Ui.ripple(playFill, Ui.pressedOf(palette.onAccent))
             setOnClickListener {
-                if (tip == Tip.LISTEN) retireTip()
+                if (tip == Tip.LISTEN) endTip(learned = true)
                 core.playDraft(chatId)
             }
         }
@@ -362,12 +366,13 @@ class ConversationActivity : ScreenActivity() {
 
     // ---- Microphone
 
-    /** Hold / slide up / slide left. Returning false lets the tap reach onMicClick (not ready, or locked). */
+    /** Hold / slide up / slide left. Returning false for a whole touch lets the tap reach onMicClick (not ready, or locked). */
     private fun onMicTouch(event: MotionEvent): Boolean {
         val density = resources.displayMetrics.density
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                if (!core.canTalk() || core.recordState != AppCore.RecordState.IDLE) return false
+                holding = core.canTalk() && core.recordState == AppCore.RecordState.IDLE
+                if (!holding) return false
                 if (!core.access.microphoneAllowed()) {
                     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
                     return true
@@ -381,7 +386,7 @@ class ConversationActivity : ScreenActivity() {
             }
             MotionEvent.ACTION_MOVE -> if (pressing) {
                 when (RecordGesture.onMove(event.rawX - downX, event.rawY - downY, density)) {
-                    RecordGesture.Phase.CANCELLED -> { pressing = false; core.cancelRecording() }
+                    RecordGesture.Phase.CANCELLED -> { pressing = false; cancelBySliding() }
                     RecordGesture.Phase.LOCKED -> { pressing = false; lockRecording() }
                     else -> cancelHint.alpha = 1f - 0.6f * RecordGesture.cancelProgress(event.rawX - downX, density)
                 }
@@ -390,7 +395,7 @@ class ConversationActivity : ScreenActivity() {
                 pressing = false
                 when (RecordGesture.onRelease(event.rawX - downX, event.rawY - downY, density, event.eventTime - downAt)) {
                     RecordGesture.Phase.LOCKED -> lockRecording()
-                    RecordGesture.Phase.CANCELLED -> core.cancelRecording()
+                    RecordGesture.Phase.CANCELLED -> cancelBySliding()
                     else -> core.finishRecording()
                 }
             }
@@ -400,7 +405,12 @@ class ConversationActivity : ScreenActivity() {
                 core.cancelRecording()
             }
         }
-        return true
+        return holding
+    }
+
+    private fun cancelBySliding() {
+        if (tip == Tip.CANCEL) endTip(learned = true)
+        core.cancelRecording()
     }
 
     /** Taps (and TalkBack): stop a locked recording, go back to the setup cards, or start locked. */
@@ -416,7 +426,7 @@ class ConversationActivity : ScreenActivity() {
 
     private fun lockRecording() {
         core.recordLocked = true
-        if (tip == Tip.LOCK) retireTip()
+        if (tip == Tip.LOCK) endTip(learned = true)
         render()
     }
 
@@ -463,7 +473,7 @@ class ConversationActivity : ScreenActivity() {
     override fun onScreenStop() {
         val owner = started ?: return
         started = null
-        if (!isChangingConfigurations) retireTip(owner.settings)
+        if (!isChangingConfigurations) endTip(learned = false, owner.settings)
         owner.closeChat(chatId)
         if (!isChangingConfigurations) {
             owner.cancelRecording()
@@ -517,18 +527,19 @@ class ConversationActivity : ScreenActivity() {
         }, messages)
     }
 
-    /** Keep the same picture through renders; leaving its moment retires it. */
+    /** Keep the same picture through renders; leaving its moment only hides it. */
     private fun renderTip(place: TipPlace?, messages: List<Message>) {
-        tip?.let { if (it.place != place) retireTip() }
+        tip?.let { if (it.place != place) endTip(learned = false) }
+        if (tipped != place) tipped = null
         // The first-message hint owns this space while the microphone is idle.
-        if (tip == null && place != null && (place != TipPlace.CHAT || core.settings.firstMessageSent)) {
+        if (tipped == null && place != null && (place != TipPlace.CHAT || core.settings.firstMessageSent)) {
             val facts = TipFacts(
                 sent = messages.any { it.direction == Direction.OUT },
                 failed = messages.any { it.status?.canResend == true },
                 received = messages.any { it.direction == Direction.IN },
                 direct = core.history.chat(chatId)?.kind != ChatKind.GROUP,
             )
-            Tips.next(place, facts, core.settings.tipsShown)?.let { showTip(it) }
+            Tips.next(place, facts, core.settings.tipsShown, core.settings.tipShowings)?.let { showTip(it) }
         }
         (tipBox.getChildAt(0) as? HowToPanel)?.update()
         tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
@@ -536,6 +547,7 @@ class ConversationActivity : ScreenActivity() {
 
     private fun showTip(next: Tip) {
         tip = next
+        tipped = next.place
         tipBox.removeAllViews()
         // The picture as wide as the card, like a setup step; the sentence, speaker and close sit under it.
         val card = howTo(next.key, compact = !roomy).apply {
@@ -545,15 +557,23 @@ class ConversationActivity : ScreenActivity() {
         }
         card.add(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.tip_close)).apply {
             tag = "tip_close"
-            setOnClickListener { retireTip(); render() }
+            setOnClickListener { endTip(learned = true); render() }
         })
         tipBox.addView(card)
     }
 
-    /** Persist on close, action or moment end, not merely on display. */
-    private fun retireTip(settings: Settings = core.settings) {
-        val seen = tip ?: return
-        settings.tipsShown = settings.tipsShown + seen.key
+    /**
+     * Takes the tip away. [learned] (its close button, or its action done) it never returns; when its moment only
+     * ended, or the screen was left, that counts as one showing and it is offered again (Tips.MAX_SHOWINGS).
+     */
+    private fun endTip(learned: Boolean, settings: Settings = core.settings) {
+        val shown = tip ?: return
+        if (learned) {
+            settings.tipsShown = settings.tipsShown + shown.key
+        } else {
+            settings.tipShowings = settings.tipShowings.let { it + (shown.key to (it[shown.key] ?: 0) + 1) }
+            tipped = null
+        }
         tip = null
         tipBox.removeAllViews()
         tipBox.visibility = View.GONE
@@ -638,7 +658,7 @@ class ConversationActivity : ScreenActivity() {
             getString(if (playing) R.string.stop_listening else R.string.listen), color = if (playing) palette.good else palette.text).apply {
             tag = "play:${message.id}"
             setOnClickListener {
-                if (tip == Tip.ARRIVE && message.direction == Direction.IN) retireTip()
+                if (tip == Tip.ARRIVE && message.direction == Direction.IN) endTip(learned = true)
                 core.play(message.id)
             }
         })
@@ -660,7 +680,7 @@ class ConversationActivity : ScreenActivity() {
                 // Off like Send while the radio has no region or its region is being set.
                 Ui.enable(this, !core.region.blocksSending)
                 setOnClickListener {
-                    if (tip == Tip.FAILED) retireTip()
+                    if (tip == Tip.FAILED) endTip(learned = true)
                     core.resend(message.id)
                 }
             })

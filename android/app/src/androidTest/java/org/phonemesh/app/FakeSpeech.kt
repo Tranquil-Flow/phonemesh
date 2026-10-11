@@ -15,6 +15,9 @@ class FakeSpeech : Speech {
         private set
     val playing: Boolean get() = playEnd != null
     private var finished: ((FloatArray?, RecordError?) -> Unit)? = null
+    /** The words stay "being written" until finishTranscript. */
+    var holdTranscript = false
+    private var heard: ((String?) -> Unit)? = null
     private var playEnd: ((Boolean) -> Unit)? = null
 
     override fun startRecording(onStarted: () -> Unit, onFinished: (FloatArray?, RecordError?) -> Unit) {
@@ -38,7 +41,15 @@ class FakeSpeech : Speech {
         done(null, error)
     }
 
-    override fun transcribe(pack: Readiness.Ready, samples: FloatArray, onResult: (String?) -> Unit) = onResult(nextTranscript)
+    override fun transcribe(pack: Readiness.Ready, samples: FloatArray, onResult: (String?) -> Unit) {
+        if (holdTranscript) heard = onResult else onResult(nextTranscript)
+    }
+
+    fun finishTranscript() {
+        val done = heard ?: return
+        heard = null
+        done(nextTranscript)
+    }
 
     override fun speak(pack: Readiness.Ready, text: String, onEnd: (Boolean) -> Unit) {
         stopPlayback()

@@ -142,6 +142,13 @@ internal object MeshtasticProtocol {
         return RadioEvent.NodeDiscovered(info.num.toLong() and BROADCAST_NUM, id, name)
     }
 
+    /**
+     * The connected radio's own name after [event]: the name of its own record (number [local]), null when that
+     * record names nothing; any other radio's record leaves [known] as it was.
+     */
+    fun ownName(event: RadioEvent.NodeDiscovered, local: Long?, known: String?): String? =
+        if (event.nodeNum != local) known else event.name.takeIf { it != event.id }
+
     private fun packetEvent(packet: MeshProtos.MeshPacket): RadioEvent? {
         if (!packet.hasDecoded()) return null
         val decoded = packet.decoded

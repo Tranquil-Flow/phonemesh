@@ -37,7 +37,7 @@ class ScreenChecksTest {
             "01-language-from-settings", "02-chats-step1", "02-chats-step1-offline", "02-chats-friend-guide",
             "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
             "05-conversation-mic-hint", "05-conversation-tip", "06-draft-too-long", "06-draft-cut", "07-recording",
-            "07-recording-tip", "08-radio", "09-settings", "10-help", "11-note-picture",
+            "07-recording-tip", "07-writing", "08-radio", "09-settings", "10-help", "11-note-picture",
         )
         assertEquals(names, ScreenStates.all.map { it.first })
         assertEquals(names.map { "$it-dark" }, ScreenStates.dark.map { it.first })
@@ -52,6 +52,7 @@ class ScreenChecksTest {
     @Test fun draftTooLong() = check(minTargets = 3) { ScreenStates.draftTooLong() }
     @Test fun draftCut() = check(minTargets = 4) { ScreenStates.draftCut() }
     @Test fun recordingLocked() = check(minTargets = 2) { ScreenStates.recordingLocked() }
+    @Test fun writing() = check(minTargets = 2) { ScreenStates.writing() }
     @Test fun radio() = check(minTargets = 3, minRows = 2) { ScreenStates.radio() }
     @Test fun settings() = check(minTargets = 3) { ScreenStates.settings() }
 

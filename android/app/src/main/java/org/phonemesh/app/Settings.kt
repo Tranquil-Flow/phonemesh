@@ -72,6 +72,15 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         edit.apply()
     }
 
+    /** The name this radio announces for itself, learned when it connected; other people see the same one. */
+    fun radioOwnName(address: String): String? = prefs.getString(RADIO_OWN_NAME + address, null)
+
+    fun setRadioOwnName(address: String, name: String?) {
+        val edit = prefs.edit()
+        if (name == null) edit.remove(RADIO_OWN_NAME + address) else edit.putString(RADIO_OWN_NAME + address, name)
+        edit.apply()
+    }
+
     /** A helper chose this radio's region: a country guess never offers to change it. */
     override fun helperSet(address: String): Boolean = address in prefs.getStringSet(HELPER_SET, null).orEmpty()
 
@@ -105,6 +114,7 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val TIP_SHOWINGS = "tipShowings"
         private const val KEPT = "keptRegions."
         private const val RADIO_COUNTRY = "radioCountry."
+        private const val RADIO_OWN_NAME = "radioOwnName."
         private const val HELPER_SET = "helperSet"
         internal const val MIGRATED = "migrated"
     }

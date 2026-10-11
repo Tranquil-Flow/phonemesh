@@ -96,6 +96,8 @@ class AppCore private constructor(
     var connectingAddress: String? = null
         private set
     private var connectingSince = 0L
+    // The radio whose connection is ready now: its own name is kept under this address.
+    private var readyAddress: String? = null
     // Android is pairing with that radio: the wait has no end of its own until the radio reports one.
     private var pairing = false
     // Test hook: tests shorten the connection wait.
@@ -279,6 +281,16 @@ class AppCore private constructor(
     private fun knownName(id: String): String? =
         radio.peers().firstOrNull { it.id == id }?.name?.takeIf { it.isNotBlank() && it != id }
 
+    /**
+     * Keeps the name the connected radio announces for itself, so the radio screen shows the name other people see.
+     * A [fresh] connection that announces none forgets an older one.
+     */
+    private fun rememberOwnName(fresh: Boolean) {
+        val address = readyAddress ?: return
+        val name = radio.ownName()?.takeIf { it.isNotBlank() }
+        if (name != null || fresh) settings.setRadioOwnName(address, name)
+    }
+
     /** The radio ended the scan itself (never started, failed, throttled) or finished stopping one. */
     override fun onScanStopped() {
         if (!scanning) return
@@ -297,6 +309,8 @@ class AppCore private constructor(
         // Only success ends an attempt here; false is progress too (the radio reports it many times while connecting).
         val attempting = connectingAddress != null
         if (becameReady) endAttempt()
+        readyAddress = if (becameReady) settings.radioAddress else readyAddress.takeIf { connected }
+        if (becameReady) rememberOwnName(fresh = true)
         // Only a real change of the link reaches the region check: ready means a new handshake has finished.
         if (becameReady) region.onReady()
         if (was && !connected) region.onLost()
@@ -335,6 +349,7 @@ class AppCore private constructor(
     }
 
     override fun onPeersChanged() {
+        rememberOwnName(fresh = false)
         history.renameAll(radio.peers().filter { it.name.isNotBlank() && it.name != it.id }.associate { it.id to it.name })
         changed(Change.PEERS)
     }
@@ -382,6 +397,10 @@ class AppCore private constructor(
     /** A radio's name for screens: "Radio EE01" when it has none (blank, missing, or just its address). */
     fun radioLabel(name: String?, address: String?): String =
         if (name.isNullOrBlank() || name == address) text(unnamedRadio(address.orEmpty())) else name
+
+    /** A radio on the radio screen: the name it announces once it has connected, its Bluetooth [name] before that. */
+    fun ownRadioLabel(name: String?, address: String?): String =
+        radioLabel(address?.let { settings.radioOwnName(it) } ?: name, address)
 
     fun senderName(id: String): String = knownName(id) ?: text(unnamedRadio(id))
 

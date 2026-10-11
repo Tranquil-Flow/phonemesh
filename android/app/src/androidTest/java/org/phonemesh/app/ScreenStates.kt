@@ -206,6 +206,19 @@ object ScreenStates {
         return screen
     }
 
+    /** The recording has stopped and its words are not a draft yet. */
+    fun writing(): Activity {
+        TestCore.install()
+        TestCore.speech.holdTranscript = true
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        Views.tap(screen, "mic")
+        Views.tap(screen, "mic")
+        expect(TestCore.onMain { TestCore.core.recordState == AppCore.RecordState.TRANSCRIBING }, "the words are being written")
+        expect(Views.tagged(screen, "writing") != null, "the writing sign")
+        return screen
+    }
+
     fun radio(): Activity {
         TestCore.install()
         TestCore.onMain { TestCore.core.settings.radioName = "Radio du marché" }
@@ -479,6 +492,7 @@ object ScreenStates {
         "06-draft-cut" to { draftCut() },
         "07-recording" to { recordingLocked() },
         "07-recording-tip" to { recordingTip() },
+        "07-writing" to { writing() },
         "08-radio" to { radio() },
         "09-settings" to { settings() },
         "10-help" to { help() },

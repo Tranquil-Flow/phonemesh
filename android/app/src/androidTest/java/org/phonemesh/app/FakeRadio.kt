@@ -32,6 +32,9 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     override fun connect(address: String) { connects += address }
     override fun disconnect() { disconnects++ }
     override fun peers(): List<RadioPeer> = peerList
+    /** The name the fake radio announces for itself while ready. */
+    var ownName: String? = null
+    override fun ownName(): String? = if (ready) ownName else null
     override fun send(text: String, destinationId: String, channel: Int): Long {
         check(ready) { "Meshtastic radio is not ready" }
         val id = nextPacket++

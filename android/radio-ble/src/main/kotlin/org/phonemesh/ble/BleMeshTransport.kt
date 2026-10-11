@@ -106,6 +106,7 @@ class BleMeshTransport(
     @Volatile private var wantedConfigId: Int? = null
     @Volatile private var negotiatedMtu = DEFAULT_ATT_MTU
     @Volatile private var localNodeNum: Int? = null
+    @Volatile private var ownName: String? = null
     @Volatile private var configuredHopLimit: Int? = null
     private var drainInProgress = false
     private var drainAgain = false
@@ -417,6 +418,8 @@ class BleMeshTransport(
 
     override fun peers(): List<RadioPeer> = synchronized(peersById) { peersById.values.toList() }
 
+    override fun ownName(): String? = ownName
+
     override fun disconnect() {
         checkOpen()
         stopScan()
@@ -701,6 +704,7 @@ class BleMeshTransport(
             is RadioEvent.AdminLora -> regions.onReply(event)
             is RadioEvent.NodeDiscovered -> {
                 val peer = RadioPeer(event.id, event.name)
+                ownName = MeshtasticProtocol.ownName(event, localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM), ownName)
                 synchronized(peersById) {
                     if (event.id !in peersById && peersById.size >= 512) peersById.remove(peersById.keys.first())
                     peersById[event.id] = peer
@@ -781,6 +785,7 @@ class BleMeshTransport(
         connectionDeadline = null
         regions.reset()
         localNodeNum = null
+        ownName = null
         configuredHopLimit = null
         synchronized(peersById) { peersById.clear() }
         postPeersChanged()

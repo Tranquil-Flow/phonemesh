@@ -67,6 +67,8 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var micIcon: ImageView
     private lateinit var micLabel: TextView
     private lateinit var ring: RecordRing
+    private lateinit var writingDots: WritingDots
+    private var wasWriting = false
     private lateinit var cancelHint: TextView
     private lateinit var lockHint: ImageView
     private lateinit var micHint: View
@@ -308,11 +310,17 @@ class ConversationActivity : ScreenActivity() {
         mic.addView(ring, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         micIcon = Ui.icon(this, R.drawable.ic_mic, palette.background, 40)
         mic.addView(micIcon, FrameLayout.LayoutParams(Ui.dp(this, 40), Ui.dp(this, 40), Gravity.CENTER))
+        writingDots = WritingDots(this, palette.background).apply {
+            tag = "writing"
+            visibility = View.GONE
+        }
+        mic.addView(writingDots, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         mic.setOnTouchListener { _, event -> onMicTouch(event) }
         mic.setOnClickListener { onMicClick() }
         column.addView(mic, LinearLayout.LayoutParams(micSize, micSize))
         micLabel = Ui.text(this, getString(R.string.talk), palette.text, bold = true).apply { gravity = Gravity.CENTER }
-        column.addView(micLabel)
+        // Wrapping its own words: a sentence longer than the microphone is wide stays on one line.
+        column.addView(micLabel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         micBar.addView(column)
         val right = FrameLayout(this)
         keyboard = Ui.iconButton(this, palette, R.drawable.ic_keyboard, getString(R.string.keyboard)).apply {
@@ -598,19 +606,26 @@ class ConversationActivity : ScreenActivity() {
     }
 
     private fun renderMic(recordingHere: Boolean) {
-        micHint.visibility = if (!core.settings.firstMessageSent && !recordingHere) View.VISIBLE else View.GONE
+        // The recording has stopped and its words are not a draft yet: seconds on a real phone, so the microphone says so.
+        val writing = core.recordState == AppCore.RecordState.TRANSCRIBING && core.recordingChatId == chatId
+        micHint.visibility = if (!core.settings.firstMessageSent && !recordingHere && !writing) View.VISIBLE else View.GONE
         val locked = recordingHere && core.recordLocked
         mic.alpha = if (core.canTalk() || recordingHere) 1f else 0.35f
         ring.startedAt = if (recordingHere) core.recordingStartedAt else 0L
         micIcon.setImageResource(if (locked) R.drawable.ic_stop else R.drawable.ic_mic)
-        val label = getString(if (locked) R.string.stop_recording else R.string.talk)
+        micIcon.visibility = if (writing) View.INVISIBLE else View.VISIBLE
+        writingDots.visibility = if (writing) View.VISIBLE else View.GONE
+        val label = getString(if (locked) R.string.stop_recording else if (writing) R.string.writing_words else R.string.talk)
         mic.contentDescription = label
         micLabel.text = label
+        // Said once, after the microphone has closed; nothing announces Stop into a recording.
+        if (writing && !wasWriting) mic.announceForAccessibility(label)
+        wasWriting = writing
         cancelHint.visibility = if (recordingHere && !locked) View.VISIBLE else View.INVISIBLE
         lockHint.visibility = if (recordingHere) View.VISIBLE else View.INVISIBLE
         lockHint.contentDescription = if (locked) getString(R.string.recording_locked) else null
         lockHint.importantForAccessibility = if (locked) View.IMPORTANT_FOR_ACCESSIBILITY_YES else View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        Ui.enable(keyboard, !recordingHere)
+        Ui.enable(keyboard, !recordingHere && !writing)
     }
 
     private inner class BubbleAdapter : BaseAdapter() {

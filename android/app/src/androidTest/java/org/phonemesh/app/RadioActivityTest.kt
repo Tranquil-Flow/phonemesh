@@ -152,6 +152,63 @@ class RadioActivityTest {
         assertEquals("Radio EE01", TestCore.core.settings.radioName)
     }
 
+    /** Finds a radio by its Bluetooth name, taps it, and lets it connect announcing [ownName]; the screen then closes. */
+    private fun connectOnce(ownName: String?) {
+        TestCore.install(connected = false)
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.onMain { TestCore.radio.found("AA:BB:CC:DD:8D:88", "Nova_8d88", -60) }
+        inst.waitForIdleSync()
+        assertEquals("never connected: its Bluetooth name", "Nova_8d88", Views.tagged(activity!!, "radio:AA:BB:CC:DD:8D:88")!!.contentDescription)
+        Views.clickRow(activity!!, "radio:AA:BB:CC:DD:8D:88")
+        TestCore.onMain {
+            TestCore.radio.ownName = ownName
+            TestCore.radio.connected(true)
+        }
+        assertTrue(activity!!.isFinishing)
+        // Its onStop ends the search; it must not arrive after the next screen has begun its own.
+        Views.waitUntil { activity!!.isDestroyed }
+        activity = Views.start(RadioActivity::class.java)
+        TestCore.onMain {
+            TestCore.radio.found("AA:BB:CC:DD:8D:88", "Nova_8d88", -60)
+            TestCore.radio.found("AA:BB:CC:DD:EE:02", "Nova_ee02", -70)
+        }
+        inst.waitForIdleSync()
+    }
+
+    private fun rowName(address: String): String {
+        val row = Views.tagged(activity!!, "radio:$address")!!
+        val shown = TestCore.onMain { Views.descendants(row).filterIsInstance<android.widget.TextView>().first().text.toString() }
+        assertEquals("read aloud as it is shown", shown, row.contentDescription.toString())
+        return shown
+    }
+
+    @Test fun aConnectedRadioShowsTheNameOtherPeopleSee() {
+        connectOnce("Meshtastic 8d88")
+        assertEquals("Connectée : Meshtastic 8d88", Views.textOf(Views.tagged(activity!!, "radio_state")!!))
+        assertEquals("Meshtastic 8d88", rowName("AA:BB:CC:DD:8D:88"))
+        assertEquals("a radio never connected keeps its Bluetooth name", "Nova_ee02", rowName("AA:BB:CC:DD:EE:02"))
+    }
+
+    @Test fun theNameIsKeptAfterTheRadioIsLetGoAndFollowsARename() {
+        connectOnce("Meshtastic 8d88")
+        TestCore.onMain {
+            TestCore.radio.ownName = "Kofi"
+            TestCore.radio.setPeers(emptyList()) // the radio reports its own record again
+        }
+        inst.waitForIdleSync()
+        assertEquals("Kofi", rowName("AA:BB:CC:DD:8D:88"))
+        Views.tap(activity!!, "radio_disconnect")
+        TestCore.onMain { TestCore.radio.connected(false) }
+        inst.waitForIdleSync()
+        assertEquals("Kofi", rowName("AA:BB:CC:DD:8D:88"))
+    }
+
+    @Test fun aRadioThatAnnouncesNoNameKeepsItsBluetoothName() {
+        connectOnce("  ")
+        assertEquals("Connectée : Nova_8d88", Views.textOf(Views.tagged(activity!!, "radio_state")!!))
+        assertEquals("Nova_8d88", rowName("AA:BB:CC:DD:8D:88"))
+    }
+
     @Suppress("DEPRECATION")
     @Test fun bluetoothOffShowsTheSwitchPicture() {
         TestCore.install(connected = false)

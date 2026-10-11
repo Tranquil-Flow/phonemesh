@@ -57,6 +57,7 @@
     <string name="slide_to_cancel">◀ Cancel</string>
     <string name="recording_locked">Recording locked</string>
     <string name="stop_recording">Stop</string>
+    <string name="writing_words">Writing your words…</string>
     <string name="draft_clear">Clear</string>
     <string name="listen">Listen</string>
     <string name="stop_listening">Stop listening</string>

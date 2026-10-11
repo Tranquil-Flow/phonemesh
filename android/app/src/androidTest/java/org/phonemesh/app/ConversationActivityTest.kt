@@ -571,6 +571,56 @@ class ConversationActivityTest {
         assertEquals("Bonjour à tous", Views.textOf(Views.tagged(a, "draft_text")!!))
     }
 
+    @Test fun whileTheWordsAreWrittenTheMicrophoneSaysSoAndMoves() {
+        TestCore.install()
+        val group = core.groupChatId()
+        TestCore.speech.holdTranscript = true
+        val a = open(group)
+        assertEquals("Parler", description(a, "mic"))
+        assertNull(Views.tagged(a, "writing"))
+        Views.tap(a, "mic")
+        assertNull("recording is not writing", Views.tagged(a, "writing"))
+        // Moving pictures only for the sign: a moving tip would keep the main thread from ever being idle.
+        TestCore.onMain { StoryView.animationsEnabled = { true } }
+        Views.tap(a, "mic")
+        TestCore.onMain { StoryView.animationsEnabled = { false } }
+        assertEquals(AppCore.RecordState.TRANSCRIBING, core.recordState)
+        assertEquals("J'écris vos mots…", description(a, "mic"))
+        val words = Views.withText(a, "J'écris vos mots…") as android.widget.TextView
+        assertEquals("the sentence stays on one line", 1, TestCore.onMain { words.lineCount })
+        assertNull(Views.withText(a, "Parler"))
+        val sign = Views.tagged(a, "writing") as WritingDots
+        assertTrue("the sign moves", TestCore.onMain { sign.isRunning })
+        assertFalse(Views.tagged(a, "keyboard")!!.isEnabled)
+        assertNull(Views.tagged(a, "cancel_hint"))
+        assertNull(Views.tagged(a, "lock_hint"))
+        assertNull("no invitation to talk yet", Views.tagged(a, "mic_hint"))
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        TestCore.onMain { TestCore.speech.finishTranscript() }
+        inst.waitForIdleSync()
+        assertEquals("Bonjour à tous", Views.textOf(Views.tagged(a, "draft_text")!!))
+        assertFalse("the sign stops with the writing", TestCore.onMain { sign.isRunning })
+        Views.tap(a, "draft_clear")
+        assertNull(Views.tagged(a, "writing"))
+        assertEquals("Parler", description(a, "mic"))
+        assertNotNull(Views.withText(a, "Parler"))
+        assertTrue(Views.tagged(a, "keyboard")!!.isEnabled)
+        assertFalse(TestCore.onMain { sign.isRunning })
+    }
+
+    @Test fun withAnimationsOffTheWritingSignIsStill() {
+        TestCore.install()
+        val group = core.groupChatId()
+        TestCore.speech.holdTranscript = true
+        val a = open(group)
+        Views.tap(a, "mic")
+        Views.tap(a, "mic")
+        val sign = Views.tagged(a, "writing") as WritingDots
+        inst.waitForIdleSync()
+        assertFalse(TestCore.onMain { sign.isRunning })
+        assertEquals("J'écris vos mots…", description(a, "mic"))
+    }
+
     @Test fun tooLongShowsAndDisablesSend() {
         TestCore.install()
         val group = core.groupChatId()

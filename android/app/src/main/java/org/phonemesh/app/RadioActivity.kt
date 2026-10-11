@@ -123,13 +123,13 @@ class RadioActivity : ScreenActivity() {
 
     private fun pick(radio: AppCore.FoundRadio) {
         readyAtTap = core.readyReports
-        core.connect(radio.address, core.radioLabel(radio.name, radio.address))
+        core.connect(radio.address, core.ownRadioLabel(radio.name, radio.address))
         render()
     }
 
     override fun render() {
         val connected = core.connected
-        state.text = if (connected) getString(R.string.radio_connected_to, core.radioLabel(core.settings.radioName, core.settings.radioAddress))
+        state.text = if (connected) getString(R.string.radio_connected_to, core.ownRadioLabel(core.settings.radioName, core.settings.radioAddress))
         else getString(R.string.radio_not_connected)
         disconnect.visibility = if (connected) View.VISIBLE else View.GONE
         searching.visibility = if (core.scanning) View.VISIBLE else View.GONE
@@ -162,9 +162,9 @@ class RadioActivity : ScreenActivity() {
             minimumHeight = Ui.dp(this@RadioActivity, 72)
             setPadding(pad() / 2, pad() / 2, pad() / 2, pad() / 2)
             tag = "radio:${radio.address}"
-            contentDescription = core.radioLabel(radio.name, radio.address)
+            contentDescription = core.ownRadioLabel(radio.name, radio.address)
         }
-        row.addView(Ui.content(Ui.text(this, core.radioLabel(radio.name, radio.address), palette.text, 20f, bold = true).apply {
+        row.addView(Ui.content(Ui.text(this, core.ownRadioLabel(radio.name, radio.address), palette.text, 20f, bold = true).apply {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))

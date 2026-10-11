@@ -120,6 +120,20 @@ class MeshtasticProtocolTest {
     }
 
     @Test
+    fun ownNameIsTheNameTheConnectedRadioAnnounces() {
+        fun record(num: Int, long: String, short: String = "") = MeshtasticProtocol.parseFromRadio(
+            MeshProtos.FromRadio.newBuilder().setNodeInfo(
+                MeshProtos.NodeInfo.newBuilder().setNum(num).setUser(MeshProtos.User.newBuilder().setLongName(long).setShortName(short)),
+            ).build(),
+        ) as RadioEvent.NodeDiscovered
+        assertEquals("Meshtastic 8d88", MeshtasticProtocol.ownName(record(0x8d88, "Meshtastic 8d88"), 0x8d88L, null))
+        assertEquals("another radio's record changes nothing", "Meshtastic 8d88", MeshtasticProtocol.ownName(record(0x1111, "Ama"), 0x8d88L, "Meshtastic 8d88"))
+        assertNull("no own number yet", MeshtasticProtocol.ownName(record(0x8d88, "Meshtastic 8d88"), null, null))
+        assertNull("a record with no name is not a name", MeshtasticProtocol.ownName(record(0x8d88, " "), 0x8d88L, "Old"))
+        assertEquals("the short name, as chats show it", "8d88", MeshtasticProtocol.ownName(record(0x8d88, "", "8d88"), 0x8d88L, null))
+    }
+
+    @Test
     fun wantConfigRoundTripsConfigNonce() {
         val encoded = MeshtasticProtocol.buildWantConfig(12345)
         val toRadio = MeshProtos.ToRadio.parseFrom(encoded)

@@ -66,15 +66,47 @@ Add chat features people know from WhatsApp and Telegram, as long as they fit a 
   - The radio must be within Bluetooth range at the time.
 - **Version c (with the hub):** the hub keeps the message and sends it on time.
 
-## How-to pictures still to make
+### Choosing the time, revised (owner approved 2026-10-12; to build)
 
-Each new gesture needs a talking picture (tip and Help screen), as the existing ones have:
+The three preset choices above are replaced: the owner does not want preset times. "Later" opens a window, "Envoyer plus tard", in the app's own look (large outlined buttons, yellow when chosen):
 
-- long press on a message (the menu, deleting)
-- forward
-- long press on a chat (pin, delete)
-- reply and reactions (wave 2)
-- scheduling (wave 3)
+- **Day:** "Aujourd'hui" and "Demain" buttons, and a full-width calendar button, "Choisir un jour". The calendar button opens Android's `DatePickerDialog`, limited to today through one year ahead. The chosen day then shows on the button ("jeudi 15 octobre") in yellow.
+- **Time:** a large time button between − and +.
+  - Tapping the time opens Android's `TimePickerDialog` (the hour, then the minutes; 24-hour or 12-hour as the phone is set).
+  - − and + move the time by 15 minutes. − stops at the next quarter hour after now.
+  - A sun or a moon beside the time shows day or night (moon from 19:00 to 06:00).
+- **Opens on:** today, one hour from now, rounded up to the next quarter hour.
+- **A time already past:** it turns red, "Cette heure est passée." shows, and "Planifier" stays off until a later time is chosen.
+- **Speaker:** it reads the choice aloud ("Aujourd'hui à 17 h 45", "Demain à 8 h", "Le jeudi 15 octobre à 8 h").
+- **"Planifier"** plans the message.
+- **The planned row:** "Envoi à 18:15", "Envoi demain à 08:00", or for a later day "Envoi le jeudi 15 octobre à 08:00".
+- **New icons:** calendar, sun, moon.
+- **`PlanTimes`:** gives way to rules for the window's default time, the − floor, the past check and the one-year limit. These stay JVM-tested across midnight, month ends and the clock change.
+- **Reference:** `.local/visual-guide-mockups/phonemesh-howto-chat-r10.html`, section A, a working mockup.
+
+## How-to pictures (owner approved 2026-10-12; to build)
+
+Eight talking pictures, approved in round 10: `.local/visual-guide-mockups/phonemesh-howto-chat-r10.html`.
+
+- **Conventions:** the same kit as the visual guide (`HowToKit`, the finger, the wax band, 220 × 110 units). Every picture must match the real screens exactly: the app's own icons, its menus and their words.
+- **Port as before:** timings into `HowToScenes`, drawings into `HowToDrawings`, sentences into `HowTo` and the strings, then screenshots for review.
+- **Tips:** only "hold a message" is a one-time tip, shown once after a message has arrived and the "A message came" tip was closed. The other seven go in a new Help group, "Autres gestes" (EN "More you can do").
+
+| Scene | Sentence (EN / FR) |
+|---|---|
+| `hold` | Hold a message to see what you can do. / Maintenez un message pour voir ce que vous pouvez faire. |
+| `reply` | Tap "Reply" to answer one message. / Touchez « Répondre » pour répondre à un message. |
+| `react` | Tap a picture to answer quickly. / Touchez une image pour répondre vite. |
+| `forward` | Send the same words to another chat. / Envoyez les mêmes mots à une autre discussion. |
+| `delete` | Deleted here only. Others keep it. / Supprimé ici seulement. Les autres le gardent. |
+| `pin` | Hold a chat to pin it on top or delete it. / Maintenez une discussion pour l'épingler en haut ou la supprimer. |
+| `later` | Tap "Later" to send it at the time you choose. / Touchez « Plus tard » pour l'envoyer à l'heure choisie. |
+| `later_pick` | Tap the time for the clock, the calendar for another day. / Touchez l'heure pour l'horloge, le calendrier pour un autre jour. |
+
+UI changes these pictures require:
+- **"Transférer à…":** shows each chat's picture beside its name (the group's yellow square, a person's circle).
+- **The new time window:** see "Choosing the time, revised" above.
+- **`later_pick`:** its clock and calendar are drawn from screenshots of Android's real pickers in the app's green, taken once they are built.
 
 ## Later: considered and not built now
 

@@ -13,8 +13,11 @@ enum class Tip(val key: String, val place: TipPlace) {
     DELIVERY("delivery", TipPlace.CHAT),
 }
 
-/** What has happened in the open chat. [direct] is a private chat: only there can a message reach "Delivered". */
-data class TipFacts(val sent: Boolean, val failed: Boolean, val received: Boolean, val direct: Boolean)
+/**
+ * What has happened in the open chat. [direct] is a private chat: only there can a message reach "Delivered".
+ * [held] is a finger on the microphone: a recording started by a tap is locked, so sliding left does nothing.
+ */
+data class TipFacts(val sent: Boolean, val failed: Boolean, val received: Boolean, val direct: Boolean, val held: Boolean = true)
 
 object Tips {
     /** A tip left unused is offered again, in this many moments at most. */
@@ -30,7 +33,8 @@ object Tips {
             .minByOrNull { showings[it.key] ?: 0 }
 
     private fun due(tip: Tip, facts: TipFacts): Boolean = when (tip) {
-        Tip.CANCEL, Tip.LOCK, Tip.LISTEN -> true
+        Tip.CANCEL -> facts.held
+        Tip.LOCK, Tip.LISTEN -> true
         Tip.FAILED -> facts.failed
         Tip.ARRIVE -> facts.received
         // A group message ends at "Sent", so the picture that ends on "Delivered" belongs to private chats.

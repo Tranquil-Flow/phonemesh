@@ -439,6 +439,11 @@ class ConversationActivity : ScreenActivity() {
     private fun lockRecording() {
         core.recordLocked = true
         if (tip == Tip.LOCK) endTip(learned = true)
+        // No finger, so sliding left does nothing now: the cancel tip counts one showing and no other takes its place.
+        if (tip == Tip.CANCEL) {
+            endTip(learned = false)
+            tipped = TipPlace.RECORDING
+        }
         render()
     }
 
@@ -550,6 +555,7 @@ class ConversationActivity : ScreenActivity() {
                 failed = messages.any { it.status?.canResend == true },
                 received = messages.any { it.direction == Direction.IN },
                 direct = core.history.chat(chatId)?.kind != ChatKind.GROUP,
+                held = !core.recordLocked,
             )
             Tips.next(place, facts, core.settings.tipsShown, core.settings.tipShowings)?.let { showTip(it) }
         }

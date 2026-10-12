@@ -14,6 +14,14 @@ class TipsTest {
         assertNull(Tips.next(TipPlace.RECORDING, none, setOf("cancel", "lock")))
     }
 
+    @Test fun slidingLeftIsTaughtOnlyWhileAFingerHolds() {
+        val tapped = none.copy(held = false)
+        assertEquals(Tip.LOCK, Tips.next(TipPlace.RECORDING, tapped, emptySet()))
+        assertNull(Tips.next(TipPlace.RECORDING, tapped, setOf("lock")))
+        assertEquals("not due, so its fewer showings do not count", Tip.LOCK,
+            Tips.next(TipPlace.RECORDING, tapped, emptySet(), mapOf("lock" to 2)))
+    }
+
     @Test fun aDraftTeachesListen() {
         assertEquals(Tip.LISTEN, Tips.next(TipPlace.DRAFT, none, emptySet()))
         assertNull(Tips.next(TipPlace.DRAFT, none, setOf("listen")))

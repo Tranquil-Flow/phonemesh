@@ -814,10 +814,10 @@ class ConversationActivityTest {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }
         val a = open(group)
-        Views.tap(a, "mic")
+        touch(a, MotionEvent.ACTION_DOWN)
         assertNotNull(Views.tagged(a, "tip:cancel"))
         assertEquals("Changé d'avis ? Glissez à gauche.", Views.textOf(Views.tagged(a, "howto_sentence")!!))
-        Views.tap(a, "mic")
+        touch(a, MotionEvent.ACTION_UP, atMs = 1_500)
         assertNull("the recording ended, so its tip did", Views.tagged(a, "tip:cancel"))
         assertNotNull(Views.tagged(a, "tip:listen"))
         Views.tap(a, "tip_close")
@@ -889,6 +889,35 @@ class ConversationActivityTest {
         touch(a, MotionEvent.ACTION_UP, dxDp = -120f, atMs = 500)
         assertNull(core.draft(group))
         assertEquals("tip:lock", recordOnce(a))
+    }
+
+    @Test fun aTappedRecordingNeverTeachesSlidingLeft() {
+        TestCore.install()
+        val a = open(TestCore.onMain { core.groupChatId() })
+        Views.tap(a, "mic")
+        assertTrue(core.recordLocked)
+        assertNull("sliding does nothing in a locked recording", Views.tagged(a, "tip:cancel"))
+        assertNotNull(Views.tagged(a, "tip:lock"))
+        Views.tap(a, "mic")
+        assertEquals(mapOf("lock" to 1), core.settings.tipShowings)
+        assertTrue(core.settings.tipsShown.isEmpty())
+    }
+
+    @Test fun lockingByHandEndsTheCancelTipAsOneShowingAndBringsNoOther() {
+        TestCore.install()
+        val a = open(TestCore.onMain { core.groupChatId() })
+        touch(a, MotionEvent.ACTION_DOWN)
+        assertNotNull(Views.tagged(a, "tip:cancel"))
+        touch(a, MotionEvent.ACTION_MOVE, dyDp = -100f, atMs = 400)
+        assertTrue(core.recordLocked)
+        assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+        assertNull(Views.tagged(a, "tip:cancel"))
+        assertNull("not a second picture in the same recording", Views.tagged(a, "tip:lock"))
+        assertEquals(mapOf("cancel" to 1), core.settings.tipShowings)
+        assertTrue(core.settings.tipsShown.isEmpty())
+        touch(a, MotionEvent.ACTION_UP, dyDp = -100f, atMs = 500)
+        assertEquals(AppCore.RecordState.RECORDING, core.recordState)
+        assertNull(Views.tagged(a, "tip:lock"))
     }
 
     @Test fun rotationNeitherCountsAShowingNorChangesTheTip() {
@@ -1002,7 +1031,7 @@ class ConversationActivityTest {
             TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut", false)
         }
         val a = open(group)
-        Views.tap(a, "mic")
+        touch(a, MotionEvent.ACTION_DOWN)
         assertNotNull(Views.tagged(a, "tip:cancel"))
         Views.finish(a)
         Views.waitUntil { core.recordState == AppCore.RecordState.IDLE }
@@ -1125,7 +1154,7 @@ class ConversationActivityTest {
         assertTrue("the notice's picture is as wide as the notice", TestCore.onMain { picture.width == notice.width && picture.height * 2 == picture.width })
         assertNull("one picture at a time", Views.tagged(a, "tip:listen"))
         assertTrue(core.settings.tipsShown.isEmpty())
-        assertEquals("only the recording's tip had a moment", mapOf("cancel" to 1), core.settings.tipShowings)
+        assertEquals("only the recording's tip had a moment; a tapped recording teaches lock", mapOf("lock" to 1), core.settings.tipShowings)
         for (tag in listOf("draft_clear", "draft_play", "draft_send", "draft_text", "howto:toolong")) assertTrue(tag, whole(checkNotNull(Views.tagged(a, tag))))
         assertEquals(emptyList<String>(), A11yCheck.problems(a))
         // Editing ends the notice; the draft's own tip takes its turn.

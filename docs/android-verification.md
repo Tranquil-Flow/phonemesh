@@ -275,6 +275,7 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-11.
 - Writing: while speech becomes text the mic shows three moving dots and "Writing your words…" (`ConversationActivityTest`).
 - Names: the radio screen shows the name the radio announces; the shared chat is titled "Everyone nearby", or the radio's main channel name when its owner set one (preset names such as LongFast count as none) (`MeshtasticProtocolTest`, `RadioActivityTest`, `ChatsActivityTest`, `ConversationActivityTest`, `AppCoreTest`).
 - Not checked on a phone: the dots in motion (the tests turn animations off), the Stop fix with a finger, and both names read from a real radio. Pending — owner.
+- Later, 2026-10-12: the "slide left" tip shows only while a finger holds the microphone; locking by hand ends it as one showing, with no other tip in that recording (`TipsTest`, `ConversationActivityTest`). 363 selected tests, all passed; `07-recording-tip*.png` now shows a held recording.
 
 ## Radio region: Togo legal notes and results
 

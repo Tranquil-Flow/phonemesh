@@ -1,6 +1,7 @@
 package org.phonemesh.app
 
 import android.app.Activity
+import android.view.MotionEvent
 import androidx.test.platform.app.InstrumentationRegistry
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.RadioPeer
@@ -109,8 +110,20 @@ object ScreenStates {
         return screen
     }
 
+    /** A finger holds the microphone: only then does sliding left cancel, so only then is it taught. */
     fun recordingTip(): Activity {
-        val screen = recordingLocked()
+        TestCore.install()
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        val mic = checkNotNull(Views.tagged(screen, "mic"))
+        TestCore.onMain {
+            val down = MotionEvent.obtain(1_000, 1_000, MotionEvent.ACTION_DOWN, 100f, 100f, 0)
+            mic.dispatchTouchEvent(down)
+            down.recycle()
+        }
+        inst.waitForIdleSync()
+        val held = TestCore.onMain { TestCore.core.recordState == AppCore.RecordState.RECORDING && !TestCore.core.recordLocked }
+        expect(held, "recording held by a finger")
         expect(Views.tagged(screen, "tip:cancel") != null, "the first-recording tip")
         return screen
     }

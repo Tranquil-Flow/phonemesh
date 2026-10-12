@@ -264,6 +264,18 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10.
 - Pairing: `PairingWaitTest` (JVM, 8 tests) covers one connection call for a radio that is not paired yet, the wait outliving the usual time limits, refused pairing and the 90 s limit; `AppCoreTest` and `RadioActivityTest` cover what the screens show, through the fake radio. Pairing with a real radio: pending — owner.
 - The delivery tip shows only in a private chat (`TipsTest`, `ConversationActivityTest`).
 
+### Stop by touch, returning tips, writing dots, radio and chat names
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-11.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: arm64-v8a 12593485 B, armeabi-v7a 11636245 B, +241087 B over the size before the visual guide (budget 250,000 B).
+- Instrumented tests: 361 selected tests, all passed. `docs/screenshots-phase3/` holds 109 files; the new state, in light and dark, is the mic while words are being written (`07-writing*.png`).
+- Stop: a locked recording stops with a real touch, and a touch the mic declined stays declined until it ends (`ConversationActivityTest`).
+- Tips: a tip counts as learned only after its action or after it is closed; an unused tip comes back up to 3 times, the least shown first, one tip at a time (`TipsTest`, `SettingsTest`).
+- Writing: while speech becomes text the mic shows three moving dots and "Writing your words…" (`ConversationActivityTest`).
+- Names: the radio screen shows the name the radio announces; the shared chat is titled "Everyone nearby", or the radio's main channel name when its owner set one (preset names such as LongFast count as none) (`MeshtasticProtocolTest`, `RadioActivityTest`, `ChatsActivityTest`, `ConversationActivityTest`, `AppCoreTest`).
+- Not checked on a phone: the dots in motion (the tests turn animations off), the Stop fix with a finger, and both names read from a real radio. Pending — owner.
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

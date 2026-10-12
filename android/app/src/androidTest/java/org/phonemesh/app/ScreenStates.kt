@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import androidx.test.platform.app.InstrumentationRegistry
 import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.RadioPeer
+import org.phonemesh.core.RecordGesture
 import org.phonemesh.core.StoryTimeline
 
 /** Each screen in a realistic state, built on the fake radio and speech. Used by ScreenChecksTest and ScreenshotTour. */
@@ -121,6 +122,7 @@ object ScreenStates {
             mic.dispatchTouchEvent(down)
             down.recycle()
         }
+        Thread.sleep(RecordGesture.TAP_MS + 200) // past a tap: only a hold is taught its gestures
         inst.waitForIdleSync()
         val held = TestCore.onMain { TestCore.core.recordState == AppCore.RecordState.RECORDING && !TestCore.core.recordLocked }
         expect(held, "recording held by a finger")

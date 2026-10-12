@@ -53,6 +53,14 @@ class ConversationActivity : ScreenActivity() {
     private var downX = 0f
     private var downY = 0f
     private var downAt = 0L
+    /** The finger stayed past a tap ([RecordGesture.TAP_MS]): a quick tap locks at once and is taught no gesture. */
+    private var holdConfirmed = false
+    private val confirmHold = Runnable {
+        if (pressing && started != null) {
+            holdConfirmed = true
+            render()
+        }
+    }
     private val bubbles = BubbleAdapter()
     private lateinit var title: TextView
     private lateinit var people: TextView
@@ -392,8 +400,11 @@ class ConversationActivity : ScreenActivity() {
                 downX = event.rawX
                 downY = event.rawY
                 downAt = event.eventTime
+                holdConfirmed = false
+                window.decorView.removeCallbacks(confirmHold)
                 pressing = true // before startRecording: its render must not treat the press as lost
                 pressing = core.startRecording(chatId)
+                if (pressing) window.decorView.postDelayed(confirmHold, RecordGesture.TAP_MS)
                 return pressing
             }
             MotionEvent.ACTION_MOVE -> if (pressing) {
@@ -439,7 +450,7 @@ class ConversationActivity : ScreenActivity() {
     private fun lockRecording() {
         core.recordLocked = true
         if (tip == Tip.LOCK) endTip(learned = true)
-        // No finger, so sliding left does nothing now: the cancel tip counts one showing and no other takes its place.
+        // No finger, so sliding left does nothing now: the cancel tip counts one showing and the lock tip does not follow.
         if (tip == Tip.CANCEL) {
             endTip(learned = false)
             tipped = TipPlace.RECORDING
@@ -490,6 +501,7 @@ class ConversationActivity : ScreenActivity() {
     override fun onScreenStop() {
         val owner = started ?: return
         started = null
+        window.decorView.removeCallbacks(confirmHold)
         if (!isChangingConfigurations) endTip(learned = false, owner.settings)
         owner.closeChat(chatId)
         if (!isChangingConfigurations) {
@@ -555,7 +567,7 @@ class ConversationActivity : ScreenActivity() {
                 failed = messages.any { it.status?.canResend == true },
                 received = messages.any { it.direction == Direction.IN },
                 direct = core.history.chat(chatId)?.kind != ChatKind.GROUP,
-                held = !core.recordLocked,
+                held = pressing && holdConfirmed && !core.recordLocked,
             )
             Tips.next(place, facts, core.settings.tipsShown, core.settings.tipShowings)?.let { showTip(it) }
         }

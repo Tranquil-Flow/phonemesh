@@ -276,6 +276,7 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-11.
 - Names: the radio screen shows the name the radio announces; the shared chat is titled "Everyone nearby", or the radio's main channel name when its owner set one (preset names such as LongFast count as none) (`MeshtasticProtocolTest`, `RadioActivityTest`, `ChatsActivityTest`, `ConversationActivityTest`, `AppCoreTest`).
 - Not checked on a phone: the dots in motion (the tests turn animations off), the Stop fix with a finger, and both names read from a real radio. Pending — owner.
 - Later, 2026-10-12: the "slide left" tip shows only while a finger holds the microphone; locking by hand ends it as one showing, with no other tip in that recording (`TipsTest`, `ConversationActivityTest`). 363 selected tests, all passed; `07-recording-tip*.png` now shows a held recording.
+- Later, 2026-10-12: the "slide up to lock" tip follows the same rule. A finger counts as holding only after `RecordGesture.TAP_MS` (300 ms), so a quick tap with a real finger never flashes a tip; a rotation lifts the hold and its tip leaves without counting a showing (`TipsTest`, `ConversationActivityTest`). 364 selected tests, all passed; `07-recording*.png` (a tapped recording) now shows no tip.
 
 ## Radio region: Togo legal notes and results
 

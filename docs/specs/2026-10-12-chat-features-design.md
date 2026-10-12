@@ -1,7 +1,7 @@
 # Familiar chat features
 
 **Date:** 2026-10-12
-**Status:** wave 1 built; waves 2 and 3 decided, to build.
+**Status:** waves 1, 2 and 3 built.
 **Read with:** `docs/design.md` (wire contract: 200 UTF-8 bytes on TEXT_MESSAGE_APP, tag included), `docs/android-design.md`.
 
 ## Goal
@@ -20,6 +20,7 @@ Add chat features people know from WhatsApp and Telegram, as long as they fit a 
 8. The features under "Later" are kept for possible future work, not dropped.
 9. Replies and reactions use Meshtastic's own `reply_id` and `emoji` fields (wave 2).
 10. Scheduled version b uses `USE_EXACT_ALARM`: no prompt. The app is shared as an APK; Google Play would refuse this permission for a chat app.
+11. Read new messages aloud: off by default (decided by the developer for privacy; the owner can change it).
 
 ## Wave 1: no radio use (built)
 
@@ -49,14 +50,20 @@ Add chat features people know from WhatsApp and Telegram, as long as they fit a 
 - **Only a message that went over the radio can be answered or reacted to:** one that never left the phone has no id the other phones know.
 
 
-## Wave 3: scheduled messages, versions a and b (decided: `USE_EXACT_ALARM`)
+## Wave 3: scheduled messages, versions a and b (built; `USE_EXACT_ALARM`)
 
-- The person records a message as usual and chooses "Later" with picture buttons: in 1 hour, this evening, tomorrow morning. There is no clock picker.
-- **Version a:** the message waits on the phone and goes out when its time comes while Phonemesh is open and connected. If the app was closed, it goes out the next time it opens, marked late. No new permissions.
-- **Version b:** the phone wakes at the time and sends even with the app closed.
-  - This needs an exact-alarm permission and a short foreground service with a notification while it connects and sends, plus the radio within Bluetooth range.
-  - It shares this machinery with the opt-in background roaming setting in the accounts design.
-  - Permission: `USE_EXACT_ALARM` (no prompt), with `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_CONNECTED_DEVICE`. The service shows a notification while it sends; on Android 13 and later that notification needs `POST_NOTIFICATIONS`, and the service still runs if the person refuses it.
+- **Planning:** the person records as usual, then taps "Later" under the draft. Picture buttons with their times: "In 1 hour", "This evening" (19:00, offered only before 18:00), "Tomorrow morning" (08:00). There is no clock picker (`PlanTimes`, JVM-tested across midnight, month ends and the clock change).
+  - The draft, and any reply being made, becomes a planned message, kept apart from messages (history version 4, table `planned`).
+  - Planned messages wait above the draft, each with its time ("Sends at 19:00" / "Sends tomorrow at 08:00") and a cross ("Do not send").
+- **Version a:** `AppCore.sendDue()` sends every due message when the radio becomes ready, from a timer while the process lives (again a minute later when the radio was away or sending was blocked by the region), and from the alarm.
+  - A sent planned message is an ordinary message with "Planned for 19:00" under it. One the radio refuses becomes a failure the person can resend.
+- **Version b:** an exact alarm (`setExactAndAllowWhileIdle`; `USE_EXACT_ALARM` from Android 13, `SCHEDULE_EXACT_ALARM` up to 12; an inexact alarm if Android still refuses) wakes `PlannedReceiver`. That starts `PlannedSendService`, a short foreground service (Android 14's `shortService`) with a quiet notification.
+  - The service holds the radio like an open screen (the same reconnect and the same grace before letting go), sends what is due, and stops when nothing is due or after 90 s. What is left goes out when the app next opens.
+- **Permissions added:** `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` (Android 12 and older), `FOREGROUND_SERVICE`, `POST_NOTIFICATIONS` (declared, never asked for).
+  - The `connectedDevice` service type was dropped for `shortService`: it would need the Bluetooth permission at start, and a refused one would make Android crash the app. So `FOREGROUND_SERVICE_CONNECTED_DEVICE` is not used.
+- **Limits:**
+  - Alarms do not survive a phone restart (no `RECEIVE_BOOT_COMPLETED`); after a restart, planned messages go out when the app next opens.
+  - The radio must be within Bluetooth range at the time.
 - **Version c (with the hub):** the hub keeps the message and sends it on time.
 
 ## How-to pictures still to make

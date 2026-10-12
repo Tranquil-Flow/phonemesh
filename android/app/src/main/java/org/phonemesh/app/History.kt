@@ -24,7 +24,12 @@ data class Message(
     val language: String?, val time: Long, val packetId: Long?, val status: DeliveryStatus?,
     /** The radio id of the message this one answers; null when it answers none. */
     val replyTo: Long? = null,
+    /** When a planned message was meant to go; null for one sent at once. */
+    val plannedAt: Long? = null,
 )
+
+/** A message waiting on this phone until [due]; it becomes a sent message when it goes out. */
+data class Planned(val id: Long, val chatId: Long, val text: String, val language: String, val due: Long, val replyTo: Long?)
 
 /** A reaction ([emoji]) to the message whose radio id is [target]; [senderId] is null for the user's own. */
 data class Reaction(val target: Long, val senderId: String?, val emoji: String)
@@ -56,6 +61,13 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         if (oldVersion < 3) {
             db.execSQL("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
             db.execSQL("ALTER TABLE messages ADD COLUMN reaction INTEGER NOT NULL DEFAULT 0")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN planned_at INTEGER")
+            db.execSQL(
+                "CREATE TABLE planned (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL REFERENCES chats(id), " +
+                    "text TEXT NOT NULL, language TEXT NOT NULL, due INTEGER NOT NULL, reply_to INTEGER)",
+            )
         }
     }
 
@@ -120,10 +132,41 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     fun addIncoming(
         chatId: Long, senderId: String, text: String, language: String?, time: Long, countUnread: Boolean,
         packetId: Long? = null, replyTo: Long? = null,
-    ): Message = insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread, packetId, replyTo)
+    ): Message = insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread, packetId, replyTo, null)
 
-    fun addOutgoing(chatId: Long, text: String, language: String, time: Long, replyTo: Long? = null): Message =
-        insert(chatId, Direction.OUT, null, text, language, time, DeliveryStatus.WAITING, false, null, replyTo)
+    fun addOutgoing(chatId: Long, text: String, language: String, time: Long, replyTo: Long? = null, plannedAt: Long? = null): Message =
+        insert(chatId, Direction.OUT, null, text, language, time, DeliveryStatus.WAITING, false, null, replyTo, plannedAt)
+
+    fun addPlanned(chatId: Long, text: String, language: String, due: Long, replyTo: Long?): Planned {
+        val id = writableDatabase.insertOrThrow("planned", null, ContentValues().apply {
+            put("chat_id", chatId); put("text", text); put("language", language); put("due", due); put("reply_to", replyTo)
+        })
+        return Planned(id, chatId, text, language, due, replyTo)
+    }
+
+    fun planned(chatId: Long): List<Planned> = plannedWhere("chat_id = ?", arrayOf(chatId.toString()))
+
+    /** Every planned message whose time has come, oldest first. */
+    fun duePlanned(now: Long): List<Planned> = plannedWhere("due <= ?", arrayOf(now.toString()))
+
+    fun nextDue(): Long? = readableDatabase.rawQuery("SELECT MIN(due) FROM planned", null)
+        .use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+
+    fun deletePlanned(id: Long): Boolean = writableDatabase.delete("planned", "id = ?", arrayOf(id.toString())) > 0
+
+    private fun plannedWhere(where: String, args: Array<String>): List<Planned> =
+        readableDatabase.query("planned", null, where, args, null, null, "due, id").use { c ->
+            buildList {
+                while (c.moveToNext()) {
+                    val reply = c.getColumnIndexOrThrow("reply_to")
+                    add(Planned(
+                        c.getLong(c.getColumnIndexOrThrow("id")), c.getLong(c.getColumnIndexOrThrow("chat_id")),
+                        c.getString(c.getColumnIndexOrThrow("text")), c.getString(c.getColumnIndexOrThrow("language")),
+                        c.getLong(c.getColumnIndexOrThrow("due")), if (c.isNull(reply)) null else c.getLong(reply),
+                    ))
+                }
+            }
+        }
 
     /** One reaction per person per message: a new one replaces theirs. Reactions are not messages: no bubble, no unread. */
     fun addReaction(chatId: Long, senderId: String?, emoji: String, target: Long, time: Long) {
@@ -156,7 +199,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     private fun insert(
         chatId: Long, direction: Direction, senderId: String?, text: String, language: String?, time: Long,
-        status: DeliveryStatus?, countUnread: Boolean, packetId: Long?, replyTo: Long?,
+        status: DeliveryStatus?, countUnread: Boolean, packetId: Long?, replyTo: Long?, plannedAt: Long?,
     ): Message {
         val db = writableDatabase
         db.beginTransaction()
@@ -164,7 +207,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             val id = db.insertOrThrow("messages", null, ContentValues().apply {
                 put("chat_id", chatId); put("direction", direction.name); put("sender_id", senderId); put("text", text)
                 put("language", language); put("time", time); put("delivery", status?.name)
-                put("packet_id", packetId); put("reply_to", replyTo)
+                put("packet_id", packetId); put("reply_to", replyTo); put("planned_at", plannedAt)
             })
             db.execSQL(
                 "UPDATE chats SET last_activity = MAX(last_activity, ?), unread = unread + ? WHERE id = ?",
@@ -190,7 +233,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val messages = db.delete("messages", "chat_id = ?", arrayOf(chatId.toString()))
+            val messages = db.delete("messages", "chat_id = ?", arrayOf(chatId.toString())) +
+                db.delete("planned", "chat_id = ?", arrayOf(chatId.toString()))
             val removed = if (chat.kind == ChatKind.GROUP) {
                 db.execSQL("UPDATE chats SET unread = 0 WHERE id = ?", arrayOf<Any>(chatId))
                 0
@@ -273,10 +317,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             packetId = if (isNull(packet)) null else getLong(packet),
             status = if (isNull(delivery)) null else DeliveryStatus.valueOf(getString(delivery)),
             replyTo = getColumnIndexOrThrow("reply_to").let { if (isNull(it)) null else getLong(it) },
+            plannedAt = getColumnIndexOrThrow("planned_at").let { if (isNull(it)) null else getLong(it) },
         )
     }
 
     private companion object {
-        const val VERSION = 3
+        const val VERSION = 4
     }
 }

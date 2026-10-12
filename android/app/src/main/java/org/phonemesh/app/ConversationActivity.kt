@@ -39,6 +39,8 @@ import android.widget.TextView
 import org.phonemesh.core.DayName
 import org.phonemesh.core.Days
 import org.phonemesh.core.DraftFit
+import org.phonemesh.core.PlanChoice
+import org.phonemesh.core.PlanTimes
 import org.phonemesh.core.DraftRules
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.RecordGesture
@@ -78,6 +80,8 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var draftBox: LinearLayout
     private lateinit var replyBar: LinearLayout
     private lateinit var replyQuote: TextView
+    private lateinit var plannedBox: LinearLayout
+    private lateinit var later: View
     private lateinit var draftText: TextView
     private lateinit var draftEdit: EditText
     private lateinit var tooLong: TextView
@@ -154,7 +158,12 @@ class ConversationActivity : ScreenActivity() {
             setPadding(pad(), pad() / 2, pad(), 0)
         }
         val bars = listOf(micBarView(), draftBarView())
-        root.addView(fitted(replyBarView(), draftArea(), tipBox))
+        plannedBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "planned"
+            setPadding(pad(), 0, pad() / 2, 0)
+        }
+        root.addView(fitted(plannedBox, replyBarView(), draftArea(), tipBox))
         bars.forEach { root.addView(it) }
         show(root)
         built = true
@@ -300,6 +309,12 @@ class ConversationActivity : ScreenActivity() {
         draftBox.addView(draftText)
         draftBox.addView(draftEdit)
         draftBox.addView(tooLong)
+        later = Ui.button(this, palette, getString(R.string.later), R.drawable.ic_clock).apply {
+            tag = "draft_later"
+            setOnClickListener { askWhenToSend() }
+        }
+        draftBox.addView(later, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            .apply { gravity = Gravity.END; topMargin = pad() / 2 })
         cutPanel = howTo("toolong", compact = !roomy) { getString(R.string.draft_cut) }
         cutNotice = FrameLayout(this).apply {
             tag = "draft_cut"
@@ -561,6 +576,10 @@ class ConversationActivity : ScreenActivity() {
         Looks.radio(radioStatus, palette, core.connected)
         val messages = core.history.messages(chatId)
         bubbles.update(chat, messages, core.history.reactions(chatId).groupBy { it.target })
+        renderPlanned()
+        // Planning needs whole words that fit, like Send; not while typing, and not while the region card asks first.
+        val regionAsks = core.region.blocksSending || core.region.phase != RegionPhase.Idle
+        later.visibility = if (core.draft(chatId) != null && !editing && !regionAsks && core.draftFit(chatId) == DraftFit.FITS) View.VISIBLE else View.GONE
         val answering = core.replyTarget(chatId)
         replyBar.visibility = if (answering != null) View.VISIBLE else View.GONE
         replyQuote.text = answering?.text.orEmpty()
@@ -781,6 +800,11 @@ class ConversationActivity : ScreenActivity() {
             })
         }
         box.addView(line)
+        message.plannedAt?.let { planned ->
+            box.addView(Ui.text(this, getString(R.string.planned_for, DateFormat.getTimeFormat(this).format(Date(planned))), palette.muted).apply {
+                tag = "planned_for:${message.id}"
+            })
+        }
         message.packetId?.let { bubbles.reactions[it] }?.takeIf { it.isNotEmpty() }?.let { list ->
             val shown = list.groupBy { it.emoji }.entries.joinToString("  ") { (emoji, all) -> if (all.size > 1) "$emoji ${all.size}" else emoji }
             box.addView(Ui.content(Ui.text(this, shown, palette.text).apply {
@@ -843,6 +867,53 @@ class ConversationActivity : ScreenActivity() {
                 show(Actions.confirm(this, R.string.delete_title, R.string.delete_only_here, R.string.delete) { core.deleteMessage(message.id) })
             },
         )))
+    }
+
+    /** Planned messages wait above the draft: when each goes, its words, and a cross to keep it from going. */
+    private fun renderPlanned() {
+        plannedBox.removeAllViews()
+        val zone = ZoneId.systemDefault()
+        for (planned in core.history.planned(chatId)) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                tag = "planned:${planned.id}"
+            }
+            row.addView(Ui.icon(this, R.drawable.ic_clock, palette.muted, 28))
+            val words = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(pad() / 2, 0, pad() / 2, 0)
+            }
+            val time = DateFormat.getTimeFormat(this).format(Date(planned.due))
+            val today = Days.date(planned.due, zone) == Days.date(System.currentTimeMillis(), zone)
+            val whenText = getString(if (today) R.string.sends_at else R.string.sends_tomorrow, time)
+            words.addView(Ui.text(this, whenText, palette.text, bold = true).apply { tag = "planned_when:${planned.id}" })
+            words.addView(Ui.content(Ui.text(this, planned.text, palette.muted).apply {
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+            }))
+            row.addView(words, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.planned_cancel)).apply {
+                tag = "planned_cancel:${planned.id}"
+                setOnClickListener { core.cancelPlanned(planned.id) }
+            })
+            plannedBox.addView(row)
+        }
+    }
+
+    /** In 1 hour, this evening (before 18:00 only), tomorrow morning: pictures and times, never a clock to set. */
+    private fun askWhenToSend() {
+        val format = DateFormat.getTimeFormat(this)
+        show(Actions.menu(this, palette, PlanTimes.choices(System.currentTimeMillis(), ZoneId.systemDefault()).map { (choice, due) ->
+            val (tag, label) = when (choice) {
+                PlanChoice.IN_ONE_HOUR -> "plan_hour" to R.string.plan_in_hour
+                PlanChoice.THIS_EVENING -> "plan_evening" to R.string.plan_evening
+                PlanChoice.TOMORROW_MORNING -> "plan_morning" to R.string.plan_morning
+            }
+            Actions.Item(tag, label, R.drawable.ic_clock, getString(label, format.format(Date(due)))) {
+                if (core.plan(chatId, due)) stopEditing()
+            }
+        }))
     }
 
     /** A few large reactions; one goes out as one radio message. */

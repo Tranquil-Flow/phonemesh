@@ -157,6 +157,16 @@
     <string name="reaction_not_sent">Pas envoyé. Vérifiez la radio.</string>
     <string name="reactions">Réactions : %1$s</string>
     <string name="message_actions">Répondre, réagir, copier, transférer, supprimer</string>
+    <string name="later">Plus tard</string>
+    <string name="plan_in_hour">Dans 1 heure (%1$s)</string>
+    <string name="plan_evening">Ce soir (%1$s)</string>
+    <string name="plan_morning">Demain matin (%1$s)</string>
+    <string name="sends_at">Envoi à %1$s</string>
+    <string name="sends_tomorrow">Envoi demain à %1$s</string>
+    <string name="planned_cancel">Ne pas envoyer</string>
+    <string name="planned_for">Prévu pour %1$s</string>
+    <string name="planned_channel">Messages prévus</string>
+    <string name="planned_sending">Envoi d\'un message prévu</string>
     <string name="today">Aujourd\'hui</string>
     <string name="yesterday">Hier</string>
     <string name="pack_download_button">Télécharger (%1$d Mo)</string>

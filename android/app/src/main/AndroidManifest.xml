@@ -1,6 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Planned messages sent while the app is closed (owner decision, 2026-10-12): an exact alarm wakes a short
+         foreground service that connects the radio. The notification is shown when allowed and never asked for.
+         A short service needs no further permission, so a refused Bluetooth permission cannot stop it reaching
+         the foreground (which Android would punish with a crash). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <application android:label="Phonemesh" android:theme="@style/Theme.Phonemesh"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
@@ -27,6 +35,8 @@
         <activity android:name=".HelpActivity" android:exported="false" />
         <activity android:name=".RegionActivity" android:exported="false" />
         <activity android:name=".ConversationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <receiver android:name=".PlannedReceiver" android:exported="false" />
+        <service android:name=".PlannedSendService" android:exported="false" android:foregroundServiceType="shortService" />
         <provider android:name=".ShareProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true" />
     </application>

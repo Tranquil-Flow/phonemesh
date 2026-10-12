@@ -314,6 +314,19 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Spec: `docs
 - New screenshot state `05-conversation-reply` (light and dark): reactions under a message, a reply bubble with its quote, the reply bar above a draft. `docs/screenshots-phase3/` holds 111 files.
 - Not checked with a real radio yet: replies and reactions between two phones, and how the official Meshtastic app shows ours.
 
+### Familiar chat features, wave 3: planned messages
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Spec: `docs/specs/2026-10-12-chat-features-design.md`.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: +269623 B over the size before the visual guide (allowance 350,000 B); this wave added about 7.4 KB.
+- Instrumented tests: 394 selected tests, all passed. JVM: `PlanTimesTest` (4): the three choices, "this evening" only before 18:00, month end and the clock change, just after midnight.
+- Permissions added and pinned by `AppBoundaryTest`: `USE_EXACT_ALARM`, `SCHEDULE_EXACT_ALARM` (Android 12 and older), `FOREGROUND_SERVICE`, `POST_NOTIFICATIONS` (never asked for). The service is a `shortService`, so `FOREGROUND_SERVICE_CONNECTED_DEVICE` is not used.
+- Planning: "Plus tard" under a draft that fits, never while the region card asks; the draft and its reply become a planned message (history version 4); planned messages wait above the draft with "Envoi à …" / "Envoi demain à …" and a cross; the alarm follows the next one due (`AppCoreTest`, `HistoryTest`, `ConversationActivityTest`).
+- Sending: a due message waits while the radio is away and goes out when it becomes ready, as a reply when one was planned, marked "Prévu pour …" (`AppCoreTest`, `ConversationActivityTest`). The alarm's receiver started the service, which sent the due message and stopped (`AppCoreTest`); on the emulator the service reached the foreground.
+- New screenshot state `06-draft-planned` (light and dark). `05-conversation-reply*` and `06-draft-cut*` now show "Plus tard" under the draft. `docs/screenshots-phase3/` holds 113 files.
+- A first gate run showed "Plus tard" pushing the region card's listening tip off the screen; it is now hidden while the region card asks, and `13-region-blocked-send` checks that.
+- Not checked on a phone: an alarm waking the closed app (Android's background-start exemption for exact alarms), the notification, and the Fairphone (Android 10) path without a service type.
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

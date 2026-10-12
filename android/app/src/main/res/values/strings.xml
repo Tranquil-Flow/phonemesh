@@ -160,6 +160,16 @@
     <string name="reaction_not_sent">Not sent. Check the radio.</string>
     <string name="reactions">Reactions: %1$s</string>
     <string name="message_actions">Reply, react, copy, forward, delete</string>
+    <string name="later">Later</string>
+    <string name="plan_in_hour">In 1 hour (%1$s)</string>
+    <string name="plan_evening">This evening (%1$s)</string>
+    <string name="plan_morning">Tomorrow morning (%1$s)</string>
+    <string name="sends_at">Sends at %1$s</string>
+    <string name="sends_tomorrow">Sends tomorrow at %1$s</string>
+    <string name="planned_cancel">Do not send</string>
+    <string name="planned_for">Planned for %1$s</string>
+    <string name="planned_channel">Planned messages</string>
+    <string name="planned_sending">Sending a planned message</string>
     <string name="today">Today</string>
     <string name="yesterday">Yesterday</string>
     <string name="pack_download_button">Download (%1$d MB)</string>

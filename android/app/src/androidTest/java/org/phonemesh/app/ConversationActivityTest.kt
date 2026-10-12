@@ -1069,6 +1069,40 @@ class ConversationActivityTest {
         assertEquals("Réactions : 👍 2", TestCore.onMain { shown.contentDescription.toString() })
     }
 
+    @Test fun laterPlansTheDraftAndShowsItAboveTheDraftUntilCancelled() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Rendez-vous au puits") }
+        val a = open(group)
+        Views.tap(a, "draft_later")
+        val menu = checkNotNull(a.dialogForTest)
+        val offered = TestCore.onMain { Views.descendants(menu.window!!.decorView).mapNotNull { it.tag as? String }.filter { it.startsWith("plan_") } }
+        assertTrue(offered.toString(), offered.first() == "plan_hour" && offered.last() == "plan_morning")
+        tapInDialog(menu, "plan_hour")
+        assertNull("the draft became the planned message", core.draft(group))
+        val planned = core.history.planned(group).single()
+        val zone = java.time.ZoneId.systemDefault()
+        val time = TestCore.onMain { android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(planned.due)) }
+        val sameDay = org.phonemesh.core.Days.date(planned.due, zone) == java.time.LocalDate.now(zone)
+        assertEquals(if (sameDay) "Envoi à $time" else "Envoi demain à $time", Views.textOf(Views.tagged(a, "planned_when:${planned.id}")!!))
+        assertEquals(planned.due, TestCore.alarm.at)
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        Views.tap(a, "planned_cancel:${planned.id}")
+        assertTrue(core.history.planned(group).isEmpty())
+        assertNull(Views.tagged(a, "planned:${planned.id}"))
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun aPlannedMessageThatWentOutSaysWhenItWasPlanned() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val planned = java.time.LocalDate.now().atTime(8, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val sent = TestCore.onMain { core.history.addOutgoing(group, "Bonjour à tous", "fr", System.currentTimeMillis(), plannedAt = planned) }
+        val a = open(group)
+        val time = TestCore.onMain { android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(planned)) }
+        assertEquals("Prévu pour $time", Views.textOf(Views.tagged(a, "planned_for:${sent.id}")!!))
+    }
+
     @Test fun copyPutsTheWordsOnTheClipboard() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }

@@ -39,13 +39,17 @@ class AppBoundaryTest {
         }
     }
 
-    @Test fun requestedPermissionsAreExactlyMicrophoneRadioAndPackDownloads() {
+    @Test fun requestedPermissionsAreExactlyMicrophoneRadioPackDownloadsAndPlannedSending() {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val requested=context.packageManager.getPackageInfo(context.packageName,PackageManager.GET_PERMISSIONS)
             .requestedPermissions.orEmpty().toSet()
         // Network is used only for setup-time pack downloads (PackDownloads).
         val expected=mutableSetOf(Manifest.permission.RECORD_AUDIO,Manifest.permission.INTERNET,
-            Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT)
+            Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT,
+            // Planned messages sent while the app is closed (owner decision, 2026-10-12): an exact alarm and a short
+            // foreground service; its notification is never asked for.
+            Manifest.permission.USE_EXACT_ALARM,Manifest.permission.FOREGROUND_SERVICE,Manifest.permission.POST_NOTIFICATIONS)
+        if(Build.VERSION.SDK_INT<=32) expected+=Manifest.permission.SCHEDULE_EXACT_ALARM
         // Legacy radio permissions are declared with maxSdkVersion and only requested on old Android.
         if(Build.VERSION.SDK_INT<=30) expected+=listOf(Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,Manifest.permission.ACCESS_FINE_LOCATION)

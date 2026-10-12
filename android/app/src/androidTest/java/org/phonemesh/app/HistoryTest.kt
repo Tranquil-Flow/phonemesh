@@ -117,6 +117,26 @@ class HistoryTest {
         assertNull(history.message(hello.id)!!.replyTo)
     }
 
+    @Test fun plannedMessagesWaitApartAndComeDueInOrder() {
+        val group = history.groupChat()
+        val kofi = history.directChat("!0000aaaa", "Kofi")
+        val late = history.addPlanned(group.id, "Ce soir", "fr", 3_000, null)
+        val soon = history.addPlanned(kofi.id, "Bientôt", "fr", 1_000, 77)
+        assertEquals(1_000L, history.nextDue())
+        assertTrue("not a message yet", history.messages(group.id).isEmpty())
+        assertEquals(listOf(soon), history.duePlanned(2_000))
+        assertEquals(listOf(soon, late), history.duePlanned(3_000))
+        assertEquals(listOf(late), history.planned(group.id))
+        assertTrue(history.deletePlanned(soon.id))
+        assertFalse(history.deletePlanned(soon.id))
+        assertEquals(3_000L, history.nextDue())
+        val sent = history.addOutgoing(group.id, "Ce soir", "fr", 3_500, plannedAt = 3_000)
+        assertEquals(3_000L, history.message(sent.id)!!.plannedAt)
+        assertTrue(history.deleteChat(group.id))
+        assertTrue("deleting a chat drops what it planned", history.planned(group.id).isEmpty())
+        assertNull(history.nextDue())
+    }
+
     @Test fun deletingAMessageKeepsItsChatAndTheOthers() {
         val chat = history.directChat("!0000aaaa", "Kofi")
         val first = history.addIncoming(chat.id, "!0000aaaa", "Un", "fr", 1, false)

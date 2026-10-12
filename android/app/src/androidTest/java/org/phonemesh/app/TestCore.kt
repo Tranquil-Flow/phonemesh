@@ -28,6 +28,14 @@ object TestCore {
     lateinit var radio: FakeRadio
     lateinit var speech: FakeSpeech
     val access = FakeAccess()
+
+    /** The planned-message alarm the core last set; null when none is armed. Never touches the real AlarmManager. */
+    val alarm = FakePlanAlarm()
+
+    class FakePlanAlarm : PlanAlarm {
+        var at: Long? = null
+        override fun set(at: Long?) { this.at = at }
+    }
     val core: AppCore get() = AppCore.get(context)
     @Volatile var nextTheme = ThemeMode.AUTO
 
@@ -59,7 +67,7 @@ object TestCore {
         val built = AppCore.create(
             context.applicationContext,
             radioFactory = { listener -> FakeRadio(listener).also { radio = it } },
-            speech = chosenSpeech, historyName = HISTORY, prefsName = PREFS, access = access,
+            speech = chosenSpeech, historyName = HISTORY, prefsName = PREFS, access = access, planAlarm = alarm,
         )
         if (language != null) built.settings.language = language
         // Only a fresh install overrides appearance; restart must retain the saved choice.

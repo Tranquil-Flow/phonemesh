@@ -131,6 +131,65 @@ class AppCoreTest {
         assertEquals("nothing kept when the radio cannot take it", 2, core.history.reactions(group).size)
     }
 
+    @Test fun planningKeepsTheDraftAsAPlannedMessageAndArmsTheAlarm() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        val due = System.currentTimeMillis() + 3_600_000
+        main { core.setDraft(group, "Rendez-vous ce soir") }
+        assertTrue(main { core.plan(group, due) })
+        assertNull("the draft becomes the planned message", core.draft(group))
+        val planned = core.history.planned(group).single()
+        assertEquals("Rendez-vous ce soir", planned.text)
+        assertEquals(due, TestCore.alarm.at)
+        assertTrue("nothing goes out before its time", radio.sent.isEmpty())
+        assertFalse(core.hasDuePlanned())
+        main { core.sendDue() }
+        assertTrue(radio.sent.isEmpty())
+        main { core.cancelPlanned(planned.id) }
+        assertTrue(core.history.planned(group).isEmpty())
+        assertNull("no alarm once nothing is planned", TestCore.alarm.at)
+        assertFalse("an empty draft cannot be planned", main { core.plan(group, due) })
+    }
+
+    @Test fun aDueMessageWaitsForTheRadioThenGoesOutAsAReplyMarkedPlanned() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        main { radio.receive("!0000aaaa", "[pm1:fr] Tu viens ?", false, org.phonemesh.ble.TextMark(packetId = 500)) }
+        val asked = core.history.lastMessage(group)!!
+        val due = System.currentTimeMillis() - 1_000
+        main {
+            core.setReplyTarget(group, asked.id)
+            core.setDraft(group, "J'arrive")
+            assertTrue(core.plan(group, due))
+            radio.connected(false)
+            core.sendDue()
+        }
+        assertTrue("the radio is away: it waits", radio.sent.isEmpty())
+        assertTrue(core.hasDuePlanned())
+        assertNull("the reply was planned with it", core.replyTarget(group))
+        main { radio.connected(true) }
+        val sent = radio.sent.single()
+        assertEquals(500L, sent.replyTo)
+        val message = core.history.lastMessage(group)!!
+        assertEquals("J'arrive", message.text)
+        assertEquals(due, message.plannedAt)
+        assertEquals(500L, message.replyTo)
+        assertEquals(sent.packetId, message.packetId)
+        assertFalse(core.hasDuePlanned())
+        assertNull(TestCore.alarm.at)
+    }
+
+    @Test fun theAlarmsServiceSendsWhatIsDueAndStops() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        main { core.setDraft(group, "Bonjour de loin"); assertTrue(core.plan(group, System.currentTimeMillis() - 1)) }
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        main { PlannedReceiver().onReceive(context, null) }
+        Views.waitUntil(10_000) { radio.sent.isNotEmpty() && !core.hasDuePlanned() }
+        assertEquals("Bonjour de loin", core.history.lastMessage(group)!!.text)
+        assertEquals("[pm1:fr] Bonjour de loin", radio.sent.single().text)
+    }
+
     @Test fun theGuideAgainBringsBackTipsAndTheHintButKeepsSetup() {
         TestCore.install()
         main {

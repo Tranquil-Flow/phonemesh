@@ -7,7 +7,8 @@ import android.widget.LinearLayout
 
 /** What a long press offers: one large button with a picture per choice, then Cancel. Deleting asks once more. */
 object Actions {
-    class Item(val tag: String, val label: Int, val icon: Int, val run: () -> Unit)
+    /** [text] replaces the [label] resource when the words carry a value (a time, a name). */
+    class Item(val tag: String, val label: Int, val icon: Int, val text: String? = null, val run: () -> Unit)
 
     fun menu(activity: Activity, palette: Palette, items: List<Item>): AlertDialog {
         val space = Ui.dp(activity, 16)
@@ -17,7 +18,7 @@ object Actions {
         }
         val dialog = AlertDialog.Builder(activity).setView(list).setNegativeButton(R.string.cancel, null).create()
         for (item in items) {
-            list.addView(Ui.button(activity, palette, activity.getString(item.label), item.icon).apply {
+            list.addView(Ui.button(activity, palette, item.text ?: activity.getString(item.label), item.icon).apply {
                 tag = item.tag
                 gravity = Gravity.START or Gravity.CENTER_VERTICAL
                 setOnClickListener {

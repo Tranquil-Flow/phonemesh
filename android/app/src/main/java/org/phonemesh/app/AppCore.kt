@@ -47,6 +47,7 @@ class AppCore private constructor(
     val history: History,
     val settings: Settings,
     val access: DeviceAccess,
+    private val planAlarm: PlanAlarm,
 ) : MeshRadio.Listener {
     enum class Change { RADIO, SCAN, MESSAGES, DELIVERY, PEERS, PACKS, RECORDING, PLAYBACK, NOTE, REGION }
     enum class RecordState { IDLE, RECORDING, TRANSCRIBING }
@@ -139,12 +140,15 @@ class AppCore private constructor(
         private set
     private var collecting = false
     private val poll = Runnable { pollDownloads() }
+    private val planCheck = Runnable { sendDue() }
     var lastNote: UiText? = null
         private set
 
     init {
         history.expireWaiting()
         history.groupChat(PRIMARY_CHANNEL)
+        // A new process (or a phone that restarted) arms the next planned message again.
+        armPlans()
         work.execute { runCatching { downloads().sweep() }.onFailure { Log.w(TAG, "download sweep failed", it) } }
     }
 
@@ -317,6 +321,7 @@ class AppCore private constructor(
         if (becameReady) readyAddress?.let { settings.setRadioChannelName(it, radio.channelName()) }
         // Only a real change of the link reaches the region check: ready means a new handshake has finished.
         if (becameReady) region.onReady()
+        if (becameReady) sendDue()
         if (was && !connected) region.onLost()
         if (connected != was || attempting) changed(Change.RADIO)
     }
@@ -570,6 +575,66 @@ class AppCore private constructor(
         } catch (e: RuntimeException) {
             Log.w(TAG, "send failed", e)
             history.setStatus(messageId, DeliveryStatus.FAILED)
+        }
+    }
+
+    // ---- Planned messages
+
+    /**
+     * Keeps the draft (and the reply being made) as a message planned for [due]. It goes out when its time comes and the
+     * radio is ready: at once while the app is open, through the alarm and a short background send while it is closed.
+     */
+    fun plan(chatId: Long, due: Long): Boolean {
+        val text = drafts[chatId]?.trim().orEmpty()
+        val language = currentLanguage().tag
+        if (DraftRules.fit(text, language) != DraftFit.FITS) return false
+        history.chat(chatId) ?: return false
+        if (playingId == DRAFT_PLAYBACK) stopPlayback()
+        history.addPlanned(chatId, text, language, due, replyTarget(chatId)?.packetId)
+        drafts.remove(chatId)
+        cutDrafts.remove(chatId)
+        replyTargets.remove(chatId)
+        armPlans()
+        changed(Change.MESSAGES)
+        return true
+    }
+
+    fun cancelPlanned(id: Long) {
+        if (!history.deletePlanned(id)) return
+        armPlans()
+        changed(Change.MESSAGES)
+    }
+
+    fun hasDuePlanned(): Boolean = history.duePlanned(System.currentTimeMillis()).isNotEmpty()
+
+    /**
+     * Sends every planned message whose time has come, when the radio is ready and may send. One the radio refuses
+     * becomes a failure the person can resend, like any message. The rest waits for the radio.
+     */
+    fun sendDue() {
+        val now = System.currentTimeMillis()
+        val due = history.duePlanned(now)
+        if (due.isNotEmpty() && connected && !region.blocksSending) {
+            for (planned in due) {
+                history.deletePlanned(planned.id)
+                val chat = history.chat(planned.chatId) ?: continue
+                val message = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
+                settings.firstMessageSent = true
+                transmit(message.id, planned.text, planned.language, chat, planned.replyTo)
+            }
+            changed(Change.MESSAGES)
+        }
+        armPlans()
+    }
+
+    /** The alarm for the next planned message, and a check while this process lives (again a minute later when the radio was away). */
+    private fun armPlans() {
+        main.removeCallbacks(planCheck)
+        val next = history.nextDue()
+        planAlarm.set(next)
+        if (next != null) {
+            val wait = next - System.currentTimeMillis()
+            main.postDelayed(planCheck, if (wait > 0) wait else PLAN_RETRY_MS)
         }
     }
 
@@ -871,6 +936,8 @@ class AppCore private constructor(
         const val HISTORY_DB = "history.db"
         /** A reaction is one emoji, perhaps with a skin tone or joined parts; anything longer is not a reaction. */
         const val MAX_REACTION_BYTES = 32
+        /** A due message the radio could not take yet is tried again this often while the app lives. */
+        const val PLAN_RETRY_MS = 60_000L
         /** The reactions offered: few, large, and readable without words. */
         val REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
         private const val MAX_FOUND = 50
@@ -890,6 +957,7 @@ class AppCore private constructor(
             historyName: String? = HISTORY_DB,
             prefsName: String = Settings.PREFS,
             access: DeviceAccess? = null,
+            planAlarm: PlanAlarm? = null,
         ): AppCore = AppCore(
             app,
             radioFactory ?: { listener -> BleMeshTransport(app, listener) },
@@ -897,6 +965,7 @@ class AppCore private constructor(
             History(app, historyName),
             Settings(app, prefsName),
             access ?: PhoneAccess(app),
+            planAlarm ?: SystemPlanAlarm(app),
         )
 
         /** "Radio 4a2f": the last four hex digits of a radio id with no name yet. */

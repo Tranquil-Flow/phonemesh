@@ -201,6 +201,24 @@ object ScreenStates {
         return screen
     }
 
+    /** A message planned for tomorrow morning above a new draft, which offers "Later" again. */
+    fun draftPlanned(): Activity {
+        TestCore.install()
+        val group = seedChats()
+        TestCore.onMain {
+            val core = TestCore.core
+            core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet()
+            core.setDraft(group, "Le marché ouvre à huit heures.")
+            val tomorrow = java.time.LocalDate.now().plusDays(1).atTime(8, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            check(core.plan(group, tomorrow))
+            core.setDraft(group, "Et pensez au pain.")
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        expect(tagsOf(screen, "planned:").size == 1, "one planned message above the draft")
+        expect(Views.tagged(screen, "draft_later") != null, "the Later button under the draft")
+        return screen
+    }
+
     /** The first failed message: its tip, with the large picture, between the messages and the microphone. */
     fun conversationTip(): Activity {
         TestCore.install()
@@ -464,6 +482,7 @@ object ScreenStates {
         expect(Views.tagged(screen, "card_region") != null, "the region card")
         expect(Views.tagged(screen, "region_yes") != null, "the Yes button")
         expect(Views.tagged(screen, "draft_send")?.let { TestCore.onMain { it.isEnabled } } == false, "Send is off")
+        expect(Views.tagged(screen, "draft_later")?.let { TestCore.onMain { it.isShown } } != true, "no Later while the region card asks")
         return screen
     }
 
@@ -532,6 +551,7 @@ object ScreenStates {
         "05-conversation-reply" to { conversationReply() },
         "06-draft-too-long" to { draftTooLong() },
         "06-draft-cut" to { draftCut() },
+        "06-draft-planned" to { draftPlanned() },
         "07-recording" to { recordingLocked() },
         "07-recording-tip" to { recordingTip() },
         "07-writing" to { writing() },

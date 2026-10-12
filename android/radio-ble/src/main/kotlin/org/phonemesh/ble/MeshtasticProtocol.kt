@@ -55,7 +55,10 @@ internal object MeshtasticProtocol {
             .build()
             .toByteArray()
 
-    fun buildTextToRadio(text: String, destinationId: String, channel: Int, packetId: Int = newPacketId(), hopLimit: Int = 3): ByteArray {
+    fun buildTextToRadio(
+        text: String, destinationId: String, channel: Int, packetId: Int = newPacketId(), hopLimit: Int = 3,
+        replyTo: Long = 0, reaction: Boolean = false,
+    ): ByteArray {
         val destination = parseDestinationId(destinationId)
         require(channel in 0..7) { "channel must be in 0..7" }
         require(hopLimit in 0..7) { "hop limit must be in 0..7" }
@@ -63,10 +66,15 @@ internal object MeshtasticProtocol {
         require(payload.isNotEmpty()) { "text must not be empty" }
         require(payload.size <= MAX_TEXT_BYTES) { "text is ${payload.size} UTF-8 bytes; max is $MAX_TEXT_BYTES" }
 
+        require(!reaction || replyTo != 0L) { "a reaction needs the message it answers" }
         val data = MeshProtos.Data.newBuilder()
             .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
             .setPayload(ByteString.copyFrom(payload))
             .setWantResponse(false)
+            .apply {
+                if (replyTo != 0L) setReplyId(replyTo.toInt())
+                if (reaction) setEmoji(1)
+            }
             .build()
         val packet = MeshProtos.MeshPacket.newBuilder()
             .setTo(destination.toInt())
@@ -173,7 +181,10 @@ internal object MeshtasticProtocol {
             return null
         }
         val sender = nodeId(packet.`from`.toLong())
-        return RadioEvent.Text(sender, text, packet.channel, packet.to.toLong() and BROADCAST_NUM)
+        return RadioEvent.Text(
+            sender, text, packet.channel, packet.to.toLong() and BROADCAST_NUM,
+            packet.id.toLong() and BROADCAST_NUM, decoded.replyId.toLong() and BROADCAST_NUM, decoded.emoji != 0,
+        )
     }
 
     /**
@@ -249,7 +260,10 @@ internal sealed class RadioEvent {
     data class AdminLora(val from: Long, val lora: ConfigProtos.Config.LoRaConfig?, val passkey: ByteString) : RadioEvent()
     data class PrimaryChannel(val name: String?) : RadioEvent()
     data class NodeDiscovered(val nodeNum: Long, val id: String, val name: String) : RadioEvent()
-    data class Text(val sender: String, val text: String, val channel: Int, val to: Long) : RadioEvent()
+    data class Text(
+        val sender: String, val text: String, val channel: Int, val to: Long,
+        val packetId: Long = 0, val replyTo: Long = 0, val reaction: Boolean = false,
+    ) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()
     data class Routing(
         val from: Long,

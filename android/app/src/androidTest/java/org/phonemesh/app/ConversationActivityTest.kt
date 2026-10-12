@@ -991,7 +991,7 @@ class ConversationActivityTest {
         val label = TestCore.onMain {
             bubble.createAccessibilityNodeInfo().actionList.single { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK }.label
         }
-        assertEquals("TalkBack says what a long press offers", "Copier, Transférer, Supprimer", label)
+        assertEquals("TalkBack says what a long press offers", "Répondre, réagir, copier, transférer, supprimer", label)
         assertEquals("the bubble is named by its words", "Bonjour", TestCore.onMain { bubble.contentDescription.toString() })
         val heard = TestCore.onMain { Views.descendants(a.window.decorView).first { it.tag == "bubble:${kept.id}" }.contentDescription.toString() }
         assertEquals("a group message also says who wrote it", "${TestCore.onMain { core.senderName("!1234abcd") }}, Salut", heard)
@@ -1012,6 +1012,61 @@ class ConversationActivityTest {
         assertNull(Views.tagged(a, "bubble:${gone.id}"))
         assertNotNull(Views.tagged(a, "bubble:${kept.id}"))
         assertTrue("nothing goes over the radio", TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun replyingShowsTheQuoteAboveTheDraftThenInTheBubble() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val asked = TestCore.onMain {
+            core.history.addIncoming(group, "!1234abcd", "On se voit au puits ?", "fr", System.currentTimeMillis(), false, packetId = 500)
+        }
+        val a = open(group)
+        val menu = longPress(a, asked.id)
+        assertEquals(listOf("action_reply", "action_react", "action_copy", "action_share", "action_delete"), dialogTags(menu))
+        tapInDialog(menu, "action_reply")
+        assertNotNull(Views.tagged(a, "reply_bar"))
+        assertEquals("On se voit au puits ?", Views.textOf(Views.tagged(a, "reply_quote")!!))
+        Views.tap(a, "reply_cancel")
+        assertNull("the cross stops replying", Views.tagged(a, "reply_bar"))
+        tapInDialog(longPress(a, asked.id), "action_reply")
+        TestCore.onMain { core.setDraft(group, "Oui, à midi"); core.openChat(group) }
+        inst.waitForIdleSync()
+        Views.tap(a, "draft_send")
+        assertEquals(500L, TestCore.radio.sent.single().replyTo)
+        assertNull(Views.tagged(a, "reply_bar"))
+        val answer = core.history.lastMessage(group)!!
+        assertEquals("On se voit au puits ?", Views.textOf(Views.tagged(a, "quote:${answer.id}")!!))
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+    }
+
+    @Test fun aReplyToAMessageThisPhoneNeverHadSaysSo() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val answer = TestCore.onMain {
+            core.history.addIncoming(group, "!1234abcd", "Moi aussi", "fr", System.currentTimeMillis(), false, packetId = 900, replyTo = 899)
+        }
+        val a = open(group)
+        assertEquals("Un message absent de ce téléphone", Views.textOf(Views.tagged(a, "quote:${answer.id}")!!))
+    }
+
+    @Test fun aReactionIsChosenFromLargePicturesAndShowsUnderTheMessage() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val news = TestCore.onMain {
+            core.history.addIncoming(group, "!1234abcd", "Le marché est ouvert", "fr", System.currentTimeMillis(), false, packetId = 700)
+        }
+        TestCore.onMain { core.history.addReaction(group, "!0000bbbb", "👍", 700, System.currentTimeMillis()) }
+        val a = open(group)
+        assertEquals("👍", Views.textOf(Views.tagged(a, "reactions:${news.id}")!!))
+        tapInDialog(longPress(a, news.id), "action_react")
+        val picker = checkNotNull(a.dialogForTest)
+        assertEquals(AppCore.REACTIONS.indices.map { "react:$it" },
+            TestCore.onMain { Views.descendants(picker.window!!.decorView).mapNotNull { it.tag as? String }.filter { it.startsWith("react:") } })
+        tapInDialog(picker, "react:0")
+        assertTrue(TestCore.radio.sent.single().reaction)
+        assertEquals("👍 2", Views.textOf(Views.tagged(a, "reactions:${news.id}")!!))
+        val shown = checkNotNull(Views.tagged(a, "reactions:${news.id}"))
+        assertEquals("Réactions : 👍 2", TestCore.onMain { shown.contentDescription.toString() })
     }
 
     @Test fun copyPutsTheWordsOnTheClipboard() {

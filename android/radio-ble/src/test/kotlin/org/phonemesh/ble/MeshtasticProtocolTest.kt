@@ -50,6 +50,50 @@ class MeshtasticProtocolTest {
     }
 
     @Test
+    fun aReplyAndAReactionUseMeshtasticsOwnFields() {
+        val plain = MeshProtos.ToRadio.parseFrom(MeshtasticProtocol.buildTextToRadio("hello", "^all", 0, packetId = 5)).packet.decoded
+        assertEquals("no reply: the field stays unset", 0, plain.replyId)
+        assertEquals(0, plain.emoji)
+        val reply = MeshProtos.ToRadio.parseFrom(
+            MeshtasticProtocol.buildTextToRadio("[pm1:fr] Oui", "^all", 0, packetId = 6, replyTo = 0xfedcba98L),
+        ).packet.decoded
+        assertEquals(0xfedcba98L.toInt(), reply.replyId)
+        assertEquals(0, reply.emoji)
+        val reaction = MeshProtos.ToRadio.parseFrom(
+            MeshtasticProtocol.buildTextToRadio("👍", "!1234abcd", 0, packetId = 7, replyTo = 42, reaction = true),
+        ).packet.decoded
+        assertEquals(42, reaction.replyId)
+        assertEquals(1, reaction.emoji)
+        assertEquals("👍", reaction.payload.toStringUtf8())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun aReactionNeedsTheMessageItAnswers() {
+        MeshtasticProtocol.buildTextToRadio("👍", "^all", 0, packetId = 8, reaction = true)
+    }
+
+    @Test
+    fun fromRadioTextKeepsItsIdAndTheReplyAndReactionMarks() {
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)
+            .setPayload(ByteString.copyFromUtf8("❤️"))
+            .setReplyId(0xfedcba98L.toInt())
+            .setEmoji(1)
+            .build()
+        val packet = MeshProtos.MeshPacket.newBuilder()
+            .setFrom(0x89abcdef.toInt()).setTo(0xffffffff.toInt()).setId(0x80000001L.toInt()).setDecoded(data).build()
+        val event = MeshtasticProtocol.parseFromRadio(MeshProtos.FromRadio.newBuilder().setPacket(packet).build()) as RadioEvent.Text
+        assertEquals("ids read as unsigned", 0x80000001L, event.packetId)
+        assertEquals(0xfedcba98L, event.replyTo)
+        assertTrue(event.reaction)
+        val plain = MeshtasticProtocol.parseFromRadio(MeshProtos.FromRadio.newBuilder().setPacket(
+            packet.toBuilder().setDecoded(data.toBuilder().clearReplyId().clearEmoji()),
+        ).build()) as RadioEvent.Text
+        assertEquals(0L, plain.replyTo)
+        assertEquals(false, plain.reaction)
+    }
+
+    @Test
     fun fromRadioTextMessageMapsSenderPortPayloadAndChannel() {
         val data = MeshProtos.Data.newBuilder()
             .setPortnum(Portnums.PortNum.TEXT_MESSAGE_APP)

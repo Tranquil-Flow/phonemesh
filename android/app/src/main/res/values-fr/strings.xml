@@ -150,6 +150,13 @@
     <string name="delete_chat">Supprimer la discussion</string>
     <string name="delete_chat_title">Supprimer cette discussion ?</string>
     <string name="read_new_aloud">Lire les nouveaux messages à voix haute</string>
+    <string name="reply">Répondre</string>
+    <string name="react">Réagir</string>
+    <string name="reply_cancel">Ne pas répondre</string>
+    <string name="quote_missing">Un message absent de ce téléphone</string>
+    <string name="reaction_not_sent">Pas envoyé. Vérifiez la radio.</string>
+    <string name="reactions">Réactions : %1$s</string>
+    <string name="message_actions">Répondre, réagir, copier, transférer, supprimer</string>
     <string name="today">Aujourd\'hui</string>
     <string name="yesterday">Hier</string>
     <string name="pack_download_button">Télécharger (%1$d Mo)</string>

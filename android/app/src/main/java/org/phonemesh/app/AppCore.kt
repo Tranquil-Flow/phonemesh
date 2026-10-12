@@ -11,6 +11,7 @@ import org.phonemesh.ble.DeliveryState
 import org.phonemesh.ble.MeshRadio
 import org.phonemesh.ble.RadioPeer
 import org.phonemesh.ble.RegionResult
+import org.phonemesh.ble.TextMark
 import org.phonemesh.core.CatalogEntry
 import org.phonemesh.core.CountryRegions
 import org.phonemesh.core.DeliveryRules
@@ -117,6 +118,7 @@ class AppCore private constructor(
         private set
     private val drafts = HashMap<Long, String>()
     private val cutDrafts = HashSet<Long>()
+    private val replyTargets = HashMap<Long, Long>()
     var recordState = RecordState.IDLE
         private set
     var recordingChatId: Long? = null
@@ -356,8 +358,13 @@ class AppCore private constructor(
         changed(Change.PEERS)
     }
 
-    /** Only the primary channel in 3a. Malformed text is dropped (logged), never shown. */
-    override fun onText(sender: String, text: String, channel: Int, direct: Boolean) {
+    override fun onText(sender: String, text: String, channel: Int, direct: Boolean) = onText(sender, text, channel, direct, TextMark())
+
+    /**
+     * Only the primary channel in 3a. Malformed text is dropped (logged), never shown. A reaction (Meshtastic's emoji mark)
+     * is the emoji alone, as the official apps send it, and is kept under the message it answers, not as a bubble.
+     */
+    override fun onText(sender: String, text: String, channel: Int, direct: Boolean, mark: TextMark) {
         if (channel != PRIMARY_CHANNEL) return
         val received = try {
             MessageCodec.inspectIncoming(text)
@@ -366,7 +373,17 @@ class AppCore private constructor(
             return
         }
         val chat = if (direct) history.directChat(sender, knownName(sender)) else history.groupChat(PRIMARY_CHANNEL)
-        val message = history.addIncoming(chat.id, sender, received.text, received.language, System.currentTimeMillis(), countUnread = openChatId != chat.id)
+        if (mark.reaction) {
+            val emoji = text.trim()
+            if (mark.replyTo == 0L || emoji.toByteArray(Charsets.UTF_8).size > MAX_REACTION_BYTES) return
+            history.addReaction(chat.id, sender, emoji, mark.replyTo, System.currentTimeMillis())
+            changed(Change.MESSAGES)
+            return
+        }
+        val message = history.addIncoming(
+            chat.id, sender, received.text, received.language, System.currentTimeMillis(), countUnread = openChatId != chat.id,
+            packetId = mark.packetId.takeIf { it != 0L }, replyTo = mark.replyTo.takeIf { it != 0L },
+        )
         changed(Change.MESSAGES)
         // Read aloud only while a screen is open, the microphone is free and nothing else is playing: never cut a voice off.
         if (settings.readAloud && observers.isNotEmpty() && recordState == RecordState.IDLE && playingId == null) play(message.id)
@@ -521,12 +538,13 @@ class AppCore private constructor(
         if (DraftRules.fit(text, language) != DraftFit.FITS) return false
         val chat = history.chat(chatId) ?: return false
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
-        val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis())
+        val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis(), replyTarget(chatId)?.packetId)
         drafts.remove(chatId)
         cutDrafts.remove(chatId)
+        replyTargets.remove(chatId)
         // Before any notification: observers read setup state from this flag while they render.
         settings.firstMessageSent = true
-        transmit(message.id, text, language, chat)
+        transmit(message.id, text, language, chat, message.replyTo)
         changed(Change.MESSAGES)
         return true
     }
@@ -539,20 +557,53 @@ class AppCore private constructor(
         // Like send: no region yet, or a region write is running. Nothing goes out and the message stays as it is.
         if (region.blocksSending) { changed(Change.REGION); return false }
         history.setStatus(messageId, DeliveryStatus.WAITING)
-        transmit(messageId, message.text, message.language ?: currentLanguage().tag, chat)
+        transmit(messageId, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)
         changed(Change.DELIVERY)
         return true
     }
 
     /** A radio that is not ready makes the message a failure the user can resend. */
-    private fun transmit(messageId: Long, text: String, language: String, chat: Chat) {
+    private fun transmit(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?) {
         val destination = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
         try {
-            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destination, PRIMARY_CHANNEL))
+            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destination, PRIMARY_CHANNEL, replyTo ?: 0L))
         } catch (e: RuntimeException) {
             Log.w(TAG, "send failed", e)
             history.setStatus(messageId, DeliveryStatus.FAILED)
         }
+    }
+
+    /** The message the next send in [chatId] answers; only messages that went over the radio can be answered. */
+    fun replyTarget(chatId: Long): Message? = replyTargets[chatId]?.let { history.message(it) }?.takeIf { it.packetId != null }
+
+    fun setReplyTarget(chatId: Long, messageId: Long?) {
+        if (messageId == null) replyTargets.remove(chatId) else replyTargets[chatId] = messageId
+        changed(Change.MESSAGES)
+    }
+
+    /** What a reply bubble quotes: the answered message on this phone, or null when this phone never had it. */
+    fun quoted(message: Message): Message? = message.replyTo?.let { history.byRadioId(message.chatId, it) }
+
+    /**
+     * Sends [emoji] as a reaction to a message that went over the radio: one radio message, the emoji alone with
+     * Meshtastic's reply and emoji marks. Not tracked for delivery. Nothing is kept when the radio cannot take it.
+     */
+    fun react(messageId: Long, emoji: String): Boolean {
+        val message = history.message(messageId) ?: return false
+        val target = message.packetId ?: return false
+        val chat = history.chat(message.chatId) ?: return false
+        if (region.blocksSending) { changed(Change.REGION); return false }
+        val destination = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
+        try {
+            radio.send(emoji, destination, PRIMARY_CHANNEL, replyTo = target, reaction = true)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "reaction not sent", e)
+            note(UiText(R.string.reaction_not_sent))
+            return false
+        }
+        history.addReaction(chat.id, null, emoji, target, System.currentTimeMillis())
+        changed(Change.MESSAGES)
+        return true
     }
 
     fun pinChat(chatId: Long, pinned: Boolean) {
@@ -818,6 +869,10 @@ class AppCore private constructor(
         const val SCAN_WAIT_MS = 30_000L
         const val POLL_MS = 1_000L
         const val HISTORY_DB = "history.db"
+        /** A reaction is one emoji, perhaps with a skin tone or joined parts; anything longer is not a reaction. */
+        const val MAX_REACTION_BYTES = 32
+        /** The reactions offered: few, large, and readable without words. */
+        val REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
         private const val MAX_FOUND = 50
         private const val IMPORT_PROGRESS_STEP = 5_000_000L
         private const val TAG = "AppCore"

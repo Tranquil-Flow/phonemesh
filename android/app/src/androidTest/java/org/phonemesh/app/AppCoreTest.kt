@@ -78,6 +78,59 @@ class AppCoreTest {
         assertTrue(radio.sent.isEmpty())
     }
 
+    @Test fun aReplyCarriesTheAnsweredRadioIdAndEndsAfterSending() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        main { radio.receive("!0000aaaa", "[pm1:fr] On se voit ?", false, org.phonemesh.ble.TextMark(packetId = 500)) }
+        val asked = core.history.lastMessage(group)!!
+        assertEquals("the radio id is kept", 500L, asked.packetId)
+        main { core.setReplyTarget(group, asked.id) }
+        assertEquals(asked.id, core.replyTarget(group)!!.id)
+        val answer = sendIn(group, "Oui, à midi")
+        assertEquals(500L, answer.replyTo)
+        assertEquals(500L, radio.sent.single().replyTo)
+        assertFalse(radio.sent.single().reaction)
+        assertNull("the reply ends with the send", core.replyTarget(group))
+        assertEquals(asked.id, core.quoted(answer)!!.id)
+        sendIn(group, "Et toi ?")
+        assertEquals("the next message answers nothing", 0L, radio.sent.last().replyTo)
+    }
+
+    @Test fun aMessageThatNeverWentOutCannotBeAnswered() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        val mine = main { core.history.addOutgoing(group, "Brouillon", "fr", 1) }
+        main { core.setReplyTarget(group, mine.id) }
+        assertNull(core.replyTarget(group))
+        assertFalse(main { core.react(mine.id, "👍") })
+        assertTrue(radio.sent.isEmpty())
+    }
+
+    @Test fun reactionsGoOutAsMeshtasticReactionsAndArriveUnderTheirMessage() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        main { radio.receive("!0000aaaa", "[pm1:fr] Le marché est ouvert", false, org.phonemesh.ble.TextMark(packetId = 700)) }
+        val news = core.history.lastMessage(group)!!
+        val unreadBefore = core.history.chat(group)!!.unread
+        assertTrue(main { core.react(news.id, "👍") })
+        val sent = radio.sent.single()
+        assertEquals("👍", sent.text)
+        assertEquals("^all", sent.destinationId)
+        assertTrue(sent.reaction)
+        assertEquals(700L, sent.replyTo)
+        main { core.settings.readAloud = true; core.observe { } }
+        main { radio.receive("!0000bbbb", "❤️", false, org.phonemesh.ble.TextMark(packetId = 701, replyTo = 700, reaction = true)) }
+        assertEquals(listOf(Reaction(700, null, "👍"), Reaction(700, "!0000bbbb", "❤️")), core.history.reactions(group))
+        assertEquals("a reaction is not a message", news.id, core.history.lastMessage(group)!!.id)
+        assertEquals("nor unread", unreadBefore, core.history.chat(group)!!.unread)
+        assertTrue("nor read aloud", speech.spoken.isEmpty())
+        main { radio.receive("!0000bbbb", "x".repeat(40), false, org.phonemesh.ble.TextMark(packetId = 702, replyTo = 700, reaction = true)) }
+        assertEquals("too long to be a reaction: dropped", 2, core.history.reactions(group).size)
+        main { radio.connected(false) }
+        assertFalse(main { core.react(news.id, "🙏") })
+        assertEquals("nothing kept when the radio cannot take it", 2, core.history.reactions(group).size)
+    }
+
     @Test fun theGuideAgainBringsBackTipsAndTheHintButKeepsSetup() {
         TestCore.install()
         main {

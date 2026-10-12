@@ -301,6 +301,19 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Spec: `docs
 - A first gate run caught every bubble stretched to full width (the row became vertical for the divider); fixed and covered by a test before this record.
 - Still to make: how-to pictures for the message and chat long presses and for forwarding.
 
+### Familiar chat features, wave 2: replies and reactions
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Spec: `docs/specs/2026-10-12-chat-features-design.md`.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: +262175 B over the size before the visual guide (allowance 350,000 B); this wave added about 10.3 KB.
+- Instrumented tests: 387 selected tests, all passed. JVM: `MeshtasticProtocolTest` (18), including Meshtastic's `reply_id` and `emoji` fields both ways, ids read as unsigned, and a reaction refused without the message it answers.
+- Received messages keep their radio id; history version 3; a version-1 database still upgrades (`HistoryTest`).
+- Reply: the bar above the draft, its cross, the send carrying the answered id, the quote in the bubble, and "Un message absent de ce téléphone" (`AppCoreTest`, `ConversationActivityTest`).
+- Reactions: sent as the emoji alone with the reaction mark; one per person; never a bubble, unread or read aloud; dropped when over 32 bytes; nothing kept when the radio cannot take it (`AppCoreTest`, `HistoryTest`, `ConversationActivityTest`).
+- A message that never went out offers neither Reply nor React.
+- New screenshot state `05-conversation-reply` (light and dark): reactions under a message, a reply bubble with its quote, the reply bar above a draft. `docs/screenshots-phase3/` holds 111 files.
+- Not checked with a real radio yet: replies and reactions between two phones, and how the official Meshtastic app shows ours.
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

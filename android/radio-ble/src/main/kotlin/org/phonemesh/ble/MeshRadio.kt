@@ -4,6 +4,12 @@ package org.phonemesh.ble
  * The radio link the app talks to. [BleMeshTransport] is the real one; tests use a fake.
  * Every [Listener] callback is delivered on the main thread.
  */
+/**
+ * A received text's radio [packetId], the id of the message it answers ([replyTo], 0 for none) and whether it is a
+ * reaction (Meshtastic's `Data.reply_id` and `Data.emoji`): what the official apps use for replies and tapbacks.
+ */
+data class TextMark(val packetId: Long = 0, val replyTo: Long = 0, val reaction: Boolean = false)
+
 interface MeshRadio : AutoCloseable {
     interface Listener {
         fun onState(connected: Boolean, detail: String)
@@ -28,6 +34,9 @@ interface MeshRadio : AutoCloseable {
         /** [direct] is true when the message was addressed to this radio, false for a broadcast. */
         fun onText(sender: String, text: String, channel: Int, direct: Boolean)
 
+        /** The same text with its radio id and Meshtastic's reply and reaction marks; listeners that ignore them get [onText]. */
+        fun onText(sender: String, text: String, channel: Int, direct: Boolean, mark: TextMark) = onText(sender, text, channel, direct)
+
         /** A radio seen while scanning; [rssi] is its signal strength in dBm. */
         fun onDevice(address: String, name: String, rssi: Int)
 
@@ -46,7 +55,8 @@ interface MeshRadio : AutoCloseable {
     fun connect(address: String)
     fun disconnect()
     fun peers(): List<RadioPeer>
-    fun send(text: String, destinationId: String, channel: Int): Long
+    /** [replyTo] is the radio id of the message answered (0 for none); [reaction] marks [text] as a reaction to it. */
+    fun send(text: String, destinationId: String, channel: Int, replyTo: Long = 0, reaction: Boolean = false): Long
 
     /** The name the connected radio announces for itself, the one other radios show; null while away or when it has none. */
     fun ownName(): String?

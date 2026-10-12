@@ -100,6 +100,23 @@ class HistoryTest {
         assertFalse(history.deleteChat(kofi.id))
     }
 
+    @Test fun reactionsAreKeptApartFromMessagesAndOnePerPerson() {
+        val group = history.groupChat()
+        val hello = history.addIncoming(group.id, "!0000aaaa", "Salut", "fr", 1, false, packetId = 500)
+        history.addReaction(group.id, "!0000bbbb", "👍", 500, 2)
+        history.addReaction(group.id, "!0000bbbb", "❤️", 500, 3)
+        history.addReaction(group.id, null, "😂", 500, 4)
+        assertEquals("a reaction is not a bubble", listOf(hello.id), history.messages(group.id).map { it.id })
+        assertEquals("nor the chat's last message", hello.id, history.lastMessage(group.id)!!.id)
+        assertEquals("a new reaction replaces the person's last",
+            listOf(Reaction(500, "!0000bbbb", "❤️"), Reaction(500, null, "😂")), history.reactions(group.id))
+        assertEquals(hello.id, history.byRadioId(group.id, 500)!!.id)
+        assertNull(history.byRadioId(group.id, 501))
+        val reply = history.addOutgoing(group.id, "Oui", "fr", 5, replyTo = 500)
+        assertEquals(500L, history.message(reply.id)!!.replyTo)
+        assertNull(history.message(hello.id)!!.replyTo)
+    }
+
     @Test fun deletingAMessageKeepsItsChatAndTheOthers() {
         val chat = history.directChat("!0000aaaa", "Kofi")
         val first = history.addIncoming(chat.id, "!0000aaaa", "Un", "fr", 1, false)

@@ -36,15 +36,18 @@ Add chat features people know from WhatsApp and Telegram, as long as they fit a 
 - **Read new messages aloud:** a Settings switch, off by default because phones are often used in public.
   - A message is read only while a Phonemesh screen is open, the microphone is free and nothing else is playing.
 
-## Wave 2: replies and reactions (decided: Meshtastic's fields)
+## Wave 2: replies and reactions (built; Meshtastic's fields)
 
-- Both travel as ordinary text messages on TEXT_MESSAGE_APP, inside the 200-byte limit. Both need the radio id of incoming messages, which the history does not keep yet.
-- **Proposal (recommended):** use the two fields Meshtastic already carries in `Data`.
-  - `reply_id` means "this answers packet X". A reply sends only that id, not the quoted words; the quote is shown from this phone's own copy, and "a message you do not have" when the phone missed it.
-  - `emoji = 1` marks the text as a reaction.
-  - This costs no extra bytes, and the official Meshtastic apps show both properly.
-- **Alternative:** our own marker inside the text, about 12 bytes. Other apps would show the marker as raw text.
-- Each reaction is one radio message, so the picker offers a few large pictures (👍 ❤️ 😂 😮 😢 🙏) and reactions appear under the bubble. Reactions are not read aloud.
+- **Received messages keep their radio id** (`MeshPacket.id`), so replies and reactions can point at them. The history moves to version 3 (`messages.reply_to`, `messages.reaction`).
+- **Reply:** long press → "Reply". A bar above the draft shows the words being answered, with a cross to stop replying.
+  - The next Send carries `Data.reply_id` = the answered message's radio id. The quoted words are not sent, so a reply costs no extra bytes.
+  - A reply bubble shows the quote from this phone's own copy, or "A message not on this phone".
+- **React:** long press → "React" → six large pictures (👍 ❤️ 😂 😮 😢 🙏).
+  - A reaction goes out as the emoji alone, with `Data.emoji = 1` and `Data.reply_id`, as the official apps send it. It is one radio message, is not tracked for delivery, and is kept only once the radio took it.
+  - Reactions show under the bubble ("👍 2  ❤️"), one per person (a new one replaces theirs). They are never a bubble, never unread and never read aloud.
+  - A received reaction over 32 bytes is not a reaction and is dropped.
+- **Only a message that went over the radio can be answered or reacted to:** one that never left the phone has no id the other phones know.
+
 
 ## Wave 3: scheduled messages, versions a and b (decided: `USE_EXACT_ALARM`)
 

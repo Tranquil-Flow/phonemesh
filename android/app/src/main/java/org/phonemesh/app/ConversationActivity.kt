@@ -76,6 +76,8 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var people: TextView
     private lateinit var radioStatus: ImageView
     private lateinit var draftBox: LinearLayout
+    private lateinit var replyBar: LinearLayout
+    private lateinit var replyQuote: TextView
     private lateinit var draftText: TextView
     private lateinit var draftEdit: EditText
     private lateinit var tooLong: TextView
@@ -152,7 +154,7 @@ class ConversationActivity : ScreenActivity() {
             setPadding(pad(), pad() / 2, pad(), 0)
         }
         val bars = listOf(micBarView(), draftBarView())
-        root.addView(fitted(draftArea(), tipBox))
+        root.addView(fitted(replyBarView(), draftArea(), tipBox))
         bars.forEach { root.addView(it) }
         show(root)
         built = true
@@ -227,6 +229,30 @@ class ConversationActivity : ScreenActivity() {
     }.apply {
         orientation = LinearLayout.VERTICAL
         views.forEach { addView(it) }
+    }
+
+    /** Above the draft while a reply is being made: the words answered, and a cross to stop replying. */
+    private fun replyBarView(): View {
+        replyBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            tag = "reply_bar"
+            visibility = View.GONE
+            setPadding(pad(), pad() / 2, pad() / 2, 0)
+        }
+        replyBar.addView(Ui.icon(this, R.drawable.ic_reply, palette.muted, 28))
+        replyQuote = Ui.content(Ui.text(this, "", palette.muted).apply {
+            tag = "reply_quote"
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            setPadding(pad() / 2, 0, pad() / 2, 0)
+        })
+        replyBar.addView(replyQuote, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        replyBar.addView(Ui.iconButton(this, palette, R.drawable.ic_close, getString(R.string.reply_cancel)).apply {
+            tag = "reply_cancel"
+            setOnClickListener { core.setReplyTarget(chatId, null) }
+        })
+        return replyBar
     }
 
     private fun draftArea(): View {
@@ -534,7 +560,10 @@ class ConversationActivity : ScreenActivity() {
         Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) PeopleHeard.count(core.history.sendersHeard(chatId), null) else null)
         Looks.radio(radioStatus, palette, core.connected)
         val messages = core.history.messages(chatId)
-        bubbles.update(chat, messages)
+        bubbles.update(chat, messages, core.history.reactions(chatId).groupBy { it.target })
+        val answering = core.replyTarget(chatId)
+        replyBar.visibility = if (answering != null) View.VISIBLE else View.GONE
+        replyQuote.text = answering?.text.orEmpty()
         val recordingHere = core.recordState == AppCore.RecordState.RECORDING && core.recordingChatId == chatId
         // A finger on the microphone does not survive a rotation: the recording carries on, locked.
         if (recordingHere && !pressing) core.recordLocked = true
@@ -663,9 +692,12 @@ class ConversationActivity : ScreenActivity() {
     private inner class BubbleAdapter : BaseAdapter() {
         private var chat: Chat? = null
         private var items: List<Message> = emptyList()
-        fun update(chat: Chat, messages: List<Message>) {
+        var reactions: Map<Long, List<Reaction>> = emptyMap()
+            private set
+        fun update(chat: Chat, messages: List<Message>, reactions: Map<Long, List<Reaction>>) {
             this.chat = chat
             items = messages
+            this.reactions = reactions
             notifyDataSetChanged()
         }
         override fun getCount() = items.size
@@ -710,6 +742,17 @@ class ConversationActivity : ScreenActivity() {
         box.contentDescription = listOfNotNull(
             message.senderId?.takeIf { group && !mine }?.let { core.senderName(it) }, message.text,
         ).joinToString(", ")
+        if (message.replyTo != null) {
+            val quoted = core.quoted(message)
+            box.addView(Ui.content(Ui.text(this, quoted?.text ?: getString(R.string.quote_missing), palette.muted).apply {
+                tag = "quote:${message.id}"
+                maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
+                maxWidth = (resources.displayMetrics.widthPixels * 0.7f).toInt()
+                setPadding(pad() / 2, pad() / 4, pad() / 2, pad() / 4)
+                background = Ui.outline(this@ConversationActivity, palette.background, palette.outline)
+            }))
+        }
         box.addView(Ui.content(Ui.text(this, message.text, palette.text).apply {
             maxWidth = (resources.displayMetrics.widthPixels * 0.7f).toInt()
         }))
@@ -738,6 +781,13 @@ class ConversationActivity : ScreenActivity() {
             })
         }
         box.addView(line)
+        message.packetId?.let { bubbles.reactions[it] }?.takeIf { it.isNotEmpty() }?.let { list ->
+            val shown = list.groupBy { it.emoji }.entries.joinToString("  ") { (emoji, all) -> if (all.size > 1) "$emoji ${all.size}" else emoji }
+            box.addView(Ui.content(Ui.text(this, shown, palette.text).apply {
+                tag = "reactions:${message.id}"
+                contentDescription = getString(R.string.reactions, shown)
+            }))
+        }
         if (message.status?.canResend == true) {
             box.addView(Ui.button(this, palette, getString(R.string.resend), R.drawable.ic_retry).apply {
                 tag = "resend:${message.id}"
@@ -758,8 +808,7 @@ class ConversationActivity : ScreenActivity() {
     private val deleteLabel = object : View.AccessibilityDelegate() {
         override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
             super.onInitializeAccessibilityNodeInfo(host, info)
-            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, getString(R.string.copy) + ", " +
-                getString(R.string.forward) + ", " + getString(R.string.delete)))
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, getString(R.string.message_actions)))
         }
     }
 
@@ -782,7 +831,11 @@ class ConversationActivity : ScreenActivity() {
 
     private fun showActions(message: Message) {
         val others = core.chatRows().filter { it.chat.id != chatId }
+        // Only a message that went over the radio has an id the other phones know, so only it can be answered.
+        val overRadio = message.packetId != null
         show(Actions.menu(this, palette, listOfNotNull(
+            if (overRadio) Actions.Item("action_reply", R.string.reply, R.drawable.ic_reply) { core.setReplyTarget(chatId, message.id) } else null,
+            if (overRadio) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,
             Actions.Item("action_copy", R.string.copy, R.drawable.ic_copy) { copy(message.text) },
             Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) },
             if (others.isEmpty()) null else Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) },
@@ -790,6 +843,34 @@ class ConversationActivity : ScreenActivity() {
                 show(Actions.confirm(this, R.string.delete_title, R.string.delete_only_here, R.string.delete) { core.deleteMessage(message.id) })
             },
         )))
+    }
+
+    /** A few large reactions; one goes out as one radio message. */
+    private fun askForReaction(messageId: Long) {
+        val grid = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(), pad(), pad(), 0)
+        }
+        val picker = AlertDialog.Builder(this).setTitle(R.string.react).setView(grid).setNegativeButton(R.string.cancel, null).create()
+        AppCore.REACTIONS.chunked(3).forEachIndexed { line, emojis ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            emojis.forEachIndexed { i, emoji ->
+                row.addView(Ui.button(this, palette, emoji, null).apply {
+                    tag = "react:${line * 3 + i}"
+                    textSize = 32f
+                    minHeight = Ui.dp(this@ConversationActivity, 72)
+                    setOnClickListener {
+                        picker.dismiss()
+                        core.react(messageId, emoji)
+                    }
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = pad() / 2
+                    bottomMargin = pad() / 2
+                })
+            }
+            grid.addView(row)
+        }
+        show(picker)
     }
 
     private fun copy(text: String) {

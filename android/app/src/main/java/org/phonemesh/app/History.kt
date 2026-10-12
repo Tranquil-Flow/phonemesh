@@ -22,7 +22,12 @@ data class Chat(
 data class Message(
     val id: Long, val chatId: Long, val direction: Direction, val senderId: String?, val text: String,
     val language: String?, val time: Long, val packetId: Long?, val status: DeliveryStatus?,
+    /** The radio id of the message this one answers; null when it answers none. */
+    val replyTo: Long? = null,
 )
+
+/** A reaction ([emoji]) to the message whose radio id is [target]; [senderId] is null for the user's own. */
+data class Reaction(val target: Long, val senderId: String?, val emoji: String)
 
 /**
  * Text-only history on the phone: never audio, never synced (allowBackup=false keeps it off backups).
@@ -48,6 +53,10 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     /** Each step adds to what the one before made; a phone that had version 1 keeps its chats. */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if (oldVersion < 3) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
+            db.execSQL("ALTER TABLE messages ADD COLUMN reaction INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     fun groupChat(channel: Int = 0): Chat = chatFor(ChatKind.GROUP, "channel:$channel", "")
@@ -107,15 +116,47 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         return changed
     }
 
-    fun addIncoming(chatId: Long, senderId: String, text: String, language: String?, time: Long, countUnread: Boolean): Message =
-        insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread)
+    /** [packetId] is the radio id it arrived with, kept so replies and reactions can point at it. */
+    fun addIncoming(
+        chatId: Long, senderId: String, text: String, language: String?, time: Long, countUnread: Boolean,
+        packetId: Long? = null, replyTo: Long? = null,
+    ): Message = insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread, packetId, replyTo)
 
-    fun addOutgoing(chatId: Long, text: String, language: String, time: Long): Message =
-        insert(chatId, Direction.OUT, null, text, language, time, DeliveryStatus.WAITING, false)
+    fun addOutgoing(chatId: Long, text: String, language: String, time: Long, replyTo: Long? = null): Message =
+        insert(chatId, Direction.OUT, null, text, language, time, DeliveryStatus.WAITING, false, null, replyTo)
+
+    /** One reaction per person per message: a new one replaces theirs. Reactions are not messages: no bubble, no unread. */
+    fun addReaction(chatId: Long, senderId: String?, emoji: String, target: Long, time: Long) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (senderId == null) {
+                db.delete("messages", "chat_id = ? AND reaction = 1 AND reply_to = ? AND sender_id IS NULL", arrayOf(chatId.toString(), target.toString()))
+            } else {
+                db.delete("messages", "chat_id = ? AND reaction = 1 AND reply_to = ? AND sender_id = ?", arrayOf(chatId.toString(), target.toString(), senderId))
+            }
+            db.insertOrThrow("messages", null, ContentValues().apply {
+                put("chat_id", chatId); put("direction", (if (senderId == null) Direction.OUT else Direction.IN).name)
+                put("sender_id", senderId); put("text", emoji); put("time", time); put("reply_to", target); put("reaction", 1)
+            })
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun reactions(chatId: Long): List<Reaction> = readableDatabase.query(
+        "messages", arrayOf("reply_to", "sender_id", "text"), "chat_id = ? AND reaction = 1", arrayOf(chatId.toString()),
+        null, null, "id",
+    ).use { c -> buildList { while (c.moveToNext()) add(Reaction(c.getLong(0), if (c.isNull(1)) null else c.getString(1), c.getString(2))) } }
+
+    /** The message in this chat that went out or arrived with radio id [packetId]: what a reply quotes. */
+    fun byRadioId(chatId: Long, packetId: Long): Message? =
+        one("chat_id = ? AND packet_id = ? AND reaction = 0", arrayOf(chatId.toString(), packetId.toString()))
 
     private fun insert(
         chatId: Long, direction: Direction, senderId: String?, text: String, language: String?, time: Long,
-        status: DeliveryStatus?, countUnread: Boolean,
+        status: DeliveryStatus?, countUnread: Boolean, packetId: Long?, replyTo: Long?,
     ): Message {
         val db = writableDatabase
         db.beginTransaction()
@@ -123,6 +164,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             val id = db.insertOrThrow("messages", null, ContentValues().apply {
                 put("chat_id", chatId); put("direction", direction.name); put("sender_id", senderId); put("text", text)
                 put("language", language); put("time", time); put("delivery", status?.name)
+                put("packet_id", packetId); put("reply_to", replyTo)
             })
             db.execSQL(
                 "UPDATE chats SET last_activity = MAX(last_activity, ?), unread = unread + ? WHERE id = ?",
@@ -179,7 +221,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     /** The newest sent message carrying [packetId]; a resend moves the message to its new packet. */
     fun byPacket(packetId: Long): Message? = one("packet_id = ? AND direction = 'OUT'", arrayOf(packetId.toString()))
 
-    fun lastMessage(chatId: Long): Message? = one("chat_id = ?", arrayOf(chatId.toString()))
+    fun lastMessage(chatId: Long): Message? = one("chat_id = ? AND reaction = 0", arrayOf(chatId.toString()))
 
     private fun one(where: String, args: Array<String>): Message? =
         readableDatabase.query("messages", null, where, args, null, null, "id DESC", "1")
@@ -187,7 +229,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     /** The newest [limit] messages of a chat, oldest first. */
     fun messages(chatId: Long, limit: Int = 500): List<Message> =
-        readableDatabase.query("messages", null, "chat_id = ?", arrayOf(chatId.toString()), null, null, "id DESC", limit.toString())
+        readableDatabase.query("messages", null, "chat_id = ? AND reaction = 0", arrayOf(chatId.toString()), null, null, "id DESC", limit.toString())
             .use { c -> buildList { while (c.moveToNext()) add(c.message()) } }.asReversed()
 
     fun clearUnread(chatId: Long) {
@@ -230,10 +272,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             time = getLong(getColumnIndexOrThrow("time")),
             packetId = if (isNull(packet)) null else getLong(packet),
             status = if (isNull(delivery)) null else DeliveryStatus.valueOf(getString(delivery)),
+            replyTo = getColumnIndexOrThrow("reply_to").let { if (isNull(it)) null else getLong(it) },
         )
     }
 
     private companion object {
-        const val VERSION = 2
+        const val VERSION = 3
     }
 }

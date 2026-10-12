@@ -175,6 +175,32 @@ object ScreenStates {
         return screen
     }
 
+    /** A reply being written (the bar above the draft), a reply bubble with its quote, and reactions under a message. */
+    fun conversationReply(): Activity {
+        TestCore.install()
+        val group = TestCore.onMain {
+            val core = TestCore.core
+            TestCore.radio.setPeers(listOf(RadioPeer("!0000aaaa", "Kofi"), RadioPeer("!0000bbbb", "Ama"), RadioPeer("!0000cccc", "Yao")))
+            core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet()
+            core.settings.firstMessageSent = true
+            val group = core.groupChatId()
+            val now = System.currentTimeMillis()
+            core.history.addIncoming(group, "!0000aaaa", "On se retrouve au marché à midi ?", "fr", now - 60_000, false, packetId = 500)
+            core.history.addReaction(group, "!0000bbbb", "👍", 500, now - 50_000)
+            core.history.addReaction(group, "!0000cccc", "👍", 500, now - 45_000)
+            core.history.addReaction(group, null, "❤️", 500, now - 40_000)
+            val answer = core.history.addIncoming(group, "!0000bbbb", "Oui, je viens aussi.", "fr", now - 20_000, false, packetId = 501, replyTo = 500)
+            core.setReplyTarget(group, answer.id)
+            core.setDraft(group, "Parfait, à tout à l'heure.")
+            group
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        expect(Views.tagged(screen, "reply_bar") != null, "the reply bar above the draft")
+        expect(tagsOf(screen, "quote:").isNotEmpty(), "a reply bubble's quote")
+        expect(tagsOf(screen, "reactions:").isNotEmpty(), "reactions under a message")
+        return screen
+    }
+
     /** The first failed message: its tip, with the large picture, between the messages and the microphone. */
     fun conversationTip(): Activity {
         TestCore.install()
@@ -503,6 +529,7 @@ object ScreenStates {
         "05-conversation" to { conversation() },
         "05-conversation-mic-hint" to { conversationMicHint() },
         "05-conversation-tip" to { conversationTip() },
+        "05-conversation-reply" to { conversationReply() },
         "06-draft-too-long" to { draftTooLong() },
         "06-draft-cut" to { draftCut() },
         "07-recording" to { recordingLocked() },

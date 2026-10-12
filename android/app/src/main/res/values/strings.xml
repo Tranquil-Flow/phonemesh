@@ -153,6 +153,13 @@
     <string name="delete_chat">Delete chat</string>
     <string name="delete_chat_title">Delete this chat?</string>
     <string name="read_new_aloud">Read new messages aloud</string>
+    <string name="reply">Reply</string>
+    <string name="react">React</string>
+    <string name="reply_cancel">Do not reply</string>
+    <string name="quote_missing">A message not on this phone</string>
+    <string name="reaction_not_sent">Not sent. Check the radio.</string>
+    <string name="reactions">Reactions: %1$s</string>
+    <string name="message_actions">Reply, react, copy, forward, delete</string>
     <string name="today">Today</string>
     <string name="yesterday">Yesterday</string>
     <string name="pack_download_button">Download (%1$d MB)</string>

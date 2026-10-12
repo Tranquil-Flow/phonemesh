@@ -434,7 +434,7 @@ class BleMeshTransport(
      * [Listener.onDelivery]. Never resends and never infers acknowledgement from frontend behaviour.
      * Callers that ignore the return value remain source compatible.
      */
-    override fun send(text: String, destinationId: String, channel: Int): Long {
+    override fun send(text: String, destinationId: String, channel: Int, replyTo: Long, reaction: Boolean): Long {
         checkOpen()
         val target = gatt
         check(ready && target != null && toRadio != null) { "Meshtastic radio is not ready" }
@@ -446,6 +446,8 @@ class BleMeshTransport(
             channel,
             packetId = packetId.toInt(),
             hopLimit = hops,
+            replyTo = replyTo,
+            reaction = reaction,
         )
         val maxWrite = maxWriteBytes()
         require(payload.size <= maxWrite) {
@@ -720,7 +722,9 @@ class BleMeshTransport(
                 val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
                 val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
                 val direct = MeshtasticProtocol.textAudience(event.to, local)
-                if (event.sender != ownId && direct != null) postText(event.sender, event.text, event.channel, direct)
+                if (event.sender != ownId && direct != null) {
+                    postText(event.sender, event.text, event.channel, direct, TextMark(event.packetId, event.replyTo, event.reaction))
+                }
             }
             is RadioEvent.QueueStatus -> {
                 val ok = event.res == 0
@@ -874,8 +878,8 @@ class BleMeshTransport(
         }
     }
 
-    private fun postText(sender: String, text: String, channel: Int, direct: Boolean) {
-        mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel, direct) }
+    private fun postText(sender: String, text: String, channel: Int, direct: Boolean, mark: TextMark) {
+        mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel, direct, mark) }
     }
 
     private fun postDevice(address: String, name: String, rssi: Int) {

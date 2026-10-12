@@ -288,6 +288,19 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. The owner r
 - A long press on a message asks "Delete this message?" / "Supprimer ce message ?" with "Only on this phone. Others keep it."; Cancel keeps it. Deleting stops its playback, sends nothing, and a late delivery report finds nothing (`HistoryTest`, `AppCoreTest`, `ConversationActivityTest`). Each bubble is named for TalkBack (the sender in a group, then the words) and its long press is read as "Delete".
 - Still to make: a how-to picture for the long press (deleting has no tip yet).
 
+### Familiar chat features, wave 1 (no radio use)
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Spec: `docs/specs/2026-10-12-chat-features-design.md`.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs: +251915 B over the size before the visual guide (allowance 350,000 B); this wave added about 8.8 KB.
+- Instrumented tests: 379 selected tests, all passed. JVM: `DaysTest` (4).
+- Long press on a message opens one menu: Copy, Share, Forward (only when another chat exists), Delete (asks once more). Forward fills the other chat's draft and opens it; nothing is sent (`ConversationActivityTest`, `AppCoreTest`).
+- Day dividers "Aujourd'hui" / "Hier" / the long date; one per day; a short bubble stays narrow (`DaysTest`, `ConversationActivityTest`). Screenshots `05-conversation*` and `05-conversation-mic-hint*` now show the divider.
+- Long press on a chat: pin a private chat (it follows the group) or delete a chat after asking; the group only empties. The history moves to version 2 and a version-1 database keeps its chats (`HistoryTest`, `ChatsActivityTest`, `AppCoreTest`).
+- Settings → "Lire les nouveaux messages à voix haute", off by default; a new message is read only while a screen is open, the microphone is free and nothing plays (`AppCoreTest`, `SettingsActivityTest`). Screenshots `09-settings*` show the switch.
+- A first gate run caught every bubble stretched to full width (the row became vertical for the divider); fixed and covered by a test before this record.
+- Still to make: how-to pictures for the message and chat long presses and for forwarding.
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

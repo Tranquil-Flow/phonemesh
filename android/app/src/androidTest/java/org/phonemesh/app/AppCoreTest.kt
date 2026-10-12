@@ -42,6 +42,42 @@ class AppCoreTest {
         assertEquals("nothing more goes out over the radio", 1, radio.sent.size)
     }
 
+    @Test fun aNewMessageIsReadAloudOnlyWhenAskedWhileOpenAndQuiet() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        val screen = AppCore.Observer { }
+        main { core.observe(screen) }
+        main { radio.receive("!0000aaaa", "[pm1:fr] Premier", false) }
+        assertTrue("off by default", speech.spoken.isEmpty())
+        main { core.settings.readAloud = true; radio.receive("!0000aaaa", "[pm1:fr] Deuxième", false) }
+        assertEquals(listOf("Deuxième"), speech.spoken)
+        assertEquals(core.history.lastMessage(group)!!.id, core.playingId)
+        main { radio.receive("!0000aaaa", "[pm1:fr] Troisième", false) }
+        assertEquals("a voice already playing is never cut off", listOf("Deuxième"), speech.spoken)
+        main { speech.finishPlayback(); core.unobserve(screen); radio.receive("!0000aaaa", "[pm1:fr] Quatrième", false) }
+        assertEquals("no screen open, nothing is read", listOf("Deuxième"), speech.spoken)
+    }
+
+    @Test fun deletingAChatTakesItsDraftAndPlaybackAndTheGroupStaysEmpty() {
+        TestCore.install()
+        val group = main { core.groupChatId() }
+        val kofi = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        main { radio.receive("!0000aaaa", "[pm1:fr] Salut", true); radio.receive("!0000bbbb", "[pm1:fr] Tous", false) }
+        val heard = core.history.lastMessage(kofi)!!
+        main { core.play(heard.id); core.setDraft(kofi, "Réponse") }
+        assertTrue(main { core.deleteChat(kofi) })
+        assertNull(core.playingId)
+        assertNull(core.draft(kofi))
+        assertNull(core.history.chat(kofi))
+        assertTrue(main { core.deleteChat(group) })
+        assertNotNull("the group stays", core.history.chat(group))
+        assertNull(core.history.lastMessage(group))
+        assertFalse("nothing left", main { core.deleteChat(group) })
+        main { radio.receive("!0000aaaa", "[pm1:fr] Encore moi", true) }
+        assertEquals("a new message starts the chat again", "Encore moi", core.history.lastMessage(main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) })!!.text)
+        assertTrue(radio.sent.isEmpty())
+    }
+
     @Test fun theGuideAgainBringsBackTipsAndTheHintButKeepsSetup() {
         TestCore.install()
         main {

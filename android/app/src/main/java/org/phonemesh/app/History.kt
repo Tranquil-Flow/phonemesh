@@ -13,7 +13,10 @@ enum class ChatKind { GROUP, DIRECT }
 enum class Direction { IN, OUT }
 
 /** [address] is "channel:0" for the group and the radio id ("!1234abcd") for a private chat; [name] is "" while unknown. */
-data class Chat(val id: Long, val kind: ChatKind, val address: String, val name: String, val lastActivity: Long, val unread: Int)
+data class Chat(
+    val id: Long, val kind: ChatKind, val address: String, val name: String, val lastActivity: Long, val unread: Int,
+    val pinned: Boolean = false,
+)
 
 /** [senderId] is null for the user's own messages; [language] null when the sender gave none; [status] null when received. */
 data class Message(
@@ -39,9 +42,13 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         )
         db.execSQL("CREATE INDEX messages_by_chat ON messages (chat_id, id)")
         db.execSQL("CREATE INDEX messages_by_packet ON messages (packet_id)")
+        onUpgrade(db, 1, VERSION)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    /** Each step adds to what the one before made; a phone that had version 1 keeps its chats. */
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE chats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    }
 
     fun groupChat(channel: Int = 0): Chat = chatFor(ChatKind.GROUP, "channel:$channel", "")
 
@@ -72,9 +79,9 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         readableDatabase.query("chats", null, "id = ?", arrayOf(id.toString()), null, null, null)
             .use { if (it.moveToFirst()) it.chat() else null }
 
-    /** The group first, then the newest activity first. */
+    /** The group first, then pinned chats, then the newest activity first. */
     fun chats(): List<Chat> =
-        readableDatabase.query("chats", null, null, null, null, null, "kind = 'GROUP' DESC, last_activity DESC, id DESC")
+        readableDatabase.query("chats", null, null, null, null, null, "kind = 'GROUP' DESC, pinned DESC, last_activity DESC, id DESC")
             .use { c -> buildList { while (c.moveToNext()) add(c.chat()) } }
 
     fun rename(peerId: String, name: String): Boolean = renameAll(mapOf(peerId to name)) > 0
@@ -123,6 +130,33 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             )
             db.setTransactionSuccessful()
             return checkNotNull(message(id))
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun setPinned(chatId: Long, pinned: Boolean) {
+        writableDatabase.update("chats", ContentValues().apply { put("pinned", if (pinned) 1 else 0) }, "id = ?", arrayOf(chatId.toString()))
+    }
+
+    /**
+     * Deletes a chat's messages. A private chat goes too (a new message from that radio starts it again);
+     * the group stays, empty, at the top. False when there was nothing to delete.
+     */
+    fun deleteChat(chatId: Long): Boolean {
+        val chat = chat(chatId) ?: return false
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val messages = db.delete("messages", "chat_id = ?", arrayOf(chatId.toString()))
+            val removed = if (chat.kind == ChatKind.GROUP) {
+                db.execSQL("UPDATE chats SET unread = 0 WHERE id = ?", arrayOf<Any>(chatId))
+                0
+            } else {
+                db.delete("chats", "id = ?", arrayOf(chatId.toString()))
+            }
+            db.setTransactionSuccessful()
+            return messages + removed > 0
         } finally {
             db.endTransaction()
         }
@@ -178,6 +212,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         name = getString(getColumnIndexOrThrow("name")),
         lastActivity = getLong(getColumnIndexOrThrow("last_activity")),
         unread = getInt(getColumnIndexOrThrow("unread")),
+        pinned = getInt(getColumnIndexOrThrow("pinned")) != 0,
     )
 
     private fun Cursor.message(): Message {
@@ -199,6 +234,6 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 1
+        const val VERSION = 2
     }
 }

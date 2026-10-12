@@ -70,6 +70,19 @@ class SettingsActivityTest {
         Views.finish(welcome)
     }
 
+    @Test fun readingNewMessagesAloudIsASwitchThatStartsOff() {
+        TestCore.install()
+        activity = Views.start(SettingsActivity::class.java)
+        val switch = Views.tagged(activity!!, "read_aloud") as android.widget.Switch
+        assertEquals("Lire les nouveaux messages à voix haute", Views.textOf(switch))
+        assertFalse(TestCore.onMain { switch.isChecked })
+        Views.tap(activity!!, "read_aloud")
+        assertTrue(TestCore.core.settings.readAloud)
+        Views.tap(activity!!, "read_aloud")
+        assertFalse(TestCore.core.settings.readAloud)
+        assertEquals(emptyList<String>(), A11yCheck.problems(activity!!))
+    }
+
     @Test fun everyCatalogPackIsListedWithItsSize() {
         TestCore.install(voices = emptyList())
         activity = Views.start(SettingsActivity::class.java)

@@ -46,6 +46,60 @@ class HistoryTest {
         assertEquals(listOf("!0000aaaa"), history.chats().map { it.address })
     }
 
+    @Test fun pinnedChatsComeRightAfterTheGroup() {
+        val group = history.groupChat()
+        val kofi = history.directChat("!0000aaaa", "Kofi")
+        val ama = history.directChat("!0000bbbb", "Ama")
+        history.addIncoming(kofi.id, "!0000aaaa", "Vieux", "fr", 1_000, false)
+        history.addIncoming(ama.id, "!0000bbbb", "Neuf", "fr", 2_000, false)
+        assertEquals(listOf(group.id, ama.id, kofi.id), history.chats().map { it.id })
+        history.setPinned(kofi.id, true)
+        assertEquals(listOf(group.id, kofi.id, ama.id), history.chats().map { it.id })
+        assertTrue(history.chat(kofi.id)!!.pinned)
+        history.setPinned(kofi.id, false)
+        assertEquals(listOf(group.id, ama.id, kofi.id), history.chats().map { it.id })
+    }
+
+    @Test fun aVersionOneHistoryKeepsItsChatsAfterTheUpgrade() {
+        context.deleteDatabase(OLD)
+        context.openOrCreateDatabase(OLD, 0, null).use { db ->
+            db.execSQL("CREATE TABLE chats (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, address TEXT NOT NULL, " +
+                "name TEXT NOT NULL DEFAULT '', last_activity INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0, UNIQUE (kind, address))")
+            db.execSQL("CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL REFERENCES chats(id), " +
+                "direction TEXT NOT NULL, sender_id TEXT, text TEXT NOT NULL, language TEXT, time INTEGER NOT NULL, packet_id INTEGER, delivery TEXT)")
+            db.execSQL("INSERT INTO chats (kind, address, name) VALUES ('DIRECT', '!0000aaaa', 'Kofi')")
+            db.execSQL("INSERT INTO messages (chat_id, direction, sender_id, text, time) VALUES (1, 'IN', '!0000aaaa', 'Salut', 5)")
+            db.version = 1
+        }
+        val upgraded = History(context, OLD)
+        try {
+            val kofi = upgraded.chats().single()
+            assertEquals("Kofi", kofi.name)
+            assertFalse(kofi.pinned)
+            assertEquals("Salut", upgraded.lastMessage(kofi.id)!!.text)
+            upgraded.setPinned(kofi.id, true)
+            assertTrue(upgraded.chat(kofi.id)!!.pinned)
+        } finally {
+            upgraded.close()
+            context.deleteDatabase(OLD)
+        }
+    }
+
+    @Test fun deletingAPrivateChatRemovesItButTheGroupOnlyEmpties() {
+        val group = history.groupChat()
+        val kofi = history.directChat("!0000aaaa", "Kofi")
+        history.addIncoming(kofi.id, "!0000aaaa", "Un", "fr", 1, true)
+        history.addIncoming(group.id, "!0000bbbb", "Tous", "fr", 2, true)
+        assertTrue(history.deleteChat(kofi.id))
+        assertNull(history.chat(kofi.id))
+        assertTrue(history.messages(kofi.id).isEmpty())
+        assertTrue(history.deleteChat(group.id))
+        assertEquals(0, history.chat(group.id)!!.unread)
+        assertTrue(history.messages(group.id).isEmpty())
+        assertFalse(history.deleteChat(group.id))
+        assertFalse(history.deleteChat(kofi.id))
+    }
+
     @Test fun deletingAMessageKeepsItsChatAndTheOthers() {
         val chat = history.directChat("!0000aaaa", "Kofi")
         val first = history.addIncoming(chat.id, "!0000aaaa", "Un", "fr", 1, false)
@@ -105,5 +159,8 @@ class HistoryTest {
         } finally { again.close() }
     }
 
-    private companion object { const val FILE = "history-restart-test.db" }
+    private companion object {
+        const val FILE = "history-restart-test.db"
+        const val OLD = "history-version-one-test.db"
+    }
 }

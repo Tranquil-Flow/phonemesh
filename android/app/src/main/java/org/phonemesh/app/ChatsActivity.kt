@@ -105,6 +105,7 @@ class ChatsActivity : ScreenActivity() {
             adapter = rows
             divider = null
             setOnItemClickListener { _, _, position, _ -> openChat(rows.getItem(position).chat.id) }
+            setOnItemLongClickListener { _, _, position, _ -> showChatActions(rows.getItem(position).chat); true }
         }
         frame.addView(list, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         emptyHint = LinearLayout(this).apply {
@@ -423,6 +424,12 @@ class ChatsActivity : ScreenActivity() {
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        if (chat.pinned) {
+            titleLine.addView(Ui.icon(this, R.drawable.ic_pin, palette.muted, 20).apply {
+                tag = "pinned:${chat.id}"
+                contentDescription = getString(R.string.pinned)
+            })
+        }
         item.peopleHeard?.let { heard ->
             titleLine.addView(Looks.peopleBadge(this, palette).apply {
                 tag = "people:${chat.id}"
@@ -548,7 +555,36 @@ class ChatsActivity : ScreenActivity() {
         if (core.settings.language == null) setIntent(intent) else openFromIntent(intent)
     }
 
+    private var chatDialog: AlertDialog? = null
+
+    private fun showChatDialog(next: AlertDialog) {
+        chatDialog?.dismiss()
+        next.setOnDismissListener { if (chatDialog === next) chatDialog = null }
+        chatDialog = next
+        next.show()
+    }
+
+    /** A long press on a chat: pin a private chat to the top (the group is always first), or delete it on this phone. */
+    private fun showChatActions(chat: Chat) {
+        showChatDialog(Actions.menu(this, palette, listOfNotNull(
+            if (chat.kind == ChatKind.GROUP) null else if (chat.pinned) {
+                Actions.Item("action_unpin", R.string.unpin_chat, R.drawable.ic_pin) { core.pinChat(chat.id, false) }
+            } else {
+                Actions.Item("action_pin", R.string.pin_chat, R.drawable.ic_pin) { core.pinChat(chat.id, true) }
+            },
+            Actions.Item("action_delete_chat", R.string.delete_chat, R.drawable.ic_delete) {
+                showChatDialog(Actions.confirm(this, R.string.delete_chat_title, R.string.delete_only_here, R.string.delete) {
+                    core.deleteChat(chat.id)
+                })
+            },
+        )))
+    }
+
+    // Test hook
+    internal val chatDialogForTest: AlertDialog? get() = chatDialog?.takeIf { it.isShowing }
+
     override fun onDestroy() {
+        chatDialog?.dismiss()
         importDialog?.dismiss() // a pending import is dropped, never installed
         peerDialog?.dismiss()
         super.onDestroy()

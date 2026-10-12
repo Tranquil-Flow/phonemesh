@@ -40,6 +40,53 @@ class ChatsActivityTest {
 
     private fun start(): ChatsActivity = Views.start(ChatsActivity::class.java).also { activity = it }
 
+    private fun longPressChat(chats: ChatsActivity, chatId: Long): android.app.AlertDialog {
+        // A row without its own listener hands a long press to the list, which calls its item long-click listener.
+        TestCore.onMain { Views.descendants(chats.window.decorView).first { it.tag == "chat:$chatId" }.performLongClick() }
+        inst.waitForIdleSync()
+        return checkNotNull(chats.chatDialogForTest)
+    }
+
+    private fun tapInDialog(d: android.app.AlertDialog, tag: String) {
+        TestCore.onMain { checkNotNull(Views.descendants(d.window!!.decorView).firstOrNull { it.tag == tag }) { tag }.performClick() }
+        inst.waitForIdleSync()
+    }
+
+    private fun dialogTags(d: android.app.AlertDialog): List<String> =
+        TestCore.onMain { Views.descendants(d.window!!.decorView).mapNotNull { it.tag as? String }.filter { it.startsWith("action_") } }
+
+    @Test fun aLongPressPinsAPrivateChatAndDeletesAChatAfterAsking() {
+        TestCore.install()
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val group = TestCore.onMain { core.groupChatId() }
+        val kofi = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val ama = TestCore.onMain { core.startDirectChat(RadioPeer("!0000bbbb", "Ama")) }
+        TestCore.onMain {
+            core.history.addIncoming(kofi, "!0000aaaa", "Vieux", "fr", 1_000, false)
+            core.history.addIncoming(ama, "!0000bbbb", "Neuf", "fr", 2_000, false)
+        }
+        val chats = start()
+        assertEquals("the group has no pin: it is always first", listOf("action_delete_chat"), dialogTags(longPressChat(chats, group)))
+        TestCore.onMain { checkNotNull(chats.chatDialogForTest).dismiss() }
+        tapInDialog(longPressChat(chats, kofi), "action_pin")
+        assertTrue(core.history.chat(kofi)!!.pinned)
+        assertEquals(listOf(group, kofi, ama), core.chatRows().map { it.chat.id })
+        assertEquals("Épinglée", TestCore.onMain { Views.descendants(chats.window.decorView).first { it.tag == "pinned:$kofi" }.contentDescription.toString() })
+        assertEquals(listOf("action_unpin", "action_delete_chat"), dialogTags(longPressChat(chats, kofi)))
+        tapInDialog(checkNotNull(chats.chatDialogForTest), "action_delete_chat")
+        val asked = checkNotNull(chats.chatDialogForTest)
+        val title = TestCore.onMain {
+            asked.findViewById<TextView>(asked.context.resources.getIdentifier("alertTitle", "id", "android"))?.text?.toString()
+        }
+        assertEquals("Supprimer cette discussion ?", title)
+        TestCore.onMain { asked.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+        inst.waitForIdleSync()
+        assertNull(core.history.chat(kofi))
+        assertNull(Views.tagged(chats, "chat:$kofi"))
+        assertNotNull(Views.tagged(chats, "chat:$ama"))
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
     /** Plain state, safe inside a waitUntil condition (which already runs on the main thread). */
     private fun resumedNow(): Activity? =
         ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull()

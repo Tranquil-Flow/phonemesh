@@ -38,6 +38,11 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = prefs.getBoolean(FIRST_MESSAGE_SENT, false)
         set(value) { prefs.edit().putBoolean(FIRST_MESSAGE_SENT, value).apply() }
 
+    /** New messages are read aloud as they arrive while the app is open (Settings). Off: phones are often in public. */
+    var readAloud: Boolean
+        get() = prefs.getBoolean(READ_ALOUD, false)
+        set(value) { prefs.edit().putBoolean(READ_ALOUD, value).apply() }
+
     /** True once the setup guide folded away; it never returns. */
     var setupFinished: Boolean
         get() = prefs.getBoolean(SETUP_FINISHED, false)
@@ -119,6 +124,7 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val THEME = "theme"
         private const val FIRST_MESSAGE_SENT = "firstMessageSent"
         private const val SETUP_FINISHED = "setupFinished"
+        private const val READ_ALOUD = "readAloud"
         private const val TIPS_SHOWN = "tipsShown"
         private const val TIP_SHOWINGS = "tipShowings"
         private const val KEPT = "keptRegions."

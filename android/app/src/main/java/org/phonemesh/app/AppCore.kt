@@ -366,8 +366,10 @@ class AppCore private constructor(
             return
         }
         val chat = if (direct) history.directChat(sender, knownName(sender)) else history.groupChat(PRIMARY_CHANNEL)
-        history.addIncoming(chat.id, sender, received.text, received.language, System.currentTimeMillis(), countUnread = openChatId != chat.id)
+        val message = history.addIncoming(chat.id, sender, received.text, received.language, System.currentTimeMillis(), countUnread = openChatId != chat.id)
         changed(Change.MESSAGES)
+        // Read aloud only while a screen is open, the microphone is free and nothing else is playing: never cut a voice off.
+        if (settings.readAloud && observers.isNotEmpty() && recordState == RecordState.IDLE && playingId == null) play(message.id)
     }
 
     override fun onDelivery(packetId: Long, state: DeliveryState, detail: String) {
@@ -551,6 +553,31 @@ class AppCore private constructor(
             Log.w(TAG, "send failed", e)
             history.setStatus(messageId, DeliveryStatus.FAILED)
         }
+    }
+
+    fun pinChat(chatId: Long, pinned: Boolean) {
+        history.setPinned(chatId, pinned)
+        changed(Change.MESSAGES)
+    }
+
+    /** Deletes a chat's messages on this phone only (a private chat goes too); its draft and playback go with them. */
+    fun deleteChat(chatId: Long): Boolean {
+        val playing = playingId?.let { history.message(it) }
+        if (playing?.chatId == chatId) stopPlayback()
+        setDraft(chatId, null)
+        if (!history.deleteChat(chatId)) return false
+        changed(Change.MESSAGES)
+        return true
+    }
+
+    /** Puts a message's words in another chat's draft, to hear and send there. Nothing goes out until Send. */
+    fun forward(messageId: Long, toChatId: Long): Boolean {
+        val message = history.message(messageId) ?: return false
+        history.chat(toChatId) ?: return false
+        val kept = DraftRules.trimToFit(message.text, currentLanguage().tag)
+        setDraft(toChatId, kept)
+        if (kept != message.text) cutDrafts += toChatId
+        return true
     }
 
     /** Deletes a message on this phone only: what the radio sent cannot be called back. A late receipt finds nothing. */

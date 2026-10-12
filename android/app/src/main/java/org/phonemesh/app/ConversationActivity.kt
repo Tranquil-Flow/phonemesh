@@ -2,12 +2,15 @@ package org.phonemesh.app
 
 import android.Manifest
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputFilter
@@ -33,6 +36,8 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.TextView
+import org.phonemesh.core.DayName
+import org.phonemesh.core.Days
 import org.phonemesh.core.DraftFit
 import org.phonemesh.core.DraftRules
 import org.phonemesh.core.PeopleHeard
@@ -41,6 +46,9 @@ import org.phonemesh.core.Tip
 import org.phonemesh.core.TipFacts
 import org.phonemesh.core.TipPlace
 import org.phonemesh.core.Tips
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Date
 
 /** One chat: bubbles with ▶, the big microphone, the draft with ✕ ▶ ➤. Nothing plays or sends by itself. */
@@ -664,22 +672,32 @@ class ConversationActivity : ScreenActivity() {
         override fun getItem(position: Int) = items[position]
         override fun getItemId(position: Int) = items[position].id
         override fun hasStableIds() = true
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = bubble(items[position], chat?.kind == ChatKind.GROUP)
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+            bubble(items[position], chat?.kind == ChatKind.GROUP, items.getOrNull(position - 1)?.time)
     }
 
-    private fun bubble(message: Message, group: Boolean): View {
+    private fun bubble(message: Message, group: Boolean, previousTime: Long?): View {
         val mine = message.direction == Direction.OUT
         val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = if (mine) Gravity.END else Gravity.START
             setPadding(pad(), pad() / 4, pad(), pad() / 4)
             tag = "message:${message.id}"
+        }
+        val zone = ZoneId.systemDefault()
+        if (Days.startsDay(previousTime, message.time, zone)) {
+            row.addView(Ui.text(this, dayLabel(message.time, zone), palette.muted, bold = true).apply {
+                tag = "day:${message.id}"
+                gravity = Gravity.CENTER
+                setPadding(0, pad() / 2, 0, pad() / 2)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), pad() / 2, pad() / 2, pad() / 2)
             background = Ui.outline(this@ConversationActivity, if (mine) palette.sent else palette.surface, palette.outline)
             tag = "bubble:${message.id}"
-            setOnLongClickListener { askToDelete(message.id); true }
+            setOnLongClickListener { showActions(message); true }
             accessibilityDelegate = deleteLabel
         }
         if (group && !mine && message.senderId != null) {
@@ -731,7 +749,8 @@ class ConversationActivity : ScreenActivity() {
                 }
             })
         }
-        row.addView(box)
+        // A vertical row would stretch the bubble to its width; a bubble fits its words.
+        row.addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         return row
     }
 
@@ -739,32 +758,68 @@ class ConversationActivity : ScreenActivity() {
     private val deleteLabel = object : View.AccessibilityDelegate() {
         override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
             super.onInitializeAccessibilityNodeInfo(host, info)
-            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, getString(R.string.delete)))
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, getString(R.string.copy) + ", " +
+                getString(R.string.forward) + ", " + getString(R.string.delete)))
         }
     }
 
-    private var deleteDialog: AlertDialog? = null
+    /** "Today", "Yesterday", or the date in the app's language. */
+    private fun dayLabel(time: Long, zone: ZoneId): String = when (Days.name(time, System.currentTimeMillis(), zone)) {
+        DayName.TODAY -> getString(R.string.today)
+        DayName.YESTERDAY -> getString(R.string.yesterday)
+        DayName.DATE -> Days.date(time, zone).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG).withLocale(resources.configuration.locales[0]))
+    }
 
-    /** A long press asks first; the message goes from this phone only. */
-    private fun askToDelete(messageId: Long) {
-        deleteDialog?.dismiss()
-        val dialog = AlertDialog.Builder(this).setTitle(R.string.delete_title)
-            .setMessage(R.string.delete_only_here)
-            .setPositiveButton(R.string.delete) { _, _ -> core.deleteMessage(messageId) }
+    /** One dialog at a time: the long-press menu, the chat list to forward to, or the question before deleting. */
+    private var dialog: AlertDialog? = null
+
+    private fun show(next: AlertDialog) {
+        dialog?.dismiss()
+        next.setOnDismissListener { if (dialog === next) dialog = null }
+        dialog = next
+        next.show()
+    }
+
+    private fun showActions(message: Message) {
+        val others = core.chatRows().filter { it.chat.id != chatId }
+        show(Actions.menu(this, palette, listOfNotNull(
+            Actions.Item("action_copy", R.string.copy, R.drawable.ic_copy) { copy(message.text) },
+            Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) },
+            if (others.isEmpty()) null else Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) },
+            Actions.Item("action_delete", R.string.delete, R.drawable.ic_delete) {
+                show(Actions.confirm(this, R.string.delete_title, R.string.delete_only_here, R.string.delete) { core.deleteMessage(message.id) })
+            },
+        )))
+    }
+
+    private fun copy(text: String) {
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(getString(R.string.app_name), text))
+        // Android 13 and later show their own notice.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) core.note(UiText(R.string.copied))
+    }
+
+    private fun share(text: String) {
+        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
+    }
+
+    /** The words go to the other chat's draft; that chat opens to hear and send them. */
+    private fun askWhereToForward(messageId: Long, chats: List<AppCore.ChatRow>) {
+        show(AlertDialog.Builder(this).setTitle(R.string.forward_to)
+            .setItems(chats.map { it.title }.toTypedArray()) { _, which ->
+                val to = chats[which].chat.id
+                if (core.forward(messageId, to)) startActivity(intent(this, to))
+            }
             .setNegativeButton(R.string.cancel, null)
-            .create()
-        dialog.setOnDismissListener { if (deleteDialog === dialog) deleteDialog = null }
-        deleteDialog = dialog
-        dialog.show()
+            .create())
     }
 
     override fun onDestroy() {
-        deleteDialog?.dismiss()
+        dialog?.dismiss()
         super.onDestroy()
     }
 
     // Test hook
-    internal val deleteDialogForTest: AlertDialog? get() = deleteDialog?.takeIf { it.isShowing }
+    internal val dialogForTest: AlertDialog? get() = dialog?.takeIf { it.isShowing }
 
     companion object {
         const val EXTRA_CHAT_ID = "chat"

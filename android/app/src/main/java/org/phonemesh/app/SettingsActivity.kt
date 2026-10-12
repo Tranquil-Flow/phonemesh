@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import org.phonemesh.core.GeneratedPackCatalog
 import org.phonemesh.core.PackKind
@@ -35,6 +36,16 @@ class SettingsActivity : ScreenActivity() {
         themes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         column.addView(themes)
         column.addView(section(R.string.settings_speech))
+        column.addView(Switch(this).apply {
+            tag = "read_aloud"
+            text = getString(R.string.read_new_aloud)
+            contentDescription = getString(R.string.read_new_aloud)
+            textSize = Ui.BODY_SP
+            setTextColor(palette.text)
+            minHeight = Ui.dp(this@SettingsActivity, 64)
+            isChecked = core.settings.readAloud
+            setOnCheckedChangeListener { _, on -> core.settings.readAloud = on }
+        })
         engineList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "engines" }
         column.addView(engineList)
         column.addView(section(R.string.settings_packs))

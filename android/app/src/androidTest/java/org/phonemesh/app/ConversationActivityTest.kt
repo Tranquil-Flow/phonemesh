@@ -965,7 +965,22 @@ class ConversationActivityTest {
         assertEquals("a rotation is not a showing", mapOf("cancel" to 1), core.settings.tipShowings)
     }
 
-    @Test fun aLongPressAsksThenDeletesTheMessageOnThisPhoneOnly() {
+    /** Taps a button inside the dialog's own window (not the activity's). */
+    private fun tapInDialog(d: android.app.AlertDialog, tag: String) {
+        TestCore.onMain { checkNotNull(Views.descendants(d.window!!.decorView).firstOrNull { it.tag == tag }) { tag }.performClick() }
+        inst.waitForIdleSync()
+    }
+
+    private fun dialogTags(d: android.app.AlertDialog): List<String> =
+        TestCore.onMain { Views.descendants(d.window!!.decorView).mapNotNull { it.tag as? String }.filter { it.startsWith("action_") } }
+
+    private fun longPress(a: ConversationActivity, messageId: Long): android.app.AlertDialog {
+        TestCore.onMain { checkNotNull(Views.descendants(a.window.decorView).firstOrNull { it.tag == "bubble:$messageId" }).performLongClick() }
+        inst.waitForIdleSync()
+        return checkNotNull(a.dialogForTest)
+    }
+
+    @Test fun aLongPressOffersActionsAndDeletesOnThisPhoneOnlyAfterAsking() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }
         val now = System.currentTimeMillis()
@@ -976,28 +991,90 @@ class ConversationActivityTest {
         val label = TestCore.onMain {
             bubble.createAccessibilityNodeInfo().actionList.single { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK }.label
         }
-        assertEquals("TalkBack says what a long press does", "Supprimer", label)
+        assertEquals("TalkBack says what a long press offers", "Copier, Transférer, Supprimer", label)
         assertEquals("the bubble is named by its words", "Bonjour", TestCore.onMain { bubble.contentDescription.toString() })
         val heard = TestCore.onMain { Views.descendants(a.window.decorView).first { it.tag == "bubble:${kept.id}" }.contentDescription.toString() }
         assertEquals("a group message also says who wrote it", "${TestCore.onMain { core.senderName("!1234abcd") }}, Salut", heard)
-        TestCore.onMain { bubble.performLongClick() }
-        inst.waitForIdleSync()
-        val asked = checkNotNull(a.deleteDialogForTest)
+        val menu = longPress(a, gone.id)
+        assertEquals("no other chat, so nothing to forward to", listOf("action_copy", "action_share", "action_delete"), dialogTags(menu))
+        tapInDialog(menu, "action_delete")
+        val asked = checkNotNull(a.dialogForTest)
         assertEquals("Seulement sur ce téléphone. Les autres le gardent.",
             TestCore.onMain { asked.findViewById<android.widget.TextView>(android.R.id.message).text.toString() })
         TestCore.onMain { asked.getButton(DialogInterface.BUTTON_NEGATIVE).performClick() }
         inst.waitForIdleSync()
-        assertNull(a.deleteDialogForTest)
+        assertNull(a.dialogForTest)
         assertNotNull("Annuler keeps it", core.history.message(gone.id))
-        TestCore.onMain { checkNotNull(Views.descendants(a.window.decorView).firstOrNull { it.tag == "bubble:${gone.id}" }).performLongClick() }
-        inst.waitForIdleSync()
-        val again = checkNotNull(a.deleteDialogForTest)
-        TestCore.onMain { again.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+        tapInDialog(longPress(a, gone.id), "action_delete")
+        TestCore.onMain { checkNotNull(a.dialogForTest).getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
         inst.waitForIdleSync()
         assertNull(core.history.message(gone.id))
         assertNull(Views.tagged(a, "bubble:${gone.id}"))
         assertNotNull(Views.tagged(a, "bubble:${kept.id}"))
         assertTrue("nothing goes over the radio", TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun copyPutsTheWordsOnTheClipboard() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val heard = TestCore.onMain { core.history.addIncoming(group, "!1234abcd", "Rendez-vous au puits", "fr", System.currentTimeMillis(), false) }
+        val a = open(group)
+        tapInDialog(longPress(a, heard.id), "action_copy")
+        val clip = TestCore.onMain { a.getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.text?.toString() }
+        assertEquals("Rendez-vous au puits", clip)
+        assertNull(a.dialogForTest)
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun forwardingPutsTheWordsInTheOtherChatsDraftAndSendsNothing() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val kofi = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val heard = TestCore.onMain { core.history.addIncoming(group, "!1234abcd", "Le marché est demain", "fr", System.currentTimeMillis(), false) }
+        val a = open(group)
+        val menu = longPress(a, heard.id)
+        assertEquals(listOf("action_copy", "action_share", "action_forward", "action_delete"), dialogTags(menu))
+        tapInDialog(menu, "action_forward")
+        val choose = checkNotNull(a.dialogForTest)
+        assertEquals("only the other chats", listOf("Kofi"),
+            TestCore.onMain { (0 until choose.listView.adapter.count).map { choose.listView.adapter.getItem(it).toString() } })
+        TestCore.onMain { choose.listView.performItemClick(null, 0, 0) }
+        Views.waitUntil {
+            val front = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull()
+            front is ConversationActivity && front !== a
+        }
+        assertEquals("Le marché est demain", core.draft(kofi))
+        assertNull(core.draft(group))
+        assertTrue("nothing goes out until Send", TestCore.radio.sent.isEmpty())
+        Views.finish(Views.resumed())
+    }
+
+    @Test fun dayDividersSayTodayYesterdayOrTheDate() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.LocalDate.now(zone)
+        fun noon(day: java.time.LocalDate) = day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        val (old, yesterday, firstToday, secondToday) = TestCore.onMain {
+            listOf(
+                core.history.addIncoming(group, "!1234abcd", "Avant", "fr", noon(today.minusDays(3)), false),
+                core.history.addIncoming(group, "!1234abcd", "Hier soir", "fr", noon(today.minusDays(1)), false),
+                core.history.addOutgoing(group, "Ce matin", "fr", System.currentTimeMillis() - 1),
+                core.history.addOutgoing(group, "Encore", "fr", System.currentTimeMillis()),
+            )
+        }
+        val a = open(group)
+        val date = today.minusDays(3).format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.LONG)
+            .withLocale(java.util.Locale.forLanguageTag("fr")))
+        assertEquals(date, Views.textOf(Views.tagged(a, "day:${old.id}")!!))
+        assertEquals("Hier", Views.textOf(Views.tagged(a, "day:${yesterday.id}")!!))
+        assertEquals("Aujourd'hui", Views.textOf(Views.tagged(a, "day:${firstToday.id}")!!))
+        assertNull("one divider per day", Views.tagged(a, "day:${secondToday.id}"))
+        val short = checkNotNull(Views.tagged(a, "bubble:${secondToday.id}"))
+        assertTrue("a short message's bubble fits its words, not the screen width",
+            TestCore.onMain { short.width < a.window.decorView.width / 2 })
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
     }
 
     @Test fun aFailedMessageTeachesSendAgainOnceAndResendingClosesIt() {

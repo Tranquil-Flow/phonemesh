@@ -46,6 +46,19 @@ class HistoryTest {
         assertEquals(listOf("!0000aaaa"), history.chats().map { it.address })
     }
 
+    @Test fun deletingAMessageKeepsItsChatAndTheOthers() {
+        val chat = history.directChat("!0000aaaa", "Kofi")
+        val first = history.addIncoming(chat.id, "!0000aaaa", "Un", "fr", 1, false)
+        val second = history.addOutgoing(chat.id, "Deux", "fr", 2)
+        history.attachPacket(second.id, 77)
+        assertTrue(history.deleteMessage(second.id))
+        assertFalse("already gone", history.deleteMessage(second.id))
+        assertEquals(listOf(first.id), history.messages(chat.id).map { it.id })
+        assertEquals(first.id, history.lastMessage(chat.id)!!.id)
+        assertNull("a late receipt finds nothing", history.byPacket(77))
+        assertNotNull(history.chat(chat.id))
+    }
+
     @Test fun deliveryFindsTheMessageByItsLatestPacket() {
         val chat = history.directChat("!0000aaaa", "Kofi")
         val sent = history.addOutgoing(chat.id, "Salut", "fr", 10)

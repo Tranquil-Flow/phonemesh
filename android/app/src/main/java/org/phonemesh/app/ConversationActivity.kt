@@ -1,6 +1,7 @@
 package org.phonemesh.app
 
 import android.Manifest
+import android.app.AlertDialog
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -19,6 +20,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
@@ -676,6 +678,9 @@ class ConversationActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), pad() / 2, pad() / 2, pad() / 2)
             background = Ui.outline(this@ConversationActivity, if (mine) palette.sent else palette.surface, palette.outline)
+            tag = "bubble:${message.id}"
+            setOnLongClickListener { askToDelete(message.id); true }
+            accessibilityDelegate = deleteLabel
         }
         if (group && !mine && message.senderId != null) {
             box.addView(Ui.content(Ui.text(this, core.senderName(message.senderId), palette.text, bold = true).apply {
@@ -683,6 +688,10 @@ class ConversationActivity : ScreenActivity() {
                 ellipsize = TextUtils.TruncateAt.END
             }))
         }
+        // A long press deletes, so the bubble is a target and is named: who wrote it, then the words.
+        box.contentDescription = listOfNotNull(
+            message.senderId?.takeIf { group && !mine }?.let { core.senderName(it) }, message.text,
+        ).joinToString(", ")
         box.addView(Ui.content(Ui.text(this, message.text, palette.text).apply {
             maxWidth = (resources.displayMetrics.widthPixels * 0.7f).toInt()
         }))
@@ -725,6 +734,37 @@ class ConversationActivity : ScreenActivity() {
         row.addView(box)
         return row
     }
+
+    /** TalkBack names a message's long press after what it does. */
+    private val deleteLabel = object : View.AccessibilityDelegate() {
+        override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(host, info)
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, getString(R.string.delete)))
+        }
+    }
+
+    private var deleteDialog: AlertDialog? = null
+
+    /** A long press asks first; the message goes from this phone only. */
+    private fun askToDelete(messageId: Long) {
+        deleteDialog?.dismiss()
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.delete_title)
+            .setMessage(R.string.delete_only_here)
+            .setPositiveButton(R.string.delete) { _, _ -> core.deleteMessage(messageId) }
+            .setNegativeButton(R.string.cancel, null)
+            .create()
+        dialog.setOnDismissListener { if (deleteDialog === dialog) deleteDialog = null }
+        deleteDialog = dialog
+        dialog.show()
+    }
+
+    override fun onDestroy() {
+        deleteDialog?.dismiss()
+        super.onDestroy()
+    }
+
+    // Test hook
+    internal val deleteDialogForTest: AlertDialog? get() = deleteDialog?.takeIf { it.isShowing }
 
     companion object {
         const val EXTRA_CHAT_ID = "chat"

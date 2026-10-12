@@ -25,6 +25,40 @@ class AppCoreTest {
 
     @After fun tearDown() = TestCore.uninstall()
 
+    @Test fun deletingStopsItsPlaybackAndALateReceiptChangesNothing() {
+        TestCore.install()
+        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val sent = sendIn(direct, "A Kofi")
+        val packet = radio.sent.single().packetId
+        main { core.play(sent.id) }
+        assertEquals(sent.id, core.playingId)
+        assertTrue(main { core.deleteMessage(sent.id) })
+        assertNull(core.playingId)
+        assertNull(core.history.message(sent.id))
+        main { radio.deliver(packet, DeliveryState.QUEUED); radio.deliver(packet, DeliveryState.ACKNOWLEDGED) }
+        assertNull(core.history.message(sent.id))
+        assertNull(core.history.lastMessage(direct))
+        assertFalse("already gone", main { core.deleteMessage(sent.id) })
+        assertEquals("nothing more goes out over the radio", 1, radio.sent.size)
+    }
+
+    @Test fun theGuideAgainBringsBackTipsAndTheHintButKeepsSetup() {
+        TestCore.install()
+        main {
+            core.settings.tipsShown = setOf("cancel", "listen")
+            core.settings.tipShowings = mapOf("lock" to 2)
+            core.settings.firstMessageSent = true
+            core.settings.setupFinished = true
+        }
+        val radioAddress = core.settings.radioAddress
+        main { core.showGuideAgain() }
+        assertTrue(core.settings.tipsShown.isEmpty())
+        assertTrue(core.settings.tipShowings.isEmpty())
+        assertFalse("the hold-to-talk hint returns", core.settings.firstMessageSent)
+        assertTrue("setup is not run again", core.settings.setupFinished)
+        assertEquals(radioAddress, core.settings.radioAddress)
+    }
+
     @Test fun aLongTranscriptIsCutAtAWordAndMarked() {
         TestCore.install()
         val group = main { core.groupChatId() }

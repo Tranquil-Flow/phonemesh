@@ -128,6 +128,10 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         }
     }
 
+    /** Removes one message; its chat stays. False when it was already gone. */
+    fun deleteMessage(messageId: Long): Boolean =
+        writableDatabase.delete("messages", "id = ?", arrayOf(messageId.toString())) > 0
+
     fun attachPacket(messageId: Long, packetId: Long) = update(messageId) { put("packet_id", packetId) }
 
     fun setStatus(messageId: Long, status: DeliveryStatus) = update(messageId) { put("delivery", status.name) }

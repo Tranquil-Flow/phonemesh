@@ -135,6 +135,10 @@
     <string name="install_pack_title">Installer ce pack de langue ?</string>
     <string name="install">Installer</string>
     <string name="cancel">Annuler</string>
+    <string name="delete">Supprimer</string>
+    <string name="delete_title">Supprimer ce message ?</string>
+    <string name="delete_only_here">Seulement sur ce téléphone. Les autres le gardent.</string>
+    <string name="guide_again">Revoir le guide</string>
     <string name="pack_download_button">Télécharger (%1$d Mo)</string>
     <string name="pack_download_cd">Télécharger %1$s</string>
     <string name="pack_cancel_cd">Annuler %1$s</string>

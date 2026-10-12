@@ -1,6 +1,7 @@
 package org.phonemesh.app
 
 import android.app.Activity
+import android.content.DialogInterface
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -8,6 +9,7 @@ import android.graphics.Color
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.ImageView
@@ -961,6 +963,41 @@ class ConversationActivityTest {
         Views.tap(a, "mic")
         assertEquals(AppCore.RecordState.IDLE, core.recordState)
         assertEquals("a rotation is not a showing", mapOf("cancel" to 1), core.settings.tipShowings)
+    }
+
+    @Test fun aLongPressAsksThenDeletesTheMessageOnThisPhoneOnly() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val now = System.currentTimeMillis()
+        val kept = TestCore.onMain { core.history.addIncoming(group, "!1234abcd", "Salut", "fr", now, countUnread = false) }
+        val gone = TestCore.onMain { core.history.addOutgoing(group, "Bonjour", "fr", now + 1) }
+        val a = open(group)
+        val bubble = checkNotNull(Views.tagged(a, "bubble:${gone.id}"))
+        val label = TestCore.onMain {
+            bubble.createAccessibilityNodeInfo().actionList.single { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK }.label
+        }
+        assertEquals("TalkBack says what a long press does", "Supprimer", label)
+        assertEquals("the bubble is named by its words", "Bonjour", TestCore.onMain { bubble.contentDescription.toString() })
+        val heard = TestCore.onMain { Views.descendants(a.window.decorView).first { it.tag == "bubble:${kept.id}" }.contentDescription.toString() }
+        assertEquals("a group message also says who wrote it", "${TestCore.onMain { core.senderName("!1234abcd") }}, Salut", heard)
+        TestCore.onMain { bubble.performLongClick() }
+        inst.waitForIdleSync()
+        val asked = checkNotNull(a.deleteDialogForTest)
+        assertEquals("Seulement sur ce téléphone. Les autres le gardent.",
+            TestCore.onMain { asked.findViewById<android.widget.TextView>(android.R.id.message).text.toString() })
+        TestCore.onMain { asked.getButton(DialogInterface.BUTTON_NEGATIVE).performClick() }
+        inst.waitForIdleSync()
+        assertNull(a.deleteDialogForTest)
+        assertNotNull("Annuler keeps it", core.history.message(gone.id))
+        TestCore.onMain { checkNotNull(Views.descendants(a.window.decorView).firstOrNull { it.tag == "bubble:${gone.id}" }).performLongClick() }
+        inst.waitForIdleSync()
+        val again = checkNotNull(a.deleteDialogForTest)
+        TestCore.onMain { again.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+        inst.waitForIdleSync()
+        assertNull(core.history.message(gone.id))
+        assertNull(Views.tagged(a, "bubble:${gone.id}"))
+        assertNotNull(Views.tagged(a, "bubble:${kept.id}"))
+        assertTrue("nothing goes over the radio", TestCore.radio.sent.isEmpty())
     }
 
     @Test fun aFailedMessageTeachesSendAgainOnceAndResendingClosesIt() {

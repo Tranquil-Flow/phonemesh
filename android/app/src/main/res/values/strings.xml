@@ -138,6 +138,10 @@
     <string name="install_pack_title">Install this language pack?</string>
     <string name="install">Install</string>
     <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
+    <string name="delete_title">Delete this message?</string>
+    <string name="delete_only_here">Only on this phone. Others keep it.</string>
+    <string name="guide_again">Show the guide again</string>
     <string name="pack_download_button">Download (%1$d MB)</string>
     <string name="pack_download_cd">Download %1$s</string>
     <string name="pack_cancel_cd">Cancel %1$s</string>

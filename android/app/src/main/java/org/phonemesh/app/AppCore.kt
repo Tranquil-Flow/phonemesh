@@ -553,6 +553,21 @@ class AppCore private constructor(
         }
     }
 
+    /** Deletes a message on this phone only: what the radio sent cannot be called back. A late receipt finds nothing. */
+    fun deleteMessage(messageId: Long): Boolean {
+        if (playingId == messageId) stopPlayback()
+        if (!history.deleteMessage(messageId)) return false
+        changed(Change.MESSAGES)
+        return true
+    }
+
+    /** Settings → Show the guide again: every tip and the hold-to-talk hint come back; the radio and voice stay. */
+    fun showGuideAgain() {
+        settings.tipsShown = emptySet()
+        settings.tipShowings = emptyMap()
+        settings.firstMessageSent = false
+    }
+
     // ---- Playback
 
     /** Plays a message; tapping the one playing stops it. One at a time. */

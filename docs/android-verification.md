@@ -278,6 +278,16 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-11.
 - Later, 2026-10-12: the "slide left" tip shows only while a finger holds the microphone; locking by hand ends it as one showing, with no other tip in that recording (`TipsTest`, `ConversationActivityTest`). 363 selected tests, all passed; `07-recording-tip*.png` now shows a held recording.
 - Later, 2026-10-12: the "slide up to lock" tip follows the same rule. A finger counts as holding only after `RecordGesture.TAP_MS` (300 ms), so a quick tap with a real finger never flashes a tip; a rotation lifts the hold and its tip leaves without counting a showing (`TipsTest`, `ConversationActivityTest`). 364 selected tests, all passed; `07-recording*.png` (a tapped recording) now shows no tip.
 
+### Show the guide again, deleting a message
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. The owner raised the growth allowance and both APK ceilings by 100 KB for this work (350,000 B; arm64 12,800,000 B; armeabi-v7a 11,800,000 B); it used about 1.7 KB.
+
+- `scripts/check.sh`: `CHECK_OK`. Release APKs grew to +243163 B (arm64-v8a) and +243167 B (armeabi-v7a) over the size before the visual guide.
+- Instrumented tests: 369 selected tests, all passed. No screenshot state changed: the new Settings button sits below the part `09-settings` shows; it was checked on the emulator with the capture-allowed debug build.
+- Settings → "Show the guide again" / "Revoir le guide" brings back every tip and the hold-to-talk hint, then opens the welcome story. The radio, the voices and the finished setup stay (`AppCoreTest`, `SettingsActivityTest`).
+- A long press on a message asks "Delete this message?" / "Supprimer ce message ?" with "Only on this phone. Others keep it."; Cancel keeps it. Deleting stops its playback, sends nothing, and a late delivery report finds nothing (`HistoryTest`, `AppCoreTest`, `ConversationActivityTest`). Each bubble is named for TalkBack (the sender in a group, then the words) and its long press is read as "Delete".
+- Still to make: a how-to picture for the long press (deleting has no tip yet).
+
 ## Radio region: Togo legal notes and results
 
 Spec: `docs/specs/2026-10-07-radio-region-design.md`.

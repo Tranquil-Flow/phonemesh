@@ -40,6 +40,13 @@ class SettingsActivity : ScreenActivity() {
         column.addView(section(R.string.settings_packs))
         packList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "packs" }
         column.addView(packList)
+        column.addView(Ui.button(this, palette, getString(R.string.guide_again), R.drawable.ic_help).apply {
+            tag = "guide_again"
+            setOnClickListener {
+                core.showGuideAgain()
+                startActivity(Intent(this@SettingsActivity, LanguageActivity::class.java))
+            }
+        }, spaced())
         column.addView(Ui.button(this, palette, getString(R.string.share_app), R.drawable.ic_send).apply {
             tag = "share"
             setOnClickListener { shareApp() }

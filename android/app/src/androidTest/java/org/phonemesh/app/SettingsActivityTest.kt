@@ -52,6 +52,24 @@ class SettingsActivityTest {
         Views.finish(Views.resumed())
     }
 
+    @Test fun showTheGuideAgainOpensTheWelcomeStoryWithTheTipsBack() {
+        TestCore.install()
+        TestCore.onMain { TestCore.core.settings.tipsShown = setOf("cancel"); TestCore.core.settings.setupFinished = true }
+        val packs = TestCore.core.store.list().map { it.id }
+        activity = Views.start(SettingsActivity::class.java)
+        assertEquals("Revoir le guide", Views.textOf(Views.tagged(activity!!, "guide_again")!!))
+        Views.tap(activity!!, "guide_again")
+        Views.waitUntil {
+            ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED).firstOrNull() is LanguageActivity
+        }
+        val welcome = Views.resumed()!!
+        assertNotNull("the welcome story", Views.tagged(welcome, "story"))
+        assertTrue(TestCore.core.settings.tipsShown.isEmpty())
+        assertTrue(TestCore.core.settings.setupFinished)
+        assertEquals("the voices stay", packs, TestCore.core.store.list().map { it.id })
+        Views.finish(welcome)
+    }
+
     @Test fun everyCatalogPackIsListedWithItsSize() {
         TestCore.install(voices = emptyList())
         activity = Views.start(SettingsActivity::class.java)

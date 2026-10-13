@@ -68,6 +68,7 @@ class HelpActivityTest {
         val groups = listOf(
             listOf("download", "friend", "power", "close", "search", "pair", "hello"),
             listOf("cancel", "lock", "listen", "delivery", "failed", "arrive"),
+            listOf("hold", "reply", "react", "forward", "delete", "pin", "later", "later_pick"),
             listOf("lost", "bt", "short", "notheard", "mic"),
             listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"),
         )
@@ -80,6 +81,7 @@ class HelpActivityTest {
             listOf("help_group:$index") + scenes.filter { it != "pair" || HowTo.showPair }.map { "help:$it" }
         }, order)
         assertNotNull(Views.withText(screen, "Problèmes rares"))
+        assertNotNull(Views.withText(screen, "Autres gestes"))
         expected.forEach { scene ->
             assertEquals(screen.getString(HowTo.sentence(scene)), TestCore.onMain {
                 Views.descendants(rowOnMain(screen, scene)).filterIsInstance<android.widget.TextView>()

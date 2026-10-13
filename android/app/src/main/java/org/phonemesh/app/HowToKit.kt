@@ -20,15 +20,68 @@ import kotlin.math.sqrt
  * (rings, blinking light, voice bars, waves, dots) are drawn from it. [fade] multiplies every colour's opacity.
  * Paths and paints are built once; drawing allocates nothing.
  */
-class HowToKit(val words: Words) {
+class HowToKit(val words: Words, private val context: Context? = null) {
     /** Words drawn inside pictures, in the app's language. */
-    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String, val allow: String, val clear: String, val send: String) {
+    data class Words(val bonjour: String, val waiting: String, val sent: String, val delivered: String, val resend: String, val on: String, val allow: String, val clear: String, val send: String, val chat: Chat = Chat.EMPTY) {
         companion object {
             fun of(context: Context) = Words(
                 StoryTimeline.WORD, context.getString(R.string.status_waiting), context.getString(R.string.status_sent),
                 context.getString(R.string.status_delivered), context.getString(R.string.resend), context.getString(R.string.howto_on),
                 context.getString(R.string.howto_allow_button), context.getString(R.string.draft_clear), context.getString(R.string.send),
+                Chat.of(context),
             )
+        }
+    }
+
+    /**
+     * The chat-gesture pictures' words: every label is the app's own string, so a picture shows the screen's words;
+     * times and dates are formatted as the phone formats them.
+     */
+    data class Chat(
+        val reply: String, val react: String, val copy: String, val share: String, val forward: String, val delete: String,
+        val cancel: String, val forwardTo: String, val group: String, val pin: String, val deleteChat: String, val later: String,
+        val planTitle: String, val today: String, val tomorrow: String, val pickDay: String, val schedule: String,
+        val market: String, val coming: String, val market8: String, val hello: String, val seeYou: String,
+        /** Times in the pictures: 17:45, 18:00, 18:15, 08:45, 08:00, as the phone writes them. */
+        val t1745: String, val t1800: String, val t1815: String, val t0845: String, val t0800: String,
+        val sendsAt1815: String, val plannedFor1815: String,
+        /** The demo calendar: Monday 12 October 2026 and Thursday the 15th. */
+        val header12: String, val header15: String, val month: String, val weekdays: List<String>, val firstColumn: Int,
+        val chosenDay: String, val is24Hour: Boolean, val year: String,
+    ) {
+        companion object {
+            val EMPTY = Chat("", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", emptyList(), 0, "", true, "")
+
+            fun of(context: Context): Chat {
+                val locale = context.resources.configuration.locales[0]
+                val zone = java.time.ZoneId.systemDefault()
+                fun millis(day: Int, h: Int, m: Int) = java.time.LocalDateTime.of(2026, 10, day, h, m).atZone(zone).toInstant().toEpochMilli()
+                val time = android.text.format.DateFormat.getTimeFormat(context)
+                fun t(h: Int, m: Int) = time.format(java.util.Date(millis(12, h, m)))
+                fun date(skeleton: String, day: Int) = Ui.date(context, millis(day, 12, 0), skeleton, zone)
+                val calendar = java.util.Calendar.getInstance(locale)
+                val symbols = java.text.DateFormatSymbols.getInstance(locale).shortWeekdays
+                // Calendar weekdays run Sunday = 1 .. Saturday = 7; the columns start on the locale's first day.
+                val order = (0 until 7).map { (calendar.firstDayOfWeek - 1 + it) % 7 + 1 }
+                val firstOfMonth = java.time.LocalDate.of(2026, 10, 1).dayOfWeek.value % 7 + 1
+                return Chat(
+                    context.getString(R.string.reply), context.getString(R.string.react), context.getString(R.string.copy),
+                    context.getString(R.string.share_text), context.getString(R.string.forward), context.getString(R.string.delete),
+                    // Android writes a dialog's buttons in capitals, in the app's accent.
+                    context.getString(R.string.cancel).uppercase(locale), context.getString(R.string.forward_to), context.getString(R.string.group_name),
+                    context.getString(R.string.pin_chat), context.getString(R.string.delete_chat), context.getString(R.string.later),
+                    context.getString(R.string.plan_title), context.getString(R.string.today), context.getString(R.string.tomorrow),
+                    context.getString(R.string.plan_pick_day), context.getString(R.string.plan_go),
+                    context.getString(R.string.howto_msg_market), context.getString(R.string.howto_msg_coming),
+                    context.getString(R.string.howto_msg_market8), context.getString(R.string.howto_msg_hello),
+                    context.getString(R.string.howto_msg_tomorrow),
+                    t(17, 45), t(18, 0), t(18, 15), t(8, 45), t(8, 0),
+                    context.getString(R.string.sends_at, t(18, 15)), context.getString(R.string.planned_for, t(18, 15)),
+                    date("EEEMMMd", 12), date("EEEMMMd", 15), date("LLLLyyyy", 12),
+                    order.map { symbols[it].trim('.').take(1).uppercase(locale) }, order.indexOf(firstOfMonth),
+                    date("EEEEdMMMM", 15), android.text.format.DateFormat.is24HourFormat(context), "2026",
+                )
+            }
         }
     }
 
@@ -64,6 +117,7 @@ class HowToKit(val words: Words) {
         strokeJoin = Paint.Join.ROUND
     }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD }
+    private val icons = android.util.SparseArray<android.graphics.drawable.Drawable>()
     private val r = RectF()
     private val path = Path()
     private val dash46 = DashPathEffect(floatArrayOf(4f, 6f), 0f)
@@ -162,12 +216,37 @@ class HowToKit(val words: Words) {
         if (stroke > 0f) c.drawCircle(x, y, radius, line(width = stroke))
     }
 
-    fun text(c: Canvas, value: String, x: Float, y: Float, size: Float, color: Int = C.INK, align: Paint.Align = Paint.Align.CENTER) {
+    fun text(c: Canvas, value: String, x: Float, y: Float, size: Float, color: Int = C.INK, align: Paint.Align = Paint.Align.CENTER, bold: Boolean = true) {
+        textPaint.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         textPaint.color = color
         textPaint.alpha = alpha(1f)
         textPaint.textSize = size
         textPaint.textAlign = align
         c.drawText(value, x, y, textPaint)
+    }
+
+    /** Text no wider than [width]: shrunk to fit, so a longer translation never runs out of its box. */
+    fun fitted(c: Canvas, value: String, x: Float, y: Float, size: Float, width: Float, color: Int = C.INK, align: Paint.Align = Paint.Align.CENTER, bold: Boolean = true) {
+        textPaint.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        textPaint.textSize = size
+        val measured = textPaint.measureText(value)
+        text(c, value, x, y, if (measured > width) size * width / measured else size, color, align, bold)
+    }
+
+    /**
+     * One of the app's own icons (res/drawable, 24 units), centred on (x, y) at [size] units and tinted [color];
+     * [tint] false keeps its colours (sun, moon). Without a context (unit tests) nothing is drawn.
+     */
+    fun icon(c: Canvas, res: Int, x: Float, y: Float, size: Float, color: Int = C.INK, tint: Boolean = true) {
+        val drawable = icons[res] ?: context?.getDrawable(res)?.mutate()?.also { icons.put(res, it) } ?: return
+        if (tint) drawable.setTint(color) else drawable.setTintList(null)
+        drawable.alpha = alpha(1f)
+        drawable.setBounds(0, 0, 24, 24)
+        c.save()
+        c.translate(x - size / 2, y - size / 2)
+        c.scale(size / 24f, size / 24f)
+        drawable.draw(c)
+        c.restore()
     }
 
     /** The mockup's `phone(x, y)`: 30 × 54, screen 24 × 40 at (3, 5). */

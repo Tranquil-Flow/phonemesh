@@ -25,7 +25,7 @@ class HowToView(context: Context, scene: HowToScene) : View(context) {
     var onLoop: (() -> Unit)? = null
     val isRunning: Boolean get() = running
     private var values = FloatArray(scene.names.size)
-    private val kit = HowToKit(HowToKit.Words.of(context))
+    private val kit = HowToKit(HowToKit.Words.of(context), context)
     private val read = HowToValues()
     private var running = false
     private var shown = false

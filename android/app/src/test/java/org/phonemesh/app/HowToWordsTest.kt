@@ -8,7 +8,7 @@ import java.io.File
 /** Every setup picture has a localized sentence; unqualified pairing stays off. */
 class HowToWordsTest {
     private fun names(dir: String) = File("src/main/res/$dir/strings.xml").readText()
-        .let { text -> Regex("<string name=\"(howto_[a-z]+)\"").findAll(text).map { it.groupValues[1] }.toSet() }
+        .let { text -> Regex("<string name=\"(howto_[a-z_]+)\"").findAll(text).map { it.groupValues[1] }.toSet() }
 
     @Test fun everySceneHasASentence() {
         val english = names("values")

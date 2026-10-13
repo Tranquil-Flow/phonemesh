@@ -36,8 +36,9 @@ class ScreenChecksTest {
             "01-welcome-1", "01-welcome-3", "01-welcome-5", "01-welcome-still",
             "01-language-from-settings", "02-chats-step1", "02-chats-step1-offline", "02-chats-friend-guide",
             "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
-            "05-conversation-mic-hint", "05-conversation-tip", "05-conversation-reply", "06-draft-too-long", "06-draft-cut", "06-draft-planned", "07-recording",
-            "07-recording-tip", "07-writing", "08-radio", "09-settings", "10-help", "11-note-picture",
+            "05-conversation-mic-hint", "05-conversation-tip", "05-conversation-reply", "05-forward-to", "05-hold-tip",
+            "06-draft-too-long", "06-draft-cut", "06-draft-planned", "06-plan-window", "06-plan-window-day", "06-plan-clock", "06-plan-calendar",
+            "07-recording", "07-recording-tip", "07-writing", "08-radio", "09-settings", "10-help", "10-help-more", "11-note-picture",
         )
         assertEquals(names, ScreenStates.all.map { it.first })
         assertEquals(names.map { "$it-dark" }, ScreenStates.dark.map { it.first })
@@ -50,6 +51,8 @@ class ScreenChecksTest {
     @Test fun conversation() = check(minTargets = 6, minRows = 4) { ScreenStates.conversation() }
     @Test fun conversationReply() = check(minTargets = 4, minRows = 2) { ScreenStates.conversationReply() }
     @Test fun draftPlanned() = check(minTargets = 4, minRows = 2) { ScreenStates.draftPlanned() }
+    @Test fun holdTip() = check(minTargets = 6, minRows = 2) { ScreenStates.holdTip() }
+    @Test fun helpMore() = check(minTargets = 8) { ScreenStates.help(group = 2) }
     @Test fun conversationTip() = check(minTargets = 6, minRows = 2) { ScreenStates.conversationTip() }
     @Test fun draftTooLong() = check(minTargets = 3) { ScreenStates.draftTooLong() }
     @Test fun draftCut() = check(minTargets = 4) { ScreenStates.draftCut() }

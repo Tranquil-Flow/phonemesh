@@ -389,3 +389,17 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-10. No real rad
 | Local `get_config` reply and passkey behaviour on real firmware | pending — owner |
 | Country guess from a real SIM or network | pending — owner |
 | Visual check of the cards and lists on the Pixel 8 Pro and the Fairphone 3 | pending — owner |
+
+### Chat-gesture pictures, the "hold" tip, the time window and forward pictures
+
+Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Owner approved round 10 (`.local/visual-guide-mockups/phonemesh-howto-chat-r10.html`). Spec: `docs/specs/2026-10-12-chat-features-design.md`.
+
+- Gate `chat4-gate3`: `GATE_OK`. 400 instrumented tests selected, all passed. After it, the time window's sun and moon got their own icons (`ic_plan_sun`, `ic_plan_moon`): the first version had overwritten Settings' Light/Dark icons. Gate `chat4-gate5` with that fix built and passed the size check (+302,671 B), but its device tests were cut short: the Mac had restarted, and the emulator came back with broken graphics ("Failed to find ColorBuffer"), so animated pictures never let the screen go idle. After a clean emulator restart, the classes in the failed batches passed on their own: `ThemeTest` (now counting 36 icons), `ChatsActivityTest`, `HowToViewTest` 14/14 and `ScreenChecksTest` 40/40. JVM: 207 core tests (new `PlanWindowTest` 8, `HowToScenesTest` and `TipsTest` extended) and 105 app unit tests. Release APKs: +302,671 B over the size before the visual guide (allowance 350,000 B); this work added about 33 KB.
+- "Envoyer plus tard" replaces the three preset times: Aujourd'hui / Demain, "Choisir un jour" (Android's calendar, today to a year ahead), the time between − and + (15 minutes), the time opening Android's clock, sun or moon, a past time red with Planifier off, the speaker reading the choice. Opens one hour ahead, rounded up to a quarter (`ConversationActivityTest`: the window, a past time, the calendar).
+- Dates in the window, the planned row and Android's clock and calendar follow the app's language, not the phone's. A first gate showed "Mon, Oct 12" and "Thursday 15 October" in a French app; `Ui.date` and `Ui.inAppLanguage` fixed it, and a test checks it.
+- Dialog buttons ("Annuler", "OK") are now 18 sp and named for TalkBack (`Actions.readable`), which `A11yCheck` can now check in dialogs too.
+- "Transférer à…" shows each chat's picture beside its name.
+- The "hold a message" tip shows once after the "A message came" tip was closed; a long press also counts as learned.
+- Help has a new group, "Autres gestes", with eight pictures: hold, reply, react, forward, delete, pin, later, later_pick. They draw the app's own icons and words. Four approved sentences were shortened to meet the eight-word rule (see the spec).
+- New screenshot states (light and dark): `05-forward-to`, `05-hold-tip`, `06-plan-window`, `06-plan-window-day`, `06-plan-clock`, `06-plan-calendar`, `10-help-more`; plus eight `howto-*.png` stills. No existing screenshot changed. `docs/screenshots-phase3/` holds 135 files.
+- Not checked on a phone: the real alarm sending a planned message while the app is closed, and the Fairphone (Android 10) look of the clock and calendar.

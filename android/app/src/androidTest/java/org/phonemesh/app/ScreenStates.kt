@@ -143,10 +143,15 @@ object ScreenStates {
         return screen
     }
 
-    fun help(): Activity {
+    fun help(group: Int = 0): Activity {
         TestCore.install()
         val screen = Views.start(HelpActivity::class.java)
         expect(Views.tagged(screen, "help:power") != null, "the Help rows")
+        if (group > 0) {
+            val title = checkNotNull(Views.tagged(screen, "help_group:$group"))
+            TestCore.onMain { (screen.window.decorView.let { Views.descendants(it) }.first { it is android.widget.ScrollView } as android.widget.ScrollView).scrollTo(0, title.top) }
+            inst.waitForIdleSync()
+        }
         return screen
     }
 
@@ -216,6 +221,70 @@ object ScreenStates {
         val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
         expect(tagsOf(screen, "planned:").size == 1, "one planned message above the draft")
         expect(Views.tagged(screen, "draft_later") != null, "the Later button under the draft")
+        return screen
+    }
+
+    /** A draft with "Send later" open; [step] goes further: a day chosen, Android's clock, or Android's calendar. */
+    fun planWindow(step: String = ""): Activity {
+        TestCore.install()
+        val group = seedChats()
+        TestCore.onMain {
+            TestCore.core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet()
+            TestCore.core.setDraft(group, "Et pensez au pain.")
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        Views.tap(screen, "draft_later")
+        val window = checkNotNull((screen as ConversationActivity).planForTest)
+        fun tap(tag: String) {
+            TestCore.onMain { Views.descendants(window.dialog.window!!.decorView).first { it.tag == tag }.performClick() }
+            inst.waitForIdleSync()
+        }
+        when (step) {
+            "day" -> {
+                tap("plan_day")
+                val day = java.time.LocalDate.now().plusDays(3)
+                TestCore.onMain {
+                    val calendar = window.picker as android.app.DatePickerDialog
+                    calendar.updateDate(day.year, day.monthValue - 1, day.dayOfMonth)
+                    calendar.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+                }
+                inst.waitForIdleSync()
+                expect(TestCore.onMain { Views.descendants(window.dialog.window!!.decorView).first { it.tag == "plan_day" }.isSelected }, "the chosen day")
+            }
+            "clock" -> { tap("plan_time"); expect(window.picker is android.app.TimePickerDialog, "Android's clock") }
+            "calendar" -> { tap("plan_day"); expect(window.picker is android.app.DatePickerDialog, "Android's calendar") }
+            else -> expect(TestCore.onMain { window.dialog.isShowing }, "the time window")
+        }
+        return screen
+    }
+
+    /** "Forward to…": each other chat with its picture. */
+    fun forwardTo(): Activity {
+        TestCore.install()
+        val group = seedChats()
+        TestCore.onMain { TestCore.core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        val heard = TestCore.onMain { TestCore.core.history.messages(group).first { it.direction == Direction.IN } }
+        TestCore.onMain { Views.descendants(screen.window.decorView).first { it.tag == "bubble:${heard.id}" }.performLongClick() }
+        inst.waitForIdleSync()
+        val menu = checkNotNull((screen as ConversationActivity).dialogForTest)
+        TestCore.onMain { Views.descendants(menu.window!!.decorView).first { it.tag == "action_forward" }.performClick() }
+        inst.waitForIdleSync()
+        val list = checkNotNull(screen.dialogForTest)
+        expect(TestCore.onMain { Views.descendants(list.window!!.decorView).any { (it.tag as? String)?.startsWith("forward_to:") == true } }, "the chats to forward to")
+        return screen
+    }
+
+    /** The one-time "hold a message" tip, after the arrival tip was closed. */
+    fun holdTip(): Activity {
+        TestCore.install()
+        val group = seedChats()
+        TestCore.onMain {
+            TestCore.core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() - "hold"
+            TestCore.core.setDraft(group, null)
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
+        expect(Views.tagged(screen, "tip:hold") != null, "the hold tip")
         return screen
     }
 
@@ -549,15 +618,22 @@ object ScreenStates {
         "05-conversation-mic-hint" to { conversationMicHint() },
         "05-conversation-tip" to { conversationTip() },
         "05-conversation-reply" to { conversationReply() },
+        "05-forward-to" to { forwardTo() },
+        "05-hold-tip" to { holdTip() },
         "06-draft-too-long" to { draftTooLong() },
         "06-draft-cut" to { draftCut() },
         "06-draft-planned" to { draftPlanned() },
+        "06-plan-window" to { planWindow() },
+        "06-plan-window-day" to { planWindow("day") },
+        "06-plan-clock" to { planWindow("clock") },
+        "06-plan-calendar" to { planWindow("calendar") },
         "07-recording" to { recordingLocked() },
         "07-recording-tip" to { recordingTip() },
         "07-writing" to { writing() },
         "08-radio" to { radio() },
         "09-settings" to { settings() },
         "10-help" to { help() },
+        "10-help-more" to { help(group = 2) },
         "11-note-picture" to { noteWithPicture() },
     )
 

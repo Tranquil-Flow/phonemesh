@@ -3,6 +3,7 @@ package org.phonemesh.app
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import org.phonemesh.core.HowToScenes
 
 /** All how-to pictures, with their sentence and speaker, grouped for the Help page. */
 class HelpActivity : ScreenActivity() {
@@ -40,6 +41,7 @@ class HelpActivity : ScreenActivity() {
         val GROUPS: List<Pair<Int, List<String>>> = listOf(
             R.string.help_setup to listOf("download", "friend", "power", "close", "search", "pair", "hello"),
             R.string.help_talking to listOf("cancel", "lock", "listen", "delivery", "failed", "arrive"),
+            R.string.help_more to HowToScenes.MORE,
             R.string.help_problems to listOf("lost", "bt", "short", "notheard", "mic"),
             R.string.help_rare to listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"),
         )

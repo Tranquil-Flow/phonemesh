@@ -62,8 +62,9 @@ class HowToViewTest {
                 for (i in 0..50) {
                     view.freezeAt(i / 50f)
                     view.draw(canvas)
-                    // The search rings legitimately cross (12, 100); use a clear corner instead.
-                    assertEquals("$name panel at $i", HowToKit.C.PANEL, bitmap.getPixel(12, 12))
+                    // The search rings legitimately cross (12, 100), and the chat pictures' windows start at
+                    // (6, 4) units; the corner (2, 2) units stays clear in every picture.
+                    assertEquals("$name panel at $i", HowToKit.C.PANEL, bitmap.getPixel(4, 4))
                 }
                 // Optional silent bitmap export; never audio, microphone or radio operations.
                 if (InstrumentationRegistry.getArguments().getString("howtoExport") == "true") {

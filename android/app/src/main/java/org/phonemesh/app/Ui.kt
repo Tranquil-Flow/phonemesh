@@ -23,6 +23,29 @@ object Ui {
 
     fun dp(context: Context, value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
 
+    /** The app's language (it may differ from the phone's). */
+    fun locale(context: Context): java.util.Locale = context.resources.configuration.locales[0]
+
+    /**
+     * A date in the app's language, from an Android skeleton ("EEEEdMMMM" gives "jeudi 15 octobre"). Android's own
+     * DateFormat.format names days and months in the phone's language, so it is not used for words.
+     */
+    fun date(context: Context, millis: Long, skeleton: String, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+        val locale = locale(context)
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton)
+        return java.time.format.DateTimeFormatter.ofPattern(pattern, locale).format(java.time.Instant.ofEpochMilli(millis).atZone(zone))
+    }
+
+    /**
+     * Builds one of Android's own windows (date, time) with the app's language as the default for the moment, since
+     * those windows read some words from the default language rather than from their context.
+     */
+    fun <T> inAppLanguage(context: Context, build: () -> T): T {
+        val before = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(locale(context))
+        return try { build() } finally { java.util.Locale.setDefault(before) }
+    }
+
     fun outline(context: Context, fill: Int, stroke: Int, radiusDp: Int = 12, strokeDp: Int = 2, dashed: Boolean = false) =
         GradientDrawable().apply {
             setColor(fill)
@@ -133,6 +156,6 @@ object Icons {
         R.drawable.ic_moon, R.drawable.ic_no_signal, R.drawable.ic_pause, R.drawable.ic_person, R.drawable.ic_play,
         R.drawable.ic_plus, R.drawable.ic_radio_off, R.drawable.ic_radio_on, R.drawable.ic_retry, R.drawable.ic_search,
         R.drawable.ic_send, R.drawable.ic_sent, R.drawable.ic_speaker, R.drawable.ic_stop, R.drawable.ic_sun,
-        R.drawable.ic_warning,
+        R.drawable.ic_warning, R.drawable.ic_calendar, R.drawable.ic_plan_sun, R.drawable.ic_plan_moon,
     )
 }

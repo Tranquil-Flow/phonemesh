@@ -94,14 +94,16 @@ Eight talking pictures, approved in round 10: `.local/visual-guide-mockups/phone
 
 | Scene | Sentence (EN / FR) |
 |---|---|
-| `hold` | Hold a message to see what you can do. / Maintenez un message pour voir ce que vous pouvez faire. |
+| `hold` | Hold a message to see your choices. / Maintenez un message pour voir les choix. |
 | `reply` | Tap "Reply" to answer one message. / Touchez « Répondre » pour répondre à un message. |
 | `react` | Tap a picture to answer quickly. / Touchez une image pour répondre vite. |
 | `forward` | Send the same words to another chat. / Envoyez les mêmes mots à une autre discussion. |
 | `delete` | Deleted here only. Others keep it. / Supprimé ici seulement. Les autres le gardent. |
-| `pin` | Hold a chat to pin it on top or delete it. / Maintenez une discussion pour l'épingler en haut ou la supprimer. |
-| `later` | Tap "Later" to send it at the time you choose. / Touchez « Plus tard » pour l'envoyer à l'heure choisie. |
-| `later_pick` | Tap the time for the clock, the calendar for another day. / Touchez l'heure pour l'horloge, le calendrier pour un autre jour. |
+| `pin` | Hold a chat to pin or delete it. / Maintenez une discussion pour l'épingler ou la supprimer. |
+| `later` | Tap "Later" and choose when it goes. / Touchez « Plus tard » pour l'envoyer à l'heure choisie. |
+| `later_pick` | Tap the time or the calendar to choose. / Touchez l'heure ou le calendrier pour choisir. |
+
+Four approved sentences (hold, pin, later_pick, and English later) were longer than the app's eight-word rule (`CopyRules`). They were shortened when built; the table shows the built wording.
 
 UI changes these pictures require:
 - **"Transférer à…":** shows each chat's picture beside its name (the group's yellow square, a person's circle).

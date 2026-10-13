@@ -36,7 +36,8 @@ class TipsTest {
         assertEquals(Tip.FAILED, Tips.next(TipPlace.CHAT, all, emptySet()))
         assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, all, setOf("failed")))
         assertEquals(Tip.DELIVERY, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive")))
-        assertNull(Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive", "delivery")))
+        assertEquals(Tip.HOLD, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive", "delivery")))
+        assertNull(Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive", "delivery", "hold")))
     }
 
     @Test fun aGroupChatNeverPromisesDelivered() {
@@ -44,13 +45,25 @@ class TipsTest {
         val group = all.copy(direct = false)
         assertEquals(Tip.FAILED, Tips.next(TipPlace.CHAT, group, emptySet()))
         assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, group, setOf("failed")))
-        assertNull(Tips.next(TipPlace.CHAT, group, setOf("failed", "arrive")))
+        assertEquals(Tip.HOLD, Tips.next(TipPlace.CHAT, group, setOf("failed", "arrive")))
+        assertNull(Tips.next(TipPlace.CHAT, group, setOf("failed", "arrive", "hold")))
         assertEquals("unseen in the group, so a private chat still shows it",
             Tip.DELIVERY, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive")))
     }
 
-    @Test fun eachTipIsATalkingScene() =
-        assertEquals(HowToScenes.TALKING.toSet(), Tip.entries.map { it.key }.toSet())
+    @Test fun eachTipIsATalkingSceneOrHold() =
+        assertEquals(HowToScenes.TALKING.toSet() + "hold", Tip.entries.map { it.key }.toSet())
+
+    @Test fun holdingAMessageIsTaughtOnlyAfterTheArrivalTipWasClosed() {
+        val received = TipFacts(sent = false, failed = false, received = true, direct = true)
+        assertEquals(Tip.ARRIVE, Tips.next(TipPlace.CHAT, received, emptySet()))
+        assertEquals("arrival only shown, not closed", null, Tips.next(TipPlace.CHAT, received, emptySet(), mapOf("arrive" to 3)))
+        assertEquals(Tip.HOLD, Tips.next(TipPlace.CHAT, received, setOf("arrive")))
+        assertNull("nothing to hold yet", Tips.next(TipPlace.CHAT, none, setOf("arrive")))
+        assertNull("learned", Tips.next(TipPlace.CHAT, received, setOf("arrive", "hold")))
+        assertEquals("the older tips come first", Tip.DELIVERY, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive")))
+        assertEquals(Tip.HOLD, Tips.next(TipPlace.CHAT, all, setOf("failed", "arrive", "delivery")))
+    }
 
     @Test fun theTipShownInFewerMomentsComesFirstSoCancelAndLockTakeTurns() {
         assertEquals(Tip.LOCK, Tips.next(TipPlace.RECORDING, none, emptySet(), mapOf("cancel" to 1)))

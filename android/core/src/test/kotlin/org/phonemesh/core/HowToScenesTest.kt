@@ -79,7 +79,7 @@ class HowToScenesTest {
     @Test fun theProblemScenesAreThere() {
         assertEquals(listOf("bt", "short", "notheard", "mic"), HowToScenes.PROBLEMS)
         assertEquals(listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"), HowToScenes.RARE)
-        assertEquals(listOf(HowToScenes.SETUP, HowToScenes.TALKING, HowToScenes.PROBLEMS, HowToScenes.RARE), HowToScenes.groups)
+        assertEquals(listOf(HowToScenes.SETUP, HowToScenes.TALKING, HowToScenes.MORE, HowToScenes.PROBLEMS, HowToScenes.RARE), HowToScenes.groups)
     }
 
     @Test fun problemAndRareActionsMatchTheApprovedKeyframes() {
@@ -150,9 +150,53 @@ class HowToScenesTest {
         }
     }
 
-    @Test fun everySceneLastsFiveToEightSeconds() {
-        HowToScenes.all.values.forEach { assertTrue(it.name, it.durationMs in 5_000L..8_000L) }
+    @Test fun everySceneLastsFiveToEightSecondsExceptTheTwoLongerApprovedOnes() {
+        // Forward (four steps) and the clock-and-calendar picture were approved at 9 s and 10 s (round 10, 2026-10-12).
+        val longer = mapOf("forward" to 9_000L, "later_pick" to 10_000L)
+        HowToScenes.all.values.forEach { assertTrue(it.name, it.durationMs in 5_000L..8_000L || longer[it.name] == it.durationMs) }
         assertEquals(5_000L, HowToScenes.get("power").durationMs)
+    }
+
+    @Test fun theChatGesturesAreThereInHelpOrder() =
+        assertEquals(listOf("hold", "reply", "react", "forward", "delete", "pin", "later", "later_pick"), HowToScenes.MORE)
+
+    @Test fun chatGestureActionsMatchTheApprovedRoundTen() {
+        fun key(scene: String, track: String, t: Float, expected: Float) =
+            assertEquals("$scene.$track at $t", expected, HowToScenes.get(scene).value(track, t), 1e-4f)
+        key("hold", "press", .46f, 1f)
+        key("hold", "menu", .54f, 1f)
+        (0 until 6).forEach { key("hold", "row$it", (56 + it * 6.5f) / 100 + .03f, 1f) }
+        key("reply", "row0", .25f, 1f)
+        key("reply", "finger.dy", .24f, 2f)
+        key("reply", "quote", .4f, 1f)
+        key("reply", "answer.dy", .7f, 0f)
+        key("react", "lit", .31f, 1f)
+        key("react", "fly.dx", .56f, -131f)
+        key("react", "chip", .58f, 1f)
+        key("forward", "row", .25f, 1f)
+        key("forward", "pick", .45f, 1f)
+        key("forward", "finger.dx", .44f, 112f)
+        key("forward", "send", .75f, 1f)
+        key("forward", "finger.dy", .75f, 43f)
+        key("delete", "lid", .36f, -35f)
+        key("delete", "up", .64f, -28f)
+        key("pin", "row", .4f, 1f)
+        key("pin", "finger.dy", .39f, -46f)
+        key("pin", "move", .62f, 1f)
+        key("later", "button", .1f, 1f)
+        key("later", "time", .25f, 1f)
+        key("later", "time", .3f, 2f)
+        key("later", "go", .4f, 1f)
+        key("later", "wait", .51f, 1f)
+        key("later", "sent", .84f, 1f)
+        key("later_pick", "timeLit", .11f, 1f)
+        key("later_pick", "header", .25f, 1f)
+        key("later_pick", "minutes", .3f, 1f)
+        key("later_pick", "header", .33f, 2f)
+        key("later_pick", "time", .43f, 1f)
+        key("later_pick", "day", .63f, 1f)
+        key("later_pick", "chosen", .74f, 1f)
+        key("later_pick", "today", .74f, 0f)
     }
 
     @Test fun everyStillFrameShowsTheAction() {

@@ -1069,28 +1069,122 @@ class ConversationActivityTest {
         assertEquals("Réactions : 👍 2", TestCore.onMain { shown.contentDescription.toString() })
     }
 
-    @Test fun laterPlansTheDraftAndShowsItAboveTheDraftUntilCancelled() {
+    private fun planWindow(a: ConversationActivity): PlanDialog {
+        Views.tap(a, "draft_later")
+        val window = checkNotNull(a.planForTest)
+        assertTrue(TestCore.onMain { window.dialog.isShowing })
+        return window
+    }
+
+    /** Call on the main thread. */
+    private fun inPlan(window: PlanDialog, tag: String): View =
+        checkNotNull(Views.descendants(window.dialog.window!!.decorView).firstOrNull { it.tag == tag }) { tag }
+
+    private fun tapPlan(window: PlanDialog, tag: String) {
+        TestCore.onMain { inPlan(window, tag).performClick() }
+        inst.waitForIdleSync()
+    }
+
+    @Test fun laterOpensTheTimeWindowAnHourAheadAndPlansWhatIsChosen() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }
         TestCore.onMain { core.setDraft(group, "Rendez-vous au puits") }
         val a = open(group)
-        Views.tap(a, "draft_later")
-        val menu = checkNotNull(a.dialogForTest)
-        val offered = TestCore.onMain { Views.descendants(menu.window!!.decorView).mapNotNull { it.tag as? String }.filter { it.startsWith("plan_") } }
-        assertTrue(offered.toString(), offered.first() == "plan_hour" && offered.last() == "plan_morning")
-        tapInDialog(menu, "plan_hour")
+        val zone = java.time.ZoneId.systemDefault()
+        val before = System.currentTimeMillis()
+        val window = planWindow(a)
+        val opened = window.due
+        assertTrue("an hour ahead, rounded up to a quarter",
+            opened in org.phonemesh.core.PlanWindow.opening(before, zone)..org.phonemesh.core.PlanWindow.opening(System.currentTimeMillis(), zone))
+        assertTrue(TestCore.onMain { inPlan(window, "plan_today").isSelected })
+        assertFalse(TestCore.onMain { inPlan(window, "plan_tomorrow").isSelected })
+        assertEquals("Choisir un jour", TestCore.onMain { (inPlan(window, "plan_day") as android.widget.Button).text.toString() })
+        tapPlan(window, "plan_plus")
+        assertEquals(opened + 15 * 60_000, window.due)
+        tapPlan(window, "plan_minus")
+        assertEquals(opened, window.due)
+        tapPlan(window, "plan_tomorrow")
+        assertTrue(TestCore.onMain { inPlan(window, "plan_tomorrow").isSelected && !inPlan(window, "plan_today").isSelected })
+        assertEquals(org.phonemesh.core.PlanDay.TOMORROW, org.phonemesh.core.PlanWindow.day(window.due, System.currentTimeMillis(), zone))
+        val time = TestCore.onMain { android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(window.due)) }
+        assertEquals("Heure $time. Touchez pour choisir.", TestCore.onMain { inPlan(window, "plan_time").contentDescription.toString() })
+        assertEquals(emptyList<String>(), A11yCheck.problems(window.dialog))
+        tapPlan(window, "plan_say")
+        assertEquals(listOf("Demain à $time"), TestCore.speech.spoken)
+        val due = window.due
+        tapPlan(window, "plan_go")
+        assertFalse(TestCore.onMain { window.dialog.isShowing })
         assertNull("the draft became the planned message", core.draft(group))
         val planned = core.history.planned(group).single()
-        val zone = java.time.ZoneId.systemDefault()
-        val time = TestCore.onMain { android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(planned.due)) }
-        val sameDay = org.phonemesh.core.Days.date(planned.due, zone) == java.time.LocalDate.now(zone)
-        assertEquals(if (sameDay) "Envoi à $time" else "Envoi demain à $time", Views.textOf(Views.tagged(a, "planned_when:${planned.id}")!!))
+        assertEquals(due, planned.due)
+        assertEquals("Envoi demain à $time", Views.textOf(Views.tagged(a, "planned_when:${planned.id}")!!))
         assertEquals(planned.due, TestCore.alarm.at)
         assertEquals(emptyList<String>(), A11yCheck.problems(a))
         Views.tap(a, "planned_cancel:${planned.id}")
         assertTrue(core.history.planned(group).isEmpty())
         assertNull(Views.tagged(a, "planned:${planned.id}"))
         assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun aTimeAlreadyPastTurnsRedAndCannotBeScheduled() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Trop tard") }
+        val a = open(group)
+        val window = planWindow(a)
+        tapPlan(window, "plan_time")
+        val clock = checkNotNull(window.picker) as android.app.TimePickerDialog
+        TestCore.onMain {
+            clock.updateTime(0, 0)
+            clock.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+        }
+        inst.waitForIdleSync()
+        assertEquals("today at midnight has passed", View.VISIBLE, TestCore.onMain { inPlan(window, "plan_past").visibility })
+        assertFalse(TestCore.onMain { inPlan(window, "plan_go").isEnabled })
+        tapPlan(window, "plan_go")
+        assertTrue("nothing planned", core.history.planned(group).isEmpty())
+        tapPlan(window, "plan_tomorrow")
+        assertEquals(View.GONE, TestCore.onMain { inPlan(window, "plan_past").visibility })
+        assertTrue(TestCore.onMain { inPlan(window, "plan_go").isEnabled })
+        val zone = java.time.ZoneId.systemDefault()
+        val at = java.time.Instant.ofEpochMilli(window.due).atZone(zone)
+        assertEquals(0 to 0, at.hour to at.minute)
+        tapPlan(window, "plan_go")
+        assertEquals(1, core.history.planned(group).size)
+    }
+
+    @Test fun theCalendarChoosesAnotherDayUpToAYearAhead() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Pour jeudi") }
+        val a = open(group)
+        val window = planWindow(a)
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.LocalDate.now(zone)
+        val before = java.time.Instant.ofEpochMilli(window.due).atZone(zone).toLocalTime()
+        tapPlan(window, "plan_day")
+        val calendar = checkNotNull(window.picker) as android.app.DatePickerDialog
+        TestCore.onMain {
+            assertEquals(today.atStartOfDay(zone).toInstant().toEpochMilli(), calendar.datePicker.minDate)
+            assertEquals(today.plusYears(1).atStartOfDay(zone).toInstant().toEpochMilli(), calendar.datePicker.maxDate)
+        }
+        val chosen = today.plusDays(3)
+        TestCore.onMain {
+            calendar.updateDate(chosen.year, chosen.monthValue - 1, chosen.dayOfMonth)
+            calendar.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+        }
+        inst.waitForIdleSync()
+        val at = java.time.Instant.ofEpochMilli(window.due).atZone(zone)
+        assertEquals(chosen, at.toLocalDate())
+        assertEquals("the time stays", before, at.toLocalTime())
+        val dayName = java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", java.util.Locale.FRENCH).format(at)
+        assertEquals("the day in the app's language, whatever the phone's", dayName, TestCore.onMain { Ui.date(a, window.due, "EEEEdMMMM") })
+        assertTrue(TestCore.onMain { inPlan(window, "plan_day").isSelected && !inPlan(window, "plan_today").isSelected && !inPlan(window, "plan_tomorrow").isSelected })
+        assertEquals(dayName, TestCore.onMain { (inPlan(window, "plan_day") as android.widget.Button).text.toString() })
+        tapPlan(window, "plan_go")
+        val planned = core.history.planned(group).single()
+        val time = TestCore.onMain { android.text.format.DateFormat.getTimeFormat(a).format(java.util.Date(planned.due)) }
+        assertEquals("Envoi le $dayName à $time", Views.textOf(Views.tagged(a, "planned_when:${planned.id}")!!))
     }
 
     @Test fun aPlannedMessageThatWentOutSaysWhenItWasPlanned() {
@@ -1125,9 +1219,14 @@ class ConversationActivityTest {
         assertEquals(listOf("action_copy", "action_share", "action_forward", "action_delete"), dialogTags(menu))
         tapInDialog(menu, "action_forward")
         val choose = checkNotNull(a.dialogForTest)
-        assertEquals("only the other chats", listOf("Kofi"),
-            TestCore.onMain { (0 until choose.listView.adapter.count).map { choose.listView.adapter.getItem(it).toString() } })
-        TestCore.onMain { choose.listView.performItemClick(null, 0, 0) }
+        val rows = TestCore.onMain { Views.descendants(choose.window!!.decorView).filter { (it.tag as? String)?.startsWith("forward_to:") == true } }
+        assertEquals("only the other chats", listOf("forward_to:$kofi"), rows.map { it.tag })
+        TestCore.onMain {
+            assertEquals("Kofi", rows.single().contentDescription)
+            assertTrue("the chat's picture beside its name", Views.descendants(rows.single()).any { it is ImageView })
+        }
+        assertEquals(emptyList<String>(), A11yCheck.problems(choose))
+        tapInDialog(choose, "forward_to:$kofi")
         Views.waitUntil {
             val front = androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
                 .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED).firstOrNull()
@@ -1229,6 +1328,46 @@ class ConversationActivityTest {
         TestCore.onMain { core.setDraft(group, "Salut"); core.openChat(group) }
         inst.waitForIdleSync()
         assertNull(Views.tagged(a, "tip:listen"))
+    }
+
+    @Test fun holdingAMessageIsTaughtAfterTheArrivalTipAndLearnedByDoingIt() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain {
+            core.settings.firstMessageSent = true
+            core.settings.tipsShown = setOf("arrive")
+            TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut", false)
+        }
+        val incoming = core.history.messages(group).single()
+        val a = open(group)
+        val tipCard = checkNotNull(Views.tagged(a, "tip:hold"))
+        assertEquals("Maintenez un message pour voir les choix.",
+            TestCore.onMain { Views.descendants(tipCard).filterIsInstance<android.widget.TextView>().single { it.tag == "howto_sentence" }.text.toString() })
+        val menu = longPress(a, incoming.id)
+        assertNull("done, so gone", Views.tagged(a, "tip:hold"))
+        assertEquals(setOf("arrive", "hold"), core.settings.tipsShown)
+        TestCore.onMain { menu.dismiss() }
+        Views.finish(a)
+        val again = open(group)
+        assertNull("never again", Views.tagged(again, "tip:hold"))
+    }
+
+    @Test fun aLongPressBeforeItsTipMeansTheHoldTipNeverShows() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain {
+            core.settings.firstMessageSent = true
+            TestCore.radio.receive("!1234abcd", "[pm1:fr] Salut", false)
+        }
+        val incoming = core.history.messages(group).single()
+        val a = open(group)
+        assertNotNull(Views.tagged(a, "tip:arrive"))
+        val menu = longPress(a, incoming.id)
+        TestCore.onMain { menu.dismiss() }
+        assertTrue("hold" in core.settings.tipsShown)
+        Views.tap(a, "tip_close")
+        assertNull(Views.tagged(a, "tip:arrive"))
+        assertNull(Views.tagged(a, "tip:hold"))
     }
 
     @Test fun playingAnIncomingMessageClosesArrivalAndRestartRemembersIt() {

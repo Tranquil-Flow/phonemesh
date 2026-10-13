@@ -16,7 +16,7 @@ object Actions {
             orientation = LinearLayout.VERTICAL
             setPadding(space, space, space, 0)
         }
-        val dialog = AlertDialog.Builder(activity).setView(list).setNegativeButton(R.string.cancel, null).create()
+        val dialog = readable(AlertDialog.Builder(activity).setView(list).setNegativeButton(R.string.cancel, null).create())
         for (item in items) {
             list.addView(Ui.button(activity, palette, item.text ?: activity.getString(item.label), item.icon).apply {
                 tag = item.tag
@@ -32,8 +32,21 @@ object Actions {
     }
 
     fun confirm(activity: Activity, title: Int, message: Int, yes: Int, run: () -> Unit): AlertDialog =
-        AlertDialog.Builder(activity).setTitle(title).setMessage(message)
+        readable(AlertDialog.Builder(activity).setTitle(title).setMessage(message)
             .setPositiveButton(yes) { _, _ -> run() }
             .setNegativeButton(R.string.cancel, null)
-            .create()
+            .create())
+
+    /** Android draws a dialog's own buttons small; these are read at the app's text size and named for TalkBack. */
+    fun readable(dialog: AlertDialog): AlertDialog = dialog.apply {
+        setOnShowListener {
+            listOf(AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
+                getButton(which)?.takeIf { it.text.isNotEmpty() }?.apply {
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, Ui.BODY_SP)
+                    contentDescription = text
+                    minHeight = Ui.dp(context, 48)
+                }
+            }
+        }
+    }
 }

@@ -39,8 +39,8 @@ import android.widget.TextView
 import org.phonemesh.core.DayName
 import org.phonemesh.core.Days
 import org.phonemesh.core.DraftFit
-import org.phonemesh.core.PlanChoice
-import org.phonemesh.core.PlanTimes
+import org.phonemesh.core.PlanDay
+import org.phonemesh.core.PlanWindow
 import org.phonemesh.core.DraftRules
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.RecordGesture
@@ -854,6 +854,9 @@ class ConversationActivity : ScreenActivity() {
     }
 
     private fun showActions(message: Message) {
+        // The long press is what the "hold" tip teaches: done once, it never shows again.
+        if (tip == Tip.HOLD) endTip(learned = true) else core.settings.tipsShown = core.settings.tipsShown + Tip.HOLD.key
+        tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
         val others = core.chatRows().filter { it.chat.id != chatId }
         // Only a message that went over the radio has an id the other phones know, so only it can be answered.
         val overRadio = message.packetId != null
@@ -885,8 +888,11 @@ class ConversationActivity : ScreenActivity() {
                 setPadding(pad() / 2, 0, pad() / 2, 0)
             }
             val time = DateFormat.getTimeFormat(this).format(Date(planned.due))
-            val today = Days.date(planned.due, zone) == Days.date(System.currentTimeMillis(), zone)
-            val whenText = getString(if (today) R.string.sends_at else R.string.sends_tomorrow, time)
+            val whenText = when (PlanWindow.day(planned.due, System.currentTimeMillis(), zone)) {
+                PlanDay.TODAY -> getString(R.string.sends_at, time)
+                PlanDay.TOMORROW -> getString(R.string.sends_tomorrow, time)
+                PlanDay.OTHER -> getString(R.string.sends_on_day, dayName(planned.due), time)
+            }
             words.addView(Ui.text(this, whenText, palette.text, bold = true).apply { tag = "planned_when:${planned.id}" })
             words.addView(Ui.content(Ui.text(this, planned.text, palette.muted).apply {
                 maxLines = 1
@@ -901,20 +907,15 @@ class ConversationActivity : ScreenActivity() {
         }
     }
 
-    /** In 1 hour, this evening (before 18:00 only), tomorrow morning: pictures and times, never a clock to set. */
+    /** "Send later": any day up to a year ahead and any time (owner decision, 2026-10-12); see [PlanDialog]. */
     private fun askWhenToSend() {
-        val format = DateFormat.getTimeFormat(this)
-        show(Actions.menu(this, palette, PlanTimes.choices(System.currentTimeMillis(), ZoneId.systemDefault()).map { (choice, due) ->
-            val (tag, label) = when (choice) {
-                PlanChoice.IN_ONE_HOUR -> "plan_hour" to R.string.plan_in_hour
-                PlanChoice.THIS_EVENING -> "plan_evening" to R.string.plan_evening
-                PlanChoice.TOMORROW_MORNING -> "plan_morning" to R.string.plan_morning
-            }
-            Actions.Item(tag, label, R.drawable.ic_clock, getString(label, format.format(Date(due)))) {
-                if (core.plan(chatId, due)) stopEditing()
-            }
-        }))
+        val window = PlanDialog(this, palette, speak = { core.speakLine(it) }) { due -> if (core.plan(chatId, due)) stopEditing() }
+        planForTest = window
+        show(window.dialog)
     }
+
+    /** "jeudi 15 octobre", in the app's language. */
+    private fun dayName(millis: Long): String = Ui.date(this, millis, "EEEEdMMMM")
 
     /** A few large reactions; one goes out as one radio message. */
     private fun askForReaction(messageId: Long) {
@@ -922,7 +923,7 @@ class ConversationActivity : ScreenActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), pad(), pad(), 0)
         }
-        val picker = AlertDialog.Builder(this).setTitle(R.string.react).setView(grid).setNegativeButton(R.string.cancel, null).create()
+        val picker = Actions.readable(AlertDialog.Builder(this).setTitle(R.string.react).setView(grid).setNegativeButton(R.string.cancel, null).create())
         AppCore.REACTIONS.chunked(3).forEachIndexed { line, emojis ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             emojis.forEachIndexed { i, emoji ->
@@ -955,14 +956,37 @@ class ConversationActivity : ScreenActivity() {
     }
 
     /** The words go to the other chat's draft; that chat opens to hear and send them. */
+    /** Each chat with its picture beside its name, as in the chat list, so it can be found without reading. */
     private fun askWhereToForward(messageId: Long, chats: List<AppCore.ChatRow>) {
-        show(AlertDialog.Builder(this).setTitle(R.string.forward_to)
-            .setItems(chats.map { it.title }.toTypedArray()) { _, which ->
-                val to = chats[which].chat.id
-                if (core.forward(messageId, to)) startActivity(intent(this, to))
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .create())
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(), pad() / 2, pad(), 0)
+        }
+        val choose = Actions.readable(AlertDialog.Builder(this).setTitle(R.string.forward_to).setView(ScrollView(this).apply { addView(list) })
+            .setNegativeButton(R.string.cancel, null).create())
+        for (row in chats) {
+            list.addView(LinearLayout(this).apply {
+                tag = "forward_to:${row.chat.id}"
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = Ui.dp(this@ConversationActivity, 56)
+                isClickable = true
+                isFocusable = true
+                contentDescription = row.title
+                background = Ui.ripple(GradientDrawable(), Ui.pressedOf(palette.text))
+                addView(Looks.avatar(this@ConversationActivity, palette, row.chat.kind, 40))
+                addView(Ui.text(this@ConversationActivity, row.title, palette.text, bold = true).apply {
+                    setPadding(pad(), 0, 0, 0)
+                    maxLines = 1
+                    ellipsize = TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                setOnClickListener {
+                    choose.dismiss()
+                    if (core.forward(messageId, row.chat.id)) startActivity(intent(this@ConversationActivity, row.chat.id))
+                }
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        show(choose)
     }
 
     override fun onDestroy() {
@@ -972,6 +996,8 @@ class ConversationActivity : ScreenActivity() {
 
     // Test hook
     internal val dialogForTest: AlertDialog? get() = dialog?.takeIf { it.isShowing }
+    internal var planForTest: PlanDialog? = null
+        private set
 
     companion object {
         const val EXTRA_CHAT_ID = "chat"

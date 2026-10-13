@@ -210,10 +210,118 @@ object HowToScenes {
             "arrow" to "0:0 .31:0 .36:1 .97:1 1:0"),
     )
 
-    /** Scene lists in Help-page order. */
-    val groups: List<List<String>> get() = listOf(SETUP, TALKING, PROBLEMS, RARE)
+    /** The chat gestures (owner approved round 10, 2026-10-12). `hold` is also a tip; the rest live in Help. */
+    val MORE = listOf("hold", "reply", "react", "forward", "delete", "pin", "later", "later_pick")
 
-    val all: Map<String, HowToScene> = (setup + talking + problems + rare).associateBy { it.name }
+    private fun rows(): Array<Pair<String, String>> = Array(6) { i ->
+        // The hold menu's six buttons light one after another once it is open.
+        val a = (56 + i * 6.5f) / 100
+        "row$i" to "0:0 ${"%.3f".format(java.util.Locale.ROOT, a)}:0 ${"%.3f".format(java.util.Locale.ROOT, a + .015f)}:1 ${"%.3f".format(java.util.Locale.ROOT, a + .05f)}:1 ${"%.3f".format(java.util.Locale.ROOT, a + .065f)}:0 1:0"
+    }
+
+    private val more = listOf(
+        scene("hold", 6f, 0.72f, mapOf("menu" to 1f, "row2" to 1f, "finger.dx" to 30f),
+            "finger.dx" to "0:30 .12:0 .5:0 .64:30 1:30",
+            "finger.dy" to "0:40 .12:0 .5:0 .64:40 1:40",
+            "press" to "0:0 .12:0 .46:1 .5:1 .51:0 1:0",
+            "press.alpha" to "0:1 .46:1 .5:0 .99:0 1:1",
+            "light" to "0:0 .46:0 .5:1 .96:1 1:0",
+            "menu" to "0:0 .46:0 .54:1 .96:1 1:0",
+            *rows()),
+        scene("reply", 7f, 0.8f, mapOf("answer" to 1f, "link" to 1f, "finger.dx" to 50f),
+            "menu" to "0:0 .06:0 .12:1 .32:1 .36:0 1:0",
+            "row0" to "0:0 .23:0 .25:1 .34:1 .36:0 1:0",
+            "finger.dx" to "0:50 .08:50 .2:0 .24:0 .28:0 .42:50 1:50",
+            "finger.dy" to "0:84 .08:84 .2:0 .24:2 .28:0 .42:84 1:84",
+            "quote" to "0:0 .36:0 .4:1 .58:1 .62:0 1:0",
+            "answer" to "0:0 .6:0 .7:1 .96:1 1:0",
+            "answer.dy" to "0:0 .01:24 .6:24 .7:0 1:0",
+            "link" to "0:0 .7:0 .76:1 .96:1 1:0",
+            "light" to "0:0 .7:0 .76:1 .96:1 1:0"),
+        scene("react", 6f, 0.9f, mapOf("chip" to 1f, "ok" to 1f, "finger.dx" to 30f),
+            "window" to "0:0 .08:0 .14:1 .4:1 .44:0 1:0",
+            "finger.dx" to "0:30 .14:30 .26:0 .3:0 .34:0 .5:30 1:30",
+            "finger.dy" to "0:40 .14:40 .26:0 .3:2 .34:0 .5:40 1:40",
+            "lit" to "0:0 .29:0 .31:1 .42:1 .44:0 1:0",
+            "fly.alpha" to "0:0 .4:0 .42:1 .56:1 .58:0 1:0",
+            "fly.dx" to "0:0 .42:0 .48:-74 .56:-131 .6:-131 .61:0 1:0",
+            "fly.dy" to "0:0 .42:0 .48:30 .56:27 .6:27 .61:0 1:0",
+            "chip" to "0:0 .56:0 .58:1 .96:1 1:0",
+            "tx" to "0:0 .58:0 .62:1 .86:1 .9:0 1:0",
+            "ok" to OK78),
+        scene("delete", 6f, 0.9f, mapOf("up" to -28f, "ok" to 1f, "other" to 1f, "finger.dx" to 30f),
+            "finger.dx" to "0:30 .12:0 .3:0 .42:30 1:30",
+            "finger.dy" to "0:40 .12:0 .3:0 .42:40 1:40",
+            "press" to "0:0 .12:0 .28:1 .32:1 .33:0 1:0",
+            "press.alpha" to "0:1 .28:1 .32:0 .99:0 1:1",
+            "gone" to "0:0 .32:0 .52:1 .96:1 1:0",
+            "gone.alpha" to "0:1 .32:1 .52:.8 .56:0 .96:0 1:1",
+            "lid" to "0:0 .3:0 .36:-35 .54:-35 .6:0 1:0",
+            "up" to "0:0 .56:0 .64:-28 .96:-28 1:0",
+            "other" to "0:0 .62:0 .68:1 .96:1 1:0",
+            "ok" to OK78),
+        scene("pin", 7f, 0.9f, mapOf("move" to 1f, "pin" to 1f, "finger.dx" to 30f),
+            "finger.dx" to "0:30 .1:0 .26:0 .36:4 .39:4 .42:4 .54:30 1:30",
+            "finger.dy" to "0:40 .1:0 .26:0 .36:-48 .39:-46 .42:-48 .54:40 1:40",
+            "press" to "0:0 .1:0 .26:1 .29:1 .3:0 1:0",
+            "press.alpha" to "0:1 .26:1 .29:0 .99:0 1:1",
+            "lit" to "0:0 .26:0 .29:1 .96:1 1:0",
+            "menu" to "0:0 .26:0 .31:1 .44:1 .48:0 1:0",
+            "row" to "0:0 .38:0 .4:1 .46:1 .48:0 1:0",
+            "move" to "0:0 .5:0 .62:1 .96:1 1:0",
+            "pin" to "0:0 .62:0 .68:1 .96:1 1:0",
+            "ok" to OK78),
+        scene("forward", 9f, 0.9f, mapOf("sent" to 1f, "kofi" to 1f, "finger.dx" to 150f),
+            "finger.dx" to "0:150 .04:0 .16:0 .22:98 .24:98 .26:98 .34:98 .42:112 .44:112 .46:112 .58:112 .72:138 .75:138 .78:138 .9:150 1:150",
+            "finger.dy" to "0:70 .04:0 .16:0 .22:20 .24:22 .26:20 .34:20 .42:-2 .44:0 .46:-2 .58:-2 .72:41 .75:43 .78:41 .9:70 1:70",
+            "press" to "0:0 .04:0 .16:1 .18:1 .19:0 1:0",
+            "press.alpha" to "0:1 .16:1 .18:0 .99:0 1:1",
+            "menu" to "0:0 .16:0 .2:1 .28:1 .31:0 1:0",
+            "row" to "0:0 .23:0 .25:1 .3:1 .32:0 1:0",
+            "list" to "0:0 .3:0 .34:1 .48:1 .52:0 1:0",
+            "pick" to "0:0 .43:0 .45:1 .5:1 .52:0 1:0",
+            "kofi" to "0:0 .5:0 .56:1 .96:1 1:0",
+            "ghost" to "0:0 .48:0 .5:1 .6:1 .62:0 1:0",
+            "ghost.move" to "0:0 .5:0 .6:1 .62:1 .63:0 1:0",
+            "draft" to "0:0 .6:0 .62:1 .79:1 .81:0 1:0",
+            "send" to "0:0 .74:0 .75:1 .8:1 .82:0 1:0",
+            "sent" to "0:0 .8:0 .86:1 .96:1 1:0",
+            "sent.dy" to "0:0 .01:26 .8:26 .86:0 1:0",
+            "ok" to OK88),
+        scene("later", 8f, 0.9f, mapOf("sent" to 1f, "finger.dx" to 134f),
+            "finger.dx" to "0:134 .04:134 .1:0 .12:0 .14:0 .2:120 .22:120 .24:120 .26:120 .28:120 .3:120 .38:84 .4:84 .42:84 .52:134 1:134",
+            "finger.dy" to "0:20 .04:20 .1:0 .12:2 .14:0 .2:-29 .22:-27 .24:-29 .26:-29 .28:-27 .3:-29 .38:-9 .4:-7 .42:-9 .52:20 1:20",
+            "draft" to "0:1 .45:1 .465:0 .985:0 1:1",
+            "button" to "0:0 .095:0 .1:1 .14:1 .145:0 1:0",
+            "window" to "0:0 .14:0 .18:1 .44:1 .47:0 1:0",
+            "time" to "0:0 .23:0 .23:1 .29:1 .29:2 .99:2 1:0",
+            "plus" to "0:0 .215:0 .22:1 .24:1 .245:0 .275:0 .28:1 .3:1 .305:0 1:0",
+            "go" to "0:0 .395:0 .4:1 .44:1 .445:0 1:0",
+            "wait" to "0:0 .46:0 .51:1 .77:1 .8:0 1:0",
+            "wait.dy" to "0:30 .46:30 .51:0 .8:0 .81:30 1:30",
+            "hand" to "0:0 .48:0 .78:720 .79:0 1:0",
+            "sent" to "0:0 .78:0 .84:1 .96:1 1:0",
+            "tx" to "0:0 .805:0 .82:1 .96:1 .975:0 1:0"),
+        scene("later_pick", 10f, 0.9f, mapOf("chosen" to 1f, "time" to 1f, "finger.dx" to 40f),
+            "finger.dx" to "0:40 .04:40 .1:0 .12:0 .14:0 .22:87 .24:87 .26:87 .3:108 .32:108 .34:108 .37:150 .39:150 .41:150 .46:0 .48:0 .5:0 .6:108.5 .62:108.5 .64:108.5 .68:150 .7:150 .72:150 .82:40 1:40",
+            "finger.dy" to "0:46 .04:46 .1:0 .12:2 .14:0 .22:16 .24:18 .26:16 .3:-20 .32:-18 .34:-20 .37:36 .39:38 .41:36 .46:-19 .48:-17 .5:-19 .6:8 .62:10 .64:8 .68:36 .7:38 .72:36 .82:46 1:46",
+            "today" to "0:1 .73:1 .735:0 .99:0 1:1",
+            "calLit" to "0:0 .475:0 .48:1 .51:1 .515:0 1:0",
+            "chosen" to "0:0 .73:0 .735:1 .99:1 1:0",
+            "timeLit" to "0:0 .105:0 .11:1 .15:1 .155:0 1:0",
+            "time" to "0:0 .42:0 .42:1 .99:1 1:0",
+            "clock" to "0:0 .14:0 .17:1 .4:1 .425:0 1:0",
+            "header" to "0:0 .24:0 .24:1 .32:1 .32:2 .99:2 1:0",
+            "minutes" to "0:0 .28:0 .28:1 .99:1 1:0",
+            "calendar" to "0:0 .51:0 .54:1 .72:1 .745:0 1:0",
+            "day" to "0:0 .62:0 .62:1 .99:1 1:0",
+            "ok" to OK88),
+    )
+
+    /** Scene lists in Help-page order. */
+    val groups: List<List<String>> get() = listOf(SETUP, TALKING, MORE, PROBLEMS, RARE)
+
+    val all: Map<String, HowToScene> = (setup + talking + more + problems + rare).associateBy { it.name }
 
     fun get(name: String): HowToScene = requireNotNull(all[name]) { "No how-to scene $name" }
 }

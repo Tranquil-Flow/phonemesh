@@ -11,6 +11,8 @@ enum class Tip(val key: String, val place: TipPlace) {
     FAILED("failed", TipPlace.CHAT),
     ARRIVE("arrive", TipPlace.CHAT),
     DELIVERY("delivery", TipPlace.CHAT),
+    /** Long-pressing a message shows nothing on screen, so it is taught once (owner decision, 2026-10-12). */
+    HOLD("hold", TipPlace.CHAT),
 }
 
 /**
@@ -30,15 +32,17 @@ object Tips {
      */
     fun next(place: TipPlace, facts: TipFacts, learned: Set<String>, showings: Map<String, Int> = emptyMap()): Tip? =
         Tip.entries
-            .filter { it.place == place && it.key !in learned && (showings[it.key] ?: 0) < MAX_SHOWINGS && due(it, facts) }
+            .filter { it.place == place && it.key !in learned && (showings[it.key] ?: 0) < MAX_SHOWINGS && due(it, facts, learned) }
             .minByOrNull { showings[it.key] ?: 0 }
 
-    private fun due(tip: Tip, facts: TipFacts): Boolean = when (tip) {
+    private fun due(tip: Tip, facts: TipFacts, learned: Set<String>): Boolean = when (tip) {
         Tip.CANCEL, Tip.LOCK -> facts.held
         Tip.LISTEN -> true
         Tip.FAILED -> facts.failed
         Tip.ARRIVE -> facts.received
         // A group message ends at "Sent", so the picture that ends on "Delivered" belongs to private chats.
         Tip.DELIVERY -> facts.sent && facts.direct
+        // After "A message came" was closed: there is a message to hold, and the arrival picture has had its turn.
+        Tip.HOLD -> facts.received && Tip.ARRIVE.key in learned
     }
 }

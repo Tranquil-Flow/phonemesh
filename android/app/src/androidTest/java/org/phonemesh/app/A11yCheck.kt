@@ -20,8 +20,13 @@ object A11yCheck {
 
     fun problems(activity: Activity): List<String> = scan(activity).problems
 
-    fun scan(activity: Activity): Scan = TestCore.onMain {
-        val metrics = activity.resources.displayMetrics
+    /** A dialog's own window (the time window, the forward list), checked like a screen. */
+    fun problems(dialog: android.app.Dialog): List<String> = TestCore.onMain { checkNotNull(dialog.window).decorView }.let { scan(it).problems }
+
+    fun scan(activity: Activity): Scan = scan(TestCore.onMain { activity.window.decorView })
+
+    fun scan(root: View): Scan = TestCore.onMain {
+        val metrics = root.resources.displayMetrics
         val minimumTouch = 47.5f * metrics.density
         val minimumText = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 17.5f, metrics)
         val problems = mutableListOf<String>()
@@ -31,7 +36,7 @@ object A11yCheck {
             if (view.width < minimumTouch || view.height < minimumTouch) problems += "too small (${view.width}x${view.height} px): ${describe(view)}"
             if (!described) problems += "no description: ${describe(view)}"
         }
-        Views.descendants(activity.window.decorView).filter { it.isShown }.forEach { view ->
+        Views.descendants(root).filter { it.isShown }.forEach { view ->
             if (view is AdapterView<*>) {
                 if (view.count > 0 && view.childCount == 0) problems += "list has ${view.count} items but no rows laid out: ${describe(view)}"
                 for (i in 0 until view.childCount) {

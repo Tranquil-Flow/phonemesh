@@ -33,6 +33,10 @@ From handover 3 and the owner on 2026-10-14:
     the project name is settled (owner, 2026-10-14). Moving then breaks test links only.
 16. The router hub's language is chosen after the field test, with the hardware; the Mac prototype is Kotlin
     (owner, 2026-10-14).
+17. People pick their own display name: said and written by the app, or typed, and changeable later. Full account
+    names (unique, searchable) come later, once designed (owner, 2026-10-14).
+18. The owner has two radios: T1 and the field test use both. The GitHub Pages link site may be published when the
+    app needs it (owner, 2026-10-14).
 
 ## What an outsider can and cannot learn
 
@@ -252,6 +256,9 @@ Every account packet goes to the broadcast address on the shared chat's channel,
 - **No radio acknowledgement.** Meshtastic sends none for broadcasts, so delivery confirmation is the app's job: the
   hub acknowledgement and the receipts above.
 - **The channel key wraps it again.** Outsiders on the public key cannot even see the port.
+- **Relays must keep rebroadcast mode ALL** (the default). Nodes set to "core ports only" drop our ports, and nodes
+  set to "local only" or "known only" drop channels they cannot read (`.local/accounts-t1.md`, F3). The setup script
+  and the hub check the village radios' mode.
 
 ### Stage 1: stock radio over Bluetooth
 
@@ -261,8 +268,13 @@ Every account packet goes to the broadcast address on the shared chat's channel,
 - **The sender retries.** It resends after 2, 10 and 30 minutes until "delivered to their phone" arrives. A packet the
   recipient already has is recognised and dropped.
 - **Use:** this works for "we are both here now", and as the fallback when no hub is in reach.
-- **Firmware question.** The current app ignores broadcasts on private ports. Whether stock firmware passes
-  private-port broadcasts to the phone must be checked on the Heltec first (test T1).
+- **Firmware question.** The current app ignores broadcasts on private ports.
+  - **Desk check (2026-10-14, firmware 2.7.26):** stock firmware does pass private-port broadcasts to the connected
+    phone (`.local/accounts-t1.md`, finding F1). The hardware test T1 still confirms it.
+  - **Queue limit (F2):** the radio's to-phone queue holds 32 packets. When it is full, new text-port packets push out
+    the oldest, but packets on our ports are dropped. A radio with no phone connected therefore keeps the first 32 of
+    ours and loses the rest. Stage 1 relies on the sender's retries; the hub, always connected over USB, does not hit
+    this.
 
 ### Stage 2: hub (prototype on the Mac)
 

@@ -1,5 +1,7 @@
 # Phonemesh v1 design
 
+> **Superseded in part (2026-10-14):** private chats and the shared chat follow `docs/specs/2026-10-14-accounts-design.md` (app-level encryption, private ports 301–303). The text-port contract below still holds for messages from radios without the accounts version.
+
 ## Scope and supersession
 
 The current owner decision supersedes the Balanka-first handover: v1 reuses Whisper and

@@ -103,25 +103,24 @@ class PictureLooksTest {
         assertTrue(next.millis >= 0)
     }
 
-    @Test fun bothEnginesGiveTheSamePictureAndTheFasterIsRemembered() {
-        val file = place("engine-test.onnx")
-        val input = FloatArray(3 * 16 * 16) { (it % 23) / 23f }
-        val cpu = NativeUpscale.open(file.path, 2, NativeUpscale.CPU)
-        assertNotEquals(NativeUpscale.lastError(), 0L, cpu)
-        val expected = checkNotNull(NativeUpscale.run(cpu, input, 16, 16))
-        NativeUpscale.close(cpu)
-        val xnn = NativeUpscale.open(file.path, 2, NativeUpscale.XNNPACK)
-        if (xnn != 0L) {
-            val got = checkNotNull(NativeUpscale.run(xnn, input, 16, 16)) { NativeUpscale.lastError() }
-            NativeUpscale.close(xnn)
-            assertEquals(expected.size, got.size)
-            assertTrue("XNNPACK matches the CPU engine", expected.indices.all { kotlin.math.abs(expected[it] - got[it]) < 1e-3f })
-        }
+    @Test fun theEngineTrialPicksAWorkingEngineAndRemembersIt() {
         val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
-        place(PictureLook.AI_QUICK.model!!)
-        PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
-        assertTrue("the trial's winner is kept for this phone", prefs.all.keys.any { it.startsWith("engine:${PictureLook.AI_QUICK.model}") })
+        val onnx = place(PictureLook.AI_QUICK.model!!)
+        assertNull("no ncnn copy placed: the graphics chip is not tried", PictureLooks.gpuFiles(onnx))
+        val made = PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
+        assertEquals(160, made.bitmap.width)
+        val key = prefs.all.keys.single { it.startsWith("engine3:${PictureLook.AI_QUICK.model}") }
+        assertEquals("only the processor could run it", PictureLooks.ENGINE_CPU, prefs.getInt(key, -1))
+        PictureLooks.release()
+        assertEquals("the remembered engine is used again", 160, PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30)).bitmap.width)
+    }
+
+    @Test fun theGraphicsChipBridgeLoadsAndSaysWhetherItHasADevice() {
+        assertTrue("ncnn and the bridge are in the app", NativeGpu.loaded)
+        // The emulator may or may not offer Vulkan; either way the bridge answers instead of crashing.
+        val device = NativeGpu.device()
+        if (device.isEmpty()) assertTrue(NativeGpu.lastError().isNotEmpty())
     }
 
     @Test fun aViewMadeOnceIsKeptUntilItsPictureGoes() {

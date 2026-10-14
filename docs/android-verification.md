@@ -463,3 +463,21 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   sherpa-onnx's runtime is built without XNNPACK ("not supported in this build"), so the CPU engine is kept; the
   trial costs one failed open per model, once.
 - `PictureLooksTest` (8) and the viewer test pass (receipt `speed-a`).
+
+### Upscaling on ncnn: graphics chip and processor (2026-10-14)
+
+- ncnn 20260526 (Vulkan build) is in the app with the bridge `upscale_gpu.cpp`. The models' ncnn copies (pnnx 20260704,
+  fp16 weights) sit beside the ONNX files on test phones. Release APK growth for ncnn: +3,668,435 B (arm64), about
+  +2.8 MB (armeabi-v7a). The owner approved it; `BUDGET` became 4,120,000 and the ceilings 16,470,000 / 14,610,000.
+- `PictureGpuModelsCheck` (by hand, with the real models copied onto the emulator; receipt `gpu-models7`):
+  - ncnn on the processor in 32-bit matches ONNX Runtime (largest difference 0.003-0.015 on a noise pattern); the
+    conversion is right.
+  - 16-bit arithmetic on the processor differs by up to 0.28, too much.
+  - The emulator's software Vulkan (llvmpipe) gives wrong pictures in both modes. That says nothing about phones, but
+    it showed the trial's safety net working: the trial rejected both modes and kept ncnn on the processor.
+- On the emulator, ncnn on the processor was 5.3× faster than ONNX Runtime for the small model (37 vs 197 ms per
+  64 px trial piece) and 2.7× faster for the large one (1.3 vs 3.6 s).
+- The first run of a model on a phone tries ONNX Runtime, ncnn on the processor, and ncnn on the graphics chip in 16-
+  and 32-bit. It keeps the fastest whose picture matches ONNX Runtime's (mean difference ≤ 0.004, largest ≤ 0.05), and
+  logs each result under `PhonemeshPicture`. The trial is not counted in the time shown.
+- `PictureLooksTest`, `PictureGpuModelsCheck` (no models: nothing to compare) and the viewer test pass (receipt `gpu-b`).

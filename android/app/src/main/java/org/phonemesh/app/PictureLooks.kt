@@ -27,6 +27,22 @@ object NativeUpscale {
 }
 
 /**
+ * The graphics-chip bridge (src/main/cpp/upscale_gpu.cpp): ncnn with Vulkan, the same models in ncnn's format
+ * ("<model>.ncnn.param" and ".ncnn.bin" beside the ONNX file). Absent or unusable on some phones: then [open] gives 0.
+ */
+object NativeGpu {
+    val loaded: Boolean by lazy {
+        runCatching { System.loadLibrary("ncnn"); System.loadLibrary("phonemesh_gpu") }.isSuccess
+    }
+
+    @JvmStatic external fun open(param: String, bin: String, threads: Int, vulkan: Boolean, fp16: Boolean): Long
+    @JvmStatic external fun run(handle: Long, input: FloatArray, height: Int, width: Int): FloatArray?
+    @JvmStatic external fun close(handle: Long)
+    @JvmStatic external fun lastError(): String
+    @JvmStatic external fun device(): String
+}
+
+/**
  * Ways to show a received picture four times larger, all on this phone: the exact pixels, smoothed, sharper (no AI),
  * and AI models that may invent detail. [model] is the file an AI look needs; [tile] the part of the picture it works
  * on at a time, small for the large models so they stay within a phone's memory.
@@ -80,6 +96,10 @@ object PictureLooks {
         val h = source.height * SCALE
         if (look.ai) return synchronized(lock) {
             if (job.cancelled) throw Cancelled()
+            // Opening the model (and, the first time on this phone, the engine trial) is not counted in the time.
+            check(NativeUpscale.loaded) { "the AI engine is not in this build" }
+            session(context, checkNotNull(modelFile(context, look)) { "model ${look.model} is not on this phone" })
+            if (job.cancelled) throw Cancelled()
             started()
             val start = SystemClock.elapsedRealtime()
             val bitmap = ai(context, look, source, job, progress)
@@ -121,16 +141,25 @@ object PictureLooks {
         }
     }
 
+    /**
+     * The ways a model can run: ONNX Runtime on the processor (always there, and the reference), ncnn on the processor
+     * (32-bit), and ncnn on the graphics chip through Vulkan in 16-bit or 32-bit arithmetic. 16-bit is the fastest on
+     * most graphics chips but can damage these models' pictures, so each phone's trial decides.
+     */
+    const val ENGINE_CPU = 0
+    const val ENGINE_GPU = 2
+    const val ENGINE_GPU32 = 3
+    const val ENGINE_NCNN_CPU = 4
+    private val NCNN_ENGINES = listOf(ENGINE_GPU, ENGINE_GPU32, ENGINE_NCNN_CPU)
+
     /** One model open at a time: the large ones take hundreds of MB while they work. */
     private var openPath: String? = null
     private var openHandle = 0L
-    private var openEngine = NativeUpscale.CPU
+    private var openEngine = ENGINE_CPU
 
     private fun session(context: Context, file: File): Long {
         if (openPath == file.path && openHandle != 0L) return openHandle
-        if (openHandle != 0L) NativeUpscale.close(openHandle)
-        openHandle = 0L
-        openPath = null
+        closeOpen()
         val (handle, engine) = fastest(context, file)
         openPath = file.path
         openHandle = handle
@@ -138,51 +167,119 @@ object PictureLooks {
         return handle
     }
 
+    private fun closeOpen() {
+        if (openHandle != 0L) close(openEngine, openHandle)
+        openHandle = 0L
+        openPath = null
+    }
+
+    private fun open(engine: Int, file: File): Long {
+        if (engine !in NCNN_ENGINES) return NativeUpscale.open(file.path, threads(), NativeUpscale.CPU)
+        val (param, bin) = gpuFiles(file) ?: return 0L
+        if (!NativeGpu.loaded) return 0L
+        return NativeGpu.open(param.path, bin.path, threads(), engine != ENGINE_NCNN_CPU, engine == ENGINE_GPU)
+    }
+
+    private fun run(engine: Int, handle: Long, input: FloatArray, height: Int, width: Int): FloatArray? =
+        if (engine in NCNN_ENGINES) NativeGpu.run(handle, input, height, width) else NativeUpscale.run(handle, input, height, width)
+
+    private fun close(engine: Int, handle: Long) = if (engine in NCNN_ENGINES) NativeGpu.close(handle) else NativeUpscale.close(handle)
+
+    private fun lastError(engine: Int) = if (engine in NCNN_ENGINES) NativeGpu.lastError() else NativeUpscale.lastError()
+
+    /** The ncnn copy of an ONNX model, when it is on the phone: "x.onnx" -> "x.ncnn.param" and "x.ncnn.bin". */
+    fun gpuFiles(onnx: File): Pair<File, File>? {
+        val base = onnx.path.removeSuffix(".onnx")
+        val param = File("$base.ncnn.param")
+        val bin = File("$base.ncnn.bin")
+        return if (param.isFile && bin.isFile && param.canRead() && bin.canRead()) param to bin else null
+    }
+
     /**
-     * The first time a model runs on this phone, both engines run one small piece and the faster is kept, for that
-     * model on this phone from then on. XNNPACK is often faster on phone processors, but not always.
+     * The first time a model runs on this phone, each way it can run does one trial piece. A way counts only if its
+     * picture matches ONNX Runtime's (a faulty graphics driver, or 16-bit arithmetic, can give a wrong one); the
+     * fastest of those is kept for that model on this phone. Changing the model files starts a new trial.
      */
     private fun fastest(context: Context, file: File): Pair<Long, Int> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val key = "engine:${file.name}:${file.length()}"
+        val key = "engine3:${file.name}:${file.length()}:${gpuFiles(file)?.second?.length() ?: 0}"
         val known = prefs.getInt(key, -1)
         if (known >= 0) {
-            val handle = NativeUpscale.open(file.path, threads(), known)
+            val handle = open(known, file)
             if (handle != 0L) return handle to known
         }
-        var best = 0L to NativeUpscale.CPU
-        var bestMillis = Long.MAX_VALUE
-        for (engine in listOf(NativeUpscale.CPU, NativeUpscale.XNNPACK)) {
-            val handle = NativeUpscale.open(file.path, threads(), engine)
+        val cpu = open(ENGINE_CPU, file)
+        check(cpu != 0L) { NativeUpscale.lastError() }
+        val (cpuMillis, reference) = trial(ENGINE_CPU, cpu)
+        Log.i(TAG, "engine CPU on ${file.name}: $cpuMillis ms for a trial piece")
+        var best = cpu to ENGINE_CPU
+        var bestMillis = cpuMillis
+        if (gpuFiles(file) == null) Log.i(TAG, "no ncnn copy of ${file.name}: only the processor is tried")
+        else for (engine in NCNN_ENGINES) {
+            val handle = open(engine, file)
             if (handle == 0L) {
-                Log.i(TAG, "engine ${engineName(engine)} not available for ${file.name}: ${NativeUpscale.lastError()}")
+                Log.i(TAG, "engine ${engineName(engine)} not available for ${file.name}: ${NativeGpu.lastError()}")
                 continue
             }
-            val millis = trial(handle)
-            Log.i(TAG, "engine ${engineName(engine)} on ${file.name}: ${millis} ms for a trial piece")
-            if (millis < bestMillis) {
-                if (best.first != 0L) NativeUpscale.close(best.first)
+            val (millis, picture) = trial(engine, handle)
+            val (mean, worst) = difference(reference, picture)
+            val good = mean <= MEAN_TOLERANCE && worst <= WORST_TOLERANCE
+            val device = if (engine == ENGINE_NCNN_CPU) "" else " (${NativeGpu.device()})"
+            Log.i(TAG, "engine ${engineName(engine)}$device on ${file.name}: $millis ms for a trial piece, " +
+                "difference mean $mean, worst $worst${if (good) "" else ": wrong picture, not used"}")
+            if (good && millis < bestMillis) {
+                close(best.second, best.first)
                 best = handle to engine
                 bestMillis = millis
             } else {
-                NativeUpscale.close(handle)
+                close(engine, handle)
             }
         }
-        check(best.first != 0L) { NativeUpscale.lastError() }
+        Log.i(TAG, "engine ${engineName(best.second)} kept for ${file.name}")
         prefs.edit().putInt(key, best.second).apply()
         return best
     }
 
-    /** One warm-up run, then a timed one, on a 64 x 64 piece of mid-grey; Long.MAX_VALUE when it fails. */
-    private fun trial(handle: Long): Long {
-        val input = FloatArray(3 * TRIAL * TRIAL) { 0.5f }
-        if (NativeUpscale.run(handle, input, TRIAL, TRIAL) == null) return Long.MAX_VALUE
-        val start = SystemClock.elapsedRealtime()
-        if (NativeUpscale.run(handle, input, TRIAL, TRIAL) == null) return Long.MAX_VALUE
-        return SystemClock.elapsedRealtime() - start
+    /** Mean and largest difference between two pictures; Float.MAX_VALUE for both when one is missing. */
+    private fun difference(a: FloatArray?, b: FloatArray?): Pair<Float, Float> {
+        if (a == null || b == null || a.size != b.size) return Float.MAX_VALUE to Float.MAX_VALUE
+        var sum = 0.0
+        var worst = 0f
+        for (i in a.indices) {
+            val d = kotlin.math.abs(a[i] - b[i])
+            if (!d.isFinite()) return Float.MAX_VALUE to Float.MAX_VALUE
+            sum += d
+            if (d > worst) worst = d
+        }
+        return (sum / a.size).toFloat() to worst
     }
 
-    private fun engineName(engine: Int) = if (engine == NativeUpscale.XNNPACK) "XNNPACK" else "CPU"
+    /**
+     * One warm-up run, then a timed one, on a 64 x 64 piece that looks like part of a photo (smooth shading, a few
+     * edges); the time (Long.MAX_VALUE when it fails) and the picture.
+     */
+    private fun trial(engine: Int, handle: Long): Pair<Long, FloatArray?> {
+        val n = TRIAL * TRIAL
+        val input = FloatArray(3 * n)
+        for (y in 0 until TRIAL) for (x in 0 until TRIAL) {
+            val i = y * TRIAL + x
+            val square = x in 20..40 && y in 12..30
+            input[i] = if (square) 0.15f else 0.2f + 0.6f * x / TRIAL
+            input[n + i] = if (square) 0.1f else 0.3f + 0.5f * y / TRIAL
+            input[2 * n + i] = 0.5f + 0.35f * kotlin.math.sin(x * 0.21f) * kotlin.math.cos(y * 0.17f)
+        }
+        if (run(engine, handle, input, TRIAL, TRIAL) == null) return Long.MAX_VALUE to null
+        val start = SystemClock.elapsedRealtime()
+        val picture = run(engine, handle, input, TRIAL, TRIAL) ?: return Long.MAX_VALUE to null
+        return SystemClock.elapsedRealtime() - start to picture
+    }
+
+    private fun engineName(engine: Int) = when (engine) {
+        ENGINE_GPU -> "GPU-fp16"
+        ENGINE_GPU32 -> "GPU-fp32"
+        ENGINE_NCNN_CPU -> "ncnn-CPU"
+        else -> "CPU"
+    }
 
     /**
      * AI views already made, kept in the app's cache (Android may clear it) as JPEG, so opening a picture again or
@@ -227,13 +324,15 @@ object PictureLooks {
     private const val SMALL_MODEL_TILE = 128
     private const val CACHE_BYTES = 50L shl 20
     private const val CACHE_QUALITY = 95
+    /**
+     * How far another way's picture may be from ONNX Runtime's: on average under 1 level in 255, and nowhere more than
+     * 13. ncnn on the processor in 32-bit measured about 0.003-0.015 at worst; 16-bit arithmetic up to 0.28.
+     */
+    private const val MEAN_TOLERANCE = 0.004f
+    private const val WORST_TOLERANCE = 0.05f
 
     /** Lets go of the open model (when the picture screen closes), giving its memory back; waits for a running piece. */
-    fun release() = synchronized(lock) {
-        if (openHandle != 0L) NativeUpscale.close(openHandle)
-        openHandle = 0L
-        openPath = null
-    }
+    fun release() = synchronized(lock) { closeOpen() }
 
     private fun threads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 
@@ -264,7 +363,7 @@ object PictureLooks {
                 input[plane + o] = ((p shr 8) and 255) / 255f
                 input[2 * plane + o] = (p and 255) / 255f
             }
-            val result = NativeUpscale.run(handle, input, t.height, t.width) ?: error(NativeUpscale.lastError())
+            val result = run(openEngine, handle, input, t.height, t.width) ?: error(lastError(openEngine))
             val tw = t.width * SCALE
             val plane4 = tw * t.height * SCALE
             for (y in 0 until t.innerHeight * SCALE) for (x in 0 until t.innerWidth * SCALE) {

@@ -54,9 +54,10 @@ No XTTS or non-commercial-only model dependency is included in v1.
 |---|---|---|---|
 | ThumbHash (Evan Wallace, <https://github.com/evanw/thumbhash>) | `android/core/src/main/kotlin/org/phonemesh/core/ThumbHash.kt` | MIT | Line-for-line Kotlin port; the MIT notice is kept in the file. The reference Java is test-only (`android/core/src/test/java`) and checks bytes and pixels against the port. |
 | ONNX Runtime C API headers 1.28.2 (Microsoft) | `android/app/src/main/cpp/include/` | MIT | Headers only, unchanged. The picture upscaling bridge (`upscale_jni.c`, about 7 KB per ABI) uses the `libonnxruntime.so` that sherpa-onnx already ships, found at run time; nothing new is linked. |
+| ncnn 20260526, Android Vulkan shared build (Tencent, <https://github.com/Tencent/ncnn>) | `android/app/src/main/cpp/ncnn/<abi>/` (`libncnn.so` and headers, unchanged from the release zip; each file's CRC checked on download) | BSD-3-Clause | Runs the upscaling models on the graphics chip through Vulkan (`upscale_gpu.cpp`, bridge `libphonemesh_gpu.so`). `libncnn.so` is 10.0 MB (arm64) / 6.5 MB (armeabi-v7a), about 4.0 / 2.8 MB compressed in the APK. Needs only system libraries; Vulkan is loaded at run time. |
 
-Pictures otherwise use only what Android already has (BitmapFactory, ExifInterface, the platform WebP encoder), so the app
-gains no runtime library.
+Apart from ncnn for upscaling, pictures use only what Android already has (BitmapFactory, ExifInterface, the platform
+WebP encoder).
 
 ## Picture upscaling models (not in the app)
 
@@ -70,6 +71,11 @@ app works without them and shows the AI views as unavailable. Exported to ONNX b
 | Real-ESRGAN general x4v3, gentle (0.5 blend with wdn-x4v3, as Real-ESRGAN's own `-dn 0.5`) | `realesr-x4v3-gentle.onnx` | 4.9 MB | BSD-3-Clause | same release |
 | Real-ESRGAN x4plus | `realesrgan-x4plus.onnx` | 67 MB | BSD-3-Clause | release v0.1.0 |
 | BSRGAN | `bsrgan-x4.onnx` | 67 MB | MIT (KAIR) | <https://github.com/cszn/KAIR> release v1.0 |
+
+Each model also has an ncnn copy for the graphics chip (`<model>.ncnn.param` and `.ncnn.bin`, beside the ONNX file),
+converted from the ONNX files above by pnnx 20260704 (<https://github.com/pnnx/pnnx>, a build tool, not in the app) with
+fp16 weights: 2.4 MB for each small model, 33 MB for each large one. On a model's first run the app keeps the graphics
+chip only if its picture matches the processor's on a trial piece, and only if it is faster.
 
 These are generative models: they can invent detail, and the app labels their views so. They were trained on DIV2K and
 similar sets, whose "academic research only" terms may or may not reach model weights; record this before shipping

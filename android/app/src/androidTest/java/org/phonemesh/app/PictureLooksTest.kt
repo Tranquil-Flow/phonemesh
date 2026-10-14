@@ -121,7 +121,7 @@ class PictureLooksTest {
         val steps = mutableListOf<Int>()
         assertEquals(160, PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30), preparing = { steps += it }).bitmap.width)
         assertEquals("nothing to choose between", emptyList<Int>(), steps)
-        assertTrue(prefs.all.isEmpty())
+        assertTrue("no engine choice stored: ${prefs.all.keys}", prefs.all.keys.none { it.startsWith("engine") || it.startsWith("family") })
     }
 
     @Test fun theOneTimeTrialSaysHowFarItIsThenNeverRunsAgain() {
@@ -207,6 +207,26 @@ class PictureLooksTest {
             val made = PictureLooks.worker.submit<Int> { PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30)).bitmap.width }
             assertEquals(160, made.get(30, java.util.concurrent.TimeUnit.SECONDS))
         }
+    }
+
+    @Test fun theNextViewOfAModelKnowsAboutHowLongItTakes() {
+        context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        place(PictureLook.AI_QUICK.model!!)
+        assertNull("nothing known before the first view", PictureLooks.expectedMillis(context, PictureLook.AI_QUICK, 40, 30))
+        PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
+        val small = checkNotNull(PictureLooks.expectedMillis(context, PictureLook.AI_QUICK, 40, 30))
+        val large = checkNotNull(PictureLooks.expectedMillis(context, PictureLook.AI_QUICK, 400, 300))
+        assertTrue("$small then $large: a picture 100 times larger is expected to take longer", large > small && small >= 1)
+        assertNull("another model knows nothing yet", PictureLooks.expectedMillis(context, PictureLook.AI_GENTLE, 40, 30))
+    }
+
+    @Test fun theEngineTrialGivesAFirstGuessAtTheSpeed() {
+        context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE).edit().clear().commit()
+        placeWithNcnn(PictureLook.AI_QUICK.model!!)
+        var expected: Long? = -1L
+        PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30),
+            started = { expected = PictureLooks.expectedMillis(context, PictureLook.AI_QUICK, 400, 300) })
+        assertNotNull("known from the trial before the first view starts", expected)
     }
 
     @Test fun theViewsWithoutAModelAreFourTimesLarger() {

@@ -111,6 +111,7 @@ object PictureLooks {
             val start = SystemClock.elapsedRealtime()
             val bitmap = ai(context, look, source, job, progress)
             Made(bitmap, SystemClock.elapsedRealtime() - start).also {
+                rememberSpeed(context, look, it.millis.coerceAtLeast(1L).toFloat() / (source.width * source.height))
                 Log.i(TAG, "view ${look.key} ${source.width}x${source.height} -> ${w}x$h in ${it.millis} ms: " +
                     "engine ${engineName(openEngine)}, pieces of ${tileFor(context, look)} px, ${threads()} threads")
             }
@@ -217,6 +218,25 @@ object PictureLooks {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(trialKey(file), -1) < 0
     }
 
+    /**
+     * About how long [look] of a [width] x [height] picture takes on this phone: from its last view, or before that
+     * from its engine trial; null when not known yet. The viewer's bar moves over this time.
+     */
+    fun expectedMillis(context: Context, look: PictureLook, width: Int, height: Int): Long? {
+        val file = modelFile(context, look) ?: return null
+        val perPixel = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getFloat(speedKey(file), -1f)
+        return if (perPixel > 0f) (perPixel * width * height).toLong().coerceAtLeast(1L) else null
+    }
+
+    private fun rememberSpeed(context: Context, look: PictureLook, millisPerPixel: Float) {
+        val file = modelFile(context, look) ?: return
+        if (millisPerPixel.isFinite() && millisPerPixel > 0f) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putFloat(speedKey(file), millisPerPixel).apply()
+        }
+    }
+
+    private fun speedKey(file: File) = "speed:${file.name}:${file.length()}"
+
     internal fun trialKey(file: File) = "engine3:${file.name}:${file.length()}:${gpuFiles(file)?.second?.length() ?: 0}"
 
     private fun fastest(context: Context, file: File, family: String?, preparing: (Int) -> Unit): Pair<Long, Int> {
@@ -291,6 +311,8 @@ object PictureLooks {
         }
         Log.i(TAG, "engine ${engineName(best.second)} kept for ${file.name}")
         val edit = prefs.edit().putInt(key, best.second)
+        // A first guess at the speed for the progress bar, until the first real view replaces it.
+        if (bestMillis < Long.MAX_VALUE) edit.putFloat(speedKey(file), bestMillis.coerceAtLeast(1L).toFloat() / (TRIAL * TRIAL))
         if (familyKey != null) edit.putInt(familyKey, best.second)
         edit.apply()
         return best

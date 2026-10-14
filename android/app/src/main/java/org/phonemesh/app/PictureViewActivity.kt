@@ -25,6 +25,11 @@ class PictureViewActivity : ScreenActivity() {
     private var look = PictureLook.SMOOTH
     private val made = HashMap<PictureLook, PictureLooks.Made>()
     private var job = 0
+
+    /** Moves the bar during an AI view, over the time it is expected to take; [pieces] is the share actually done. */
+    private val ticker = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pieces = 0
+    private var shown = 0
     /** The view being made; a newer choice, or leaving the screen, cancels it. */
     private var running: PictureLooks.Job? = null
     private lateinit var image: ImageView
@@ -183,15 +188,17 @@ class PictureViewActivity : ScreenActivity() {
             val result = runCatching {
                 // An AI view made before for this picture opens at once; a new one is kept for next time.
                 PictureLooks.cached(context, messageId, next) ?: PictureLooks.make(context, next, from, request, started = {
-                    runOnUiThread { if (mine == job && !isDestroyed) showProgress(0) }
+                    val expected = if (next.ai) PictureLooks.expectedMillis(context, next, from.width, from.height) else null
+                    runOnUiThread { if (mine == job && !isDestroyed) startTicking(mine, next.ai, expected) }
                 }, preparing = { percent ->
                     runOnUiThread { if (mine == job && !isDestroyed) showPreparing(percent) }
                 }) { percent ->
-                    runOnUiThread { if (mine == job && !isDestroyed) showProgress(percent) }
+                    runOnUiThread { if (mine == job && !isDestroyed) { pieces = percent; showProgress(percent) } }
                 }.also { PictureLooks.keep(context, messageId, next, it) }
             }.onFailure { if (it !is PictureLooks.Cancelled) Log.w(TAG, "view ${next.key} not made", it) }
             runOnUiThread {
                 if (running === request) running = null
+                if (mine == job) ticker.removeCallbacksAndMessages(null)
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.getOrNull()?.let { made[next] = it }
                 if (mine != job || result.exceptionOrNull() is PictureLooks.Cancelled) return@runOnUiThread
@@ -216,11 +223,35 @@ class PictureViewActivity : ScreenActivity() {
         info.text = getString(R.string.look_waiting)
     }
 
+    /**
+     * The bar rises over the time this view took last time (up to 95 %, the rest when it is done); with no such time
+     * yet it rises quickly at first, then ever more slowly. Finished pieces can move it ahead, never back.
+     */
+    private fun startTicking(mine: Int, ai: Boolean, expected: Long?) {
+        ticker.removeCallbacksAndMessages(null)
+        pieces = 0
+        shown = 0
+        showProgress(0)
+        if (!ai) return
+        val start = android.os.SystemClock.elapsedRealtime()
+        ticker.post(object : Runnable {
+            override fun run() {
+                if (mine != job || isDestroyed) return
+                val t = android.os.SystemClock.elapsedRealtime() - start
+                val guess = if (expected != null) (95 * t / expected).toInt().coerceAtMost(95)
+                else (90 * (1 - kotlin.math.exp(-t / 4000.0))).toInt()
+                showProgress(maxOf(pieces, guess))
+                ticker.postDelayed(this, 100)
+            }
+        })
+    }
+
     private fun showProgress(percent: Int) {
+        shown = maxOf(shown, percent.coerceIn(0, 100))
         progress.visibility = View.VISIBLE
-        progress.isIndeterminate = percent <= 0 || percent >= 100
-        if (!progress.isIndeterminate) progress.progress = percent
-        info.text = getString(R.string.look_working, percent)
+        progress.isIndeterminate = false
+        progress.progress = shown
+        info.text = getString(R.string.look_working, shown)
     }
 
     private fun display(done: PictureLooks.Made) {
@@ -282,6 +313,7 @@ class PictureViewActivity : ScreenActivity() {
     }
 
     override fun onDestroy() {
+        ticker.removeCallbacksAndMessages(null)
         // A large model holds hundreds of MB while open; it is let go with the screen.
         // Leaving stops the view being made (at the end of its current piece), then lets the model go.
         if (isFinishing) {

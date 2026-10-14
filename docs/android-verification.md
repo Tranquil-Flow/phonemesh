@@ -493,3 +493,9 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
 - **Setup once per model family:** the quick and gentle models share one design, as do the two large ones. After the
   first full trial in a family, its sibling only checks that the kept engine gives its picture too (one run per
   engine), then uses it. Test `theSecondModelOfAFamilyOnlyChecksTheChosenEngine`; receipt `omp-b`, 12 tests.
+- **A bar that moves over time (2026-10-14):** with ncnn a whole photo is one or two pieces, so a bar fed only by
+  pieces jumped 0 → 100 %. Each model's speed on this phone (ms per source pixel) is now kept: first from its engine
+  trial, then from every view. The bar rises over the expected time up to 95 %; finished pieces can move it ahead,
+  never back. With no time known yet it rises like 90·(1−e^(−t/4 s)). Tests `theNextViewOfAModelKnowsAboutHowLongItTakes`,
+  `theEngineTrialGivesAFirstGuessAtTheSpeed`; receipt `bar-b`, 14 tests.
+- Updating the app keeps its engine choices, so a model set up under an earlier build skips the setup.

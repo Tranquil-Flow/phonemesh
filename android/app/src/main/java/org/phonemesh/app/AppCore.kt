@@ -167,8 +167,10 @@ class AppCore private constructor(
     }
     private val random = SecureRandom()
     val picturesDir: File get() = File(app.filesDir, "pictures").apply { mkdirs() }
+    private val t1 = if (BuildConfig.T1_PROBE) T1ProbeRun(app) { radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, it, PRIMARY_CHANNEL) } else null
 
     init {
+        t1?.start()
         history.expireWaiting()
         history.loseUnfinishedPictures()
         history.groupChat(PRIMARY_CHANNEL)
@@ -918,6 +920,10 @@ class AppCore private constructor(
             changed(Change.DELIVERY)
         }
         act(transfer, action)
+    }
+
+    override fun onBroadcastData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long, signal: String) {
+        t1?.got(sender, payload, channel, packetId, signal)
     }
 
     override fun onData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {

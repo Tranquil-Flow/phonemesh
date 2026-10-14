@@ -16,6 +16,8 @@ require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phon
 // (scripts/test_pack_server.py), which a real phone cannot reach.
 // Pictures over the radio (branch feat/image-messages). -Pphonemesh.pictures=false builds the voice-only app from this branch.
 val picturesBuild = project.findProperty("phonemesh.pictures") != "false"
+// Hardware test T1 of the accounts spec: -Pphonemesh.t1probe=true adds a probe that adb starts (T1ProbeRun). Debug only.
+val t1Probe = project.findProperty("phonemesh.t1probe") == "true"
 val publishedPackBaseUrl = "https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/"
 val emulatorPackBaseUrl = "http://10.0.2.2:8777/"
 val packBaseUrl = project.findProperty("phonemesh.packBaseUrl") as String?
@@ -38,6 +40,7 @@ android {
         buildConfigField("boolean", "PICTURES", picturesBuild.toString())
         buildConfigField("String", "FAKE_COUNTRY", "\"\"")
         buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
+        buildConfigField("boolean", "T1_PROBE", "false")
         // The picture upscaling bridge (src/main/cpp) is built for the two phone ABIs the APKs carry.
         externalNativeBuild { cmake { abiFilters("arm64-v8a", "armeabi-v7a") } }
     }
@@ -55,6 +58,7 @@ android {
             buildConfigField("boolean", "SECURE_SCREENS", (!screenshotBuild).toString())
             buildConfigField("String", "FAKE_COUNTRY", "\"$fakeCountry\"")
             buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: emulatorPackBaseUrl}\"")
+            buildConfigField("boolean", "T1_PROBE", t1Probe.toString())
         }
         release {
             isMinifyEnabled = true

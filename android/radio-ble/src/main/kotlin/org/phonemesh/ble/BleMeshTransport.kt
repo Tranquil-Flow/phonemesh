@@ -83,9 +83,21 @@ class BleMeshTransport(
             }
         },
         open = { openGatt() },
-        fail = { reason -> disconnectAndCleanup(reason) },
+        fail = { reason ->
+            if (!ready && target != null && !closed.get() && setupRetry.failed()) {
+                disconnectAndCleanup("$reason; trying again", announceFailure = false, keepAttempt = true)
+            } else {
+                disconnectAndCleanup(reason)
+            }
+        },
         told = { waiting -> mainHandler.post { if (!closed.get()) listener.onPairing(waiting) }; Unit },
     )
+    private val setupRetry = SetupRetry(
+        later = { task, delay -> workHandler.postDelayed(task, delay); Unit },
+        cancel = { task -> workHandler.removeCallbacks(task) },
+        again = { if (!closed.get() && !ready && target != null) openGatt() },
+    )
+
     /** Delivered on the radio worker. A ready connection is never disturbed by a bond report. */
     private val bondReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -175,8 +187,14 @@ class BleMeshTransport(
                         negotiatedMtu = DEFAULT_ATT_MTU
                         post(this@BleMeshTransport.status.connecting("GATT connected; negotiating MTU"))
                         opQueue.clear()
-                        enqueueMtuRequest(gatt)
-                        enqueueServiceDiscovery(gatt)
+                        // Android 10 reports the link before its Bluetooth service has registered it, and silently drops
+                        // a request made in that gap ("configureMTU() - No connection"); so wait a moment first.
+                        workHandler.postDelayed({
+                            if (acceptsCallback(gatt) && this@BleMeshTransport.gatt === gatt && !ready) {
+                                enqueueMtuRequest(gatt)
+                                enqueueServiceDiscovery(gatt)
+                            }
+                        }, FIRST_REQUEST_DELAY_MS)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         val detail = if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -359,6 +377,7 @@ class BleMeshTransport(
                 target = adapter.getRemoteDevice(normalized)
                 post(this@BleMeshTransport.status.connecting("Connecting to Meshtastic BLE radio $normalized"))
                 watchBond()
+                setupRetry.begin()
                 pairing.begin()
             } catch (security: SecurityException) {
                 disconnectAndCleanup("BLE connect denied: ${security.message}")
@@ -454,6 +473,11 @@ class BleMeshTransport(
             MeshtasticProtocol.buildDataToRadio(port, payload, destinationId, channel, packetId = packetId, hopLimit = hops)
         }
 
+    override fun sendBroadcastData(port: Int, payload: ByteArray, channel: Int): Long =
+        submit("^all", "broadcast data port=$port channel=$channel") { packetId, hops ->
+            MeshtasticProtocol.buildBroadcastDataToRadio(port, payload, channel, packetId = packetId, hopLimit = hops)
+        }
+
     override fun modemPreset(): String? = modemPreset
 
     private fun submit(destinationId: String, label: String, build: (packetId: Int, hops: Int) -> ByteArray): Long {
@@ -512,7 +536,7 @@ class BleMeshTransport(
     }
 
     private fun enqueueMtuRequest(gatt: BluetoothGatt) {
-        opQueue.enqueue("requestMtu") {
+        opQueue.enqueue("requestMtu", timeoutMs = MTU_TIMEOUT_MS) {
             @Suppress("MissingPermission")
             gatt.requestMtu(TARGET_MTU)
         }
@@ -699,8 +723,9 @@ class BleMeshTransport(
                         return
                     }
                     ready = true
-                    // A link that became ready is never ended by a pairing wait still counting.
+                    // A link that became ready is never ended by a pairing wait still counting, nor tried again.
                     pairing.end()
+                    setupRetry.end()
                     connectionDeadline?.let { workHandler.removeCallbacks(it) }
                     connectionDeadline = null
                     post(status.radioReady("Meshtastic BLE config complete id=${event.id}; radio ready"))
@@ -746,6 +771,10 @@ class BleMeshTransport(
                 val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
                 val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
                 if (local != null && event.to == local && event.sender != ownId) postData(event.sender, event.port, event.payload, event.channel, event.packetId)
+                else if (event.to == MeshtasticProtocol.BROADCAST_NUM && event.port == MeshtasticProtocol.ACCOUNT_PORT && event.sender != ownId) {
+                    val e = event
+                    mainHandler.post { if (!closed.get()) listener.onBroadcastData(e.sender, e.port, e.payload, e.channel, e.packetId, e.signal) }
+                }
             }
             is RadioEvent.QueueStatus -> {
                 val ok = event.res == 0
@@ -800,6 +829,7 @@ class BleMeshTransport(
     /** Ends the link and, unless [keepAttempt], the attempt with it: the pairing wait and the watch on the radio's bond. */
     private fun disconnectAndCleanup(detail: String, announceFailure: Boolean = true, keepAttempt: Boolean = false) {
         if (!keepAttempt) {
+            setupRetry.end()
             pairing.end()
             unwatchBond()
             target = null
@@ -925,6 +955,10 @@ class BleMeshTransport(
 
     companion object {
         private const val TARGET_MTU = 512
+        /** Wait after the link comes up before the first request (Android 10, see onConnectionStateChange). */
+        private const val FIRST_REQUEST_DELAY_MS = 500L
+        /** The MTU answer takes well under a second; a stalled one ends the try so the next can start. */
+        private const val MTU_TIMEOUT_MS = 4_000L
         private const val DEFAULT_ATT_MTU = 23
         private const val ATT_HEADER_BYTES = 3
         private const val MAX_DRAIN_READS = 64

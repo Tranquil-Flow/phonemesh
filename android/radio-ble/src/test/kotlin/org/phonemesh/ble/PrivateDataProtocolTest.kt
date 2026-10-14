@@ -30,6 +30,32 @@ class PrivateDataProtocolTest {
         assertArrayEquals(payload, packet.decoded.payload.toByteArray())
     }
 
+    @Test fun buildsABroadcastWithoutAckOnTheAccountsPort() {
+        val payload = ByteArray(233) { (it * 3).toByte() }
+        val packet = MeshProtos.ToRadio.parseFrom(
+            MeshtasticProtocol.buildBroadcastDataToRadio(301, payload, 0, packetId = 0x01020304, hopLimit = 3),
+        ).packet
+        assertEquals(-1, packet.to)
+        assertEquals(0x01020304, packet.id)
+        assertEquals("a broadcast gets no radio acknowledgement", false, packet.wantAck)
+        assertEquals(3, packet.hopLimit)
+        assertEquals(301, packet.decoded.portnumValue)
+        assertArrayEquals(payload, packet.decoded.payload.toByteArray())
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun broadcastsOnlyOnTheAccountsPort() { MeshtasticProtocol.buildBroadcastDataToRadio(300, byteArrayOf(1), 0) }
+
+    @Test fun aBroadcastOnTheAccountsPortArrivesWithItsSignalAndHops() {
+        val data = MeshProtos.Data.newBuilder().setPortnumValue(301).setPayload(ByteString.copyFrom(byteArrayOf(9, 8))).build()
+        val packet = MeshProtos.MeshPacket.newBuilder().setFrom(0x89abcdef.toInt()).setTo(-1).setChannel(0).setId(77)
+            .setRxRssi(-97).setRxSnr(5.25f).setHopStart(3).setHopLimit(2).setDecoded(data).build()
+        val event = MeshtasticProtocol.parseFromRadio(MeshProtos.FromRadio.newBuilder().setPacket(packet).build()) as RadioEvent.Data
+        assertEquals(301, event.port)
+        assertEquals(MeshtasticProtocol.BROADCAST_NUM, event.to)
+        assertEquals("rssi=-97 snr=5.25 hops=1", event.signal)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun refusesBroadcast() { MeshtasticProtocol.buildDataToRadio(300, byteArrayOf(1), "^all", 0) }
 

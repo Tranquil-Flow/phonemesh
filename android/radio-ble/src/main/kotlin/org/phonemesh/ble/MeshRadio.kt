@@ -54,6 +54,9 @@ interface MeshRadio : AutoCloseable {
          * [packetId] is its mesh packet id (0 when unknown).
          */
         fun onData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {}
+
+        /** An accounts-port broadcast from another radio; [signal] is "rssi=… snr=… hops=…" for diagnostics. */
+        fun onBroadcastData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long, signal: String) {}
     }
 
     fun scan()
@@ -70,6 +73,10 @@ interface MeshRadio : AutoCloseable {
      */
     fun sendData(port: Int, payload: ByteArray, destinationId: String, channel: Int): Long =
         throw UnsupportedOperationException("this radio cannot send private data")
+
+    /** One accounts-port broadcast to every radio on [channel]; no want_ack. Returns its packet id. Never resends. */
+    fun sendBroadcastData(port: Int, payload: ByteArray, channel: Int): Long =
+        throw UnsupportedOperationException("this radio cannot broadcast data")
 
     /** The radio's modem preset name from the handshake (\"LONG_FAST\", ...); null before it arrives or when custom. */
     fun modemPreset(): String? = null
@@ -94,5 +101,8 @@ interface MeshRadio : AutoCloseable {
     companion object {
         /** The private Meshtastic port pictures travel on (core PictureWire.PORT must match). */
         const val PICTURE_PORT = 300
+
+        /** The private port accounts' packets travel on, as broadcasts (wire v2). */
+        const val ACCOUNT_PORT = 301
     }
 }

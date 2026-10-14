@@ -505,3 +505,23 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   the processor is kept for both families, which is correct. The driver has no 16-bit storage or arithmetic, so its
   "16-bit" run equalled the 32-bit one (596 vs 586 ms) and only lengthened the large setup (about 56 s). The trial now
   skips 16-bit on such chips (`NativeGpu.fp16()`).
+
+### Accounts port broadcasts, probe T1, and reconnecting on Android 10 (2026-10-14)
+
+- `radio-ble`: port 301 (`ACCOUNT_PORT`) broadcasts. `buildBroadcastDataToRadio` sends with no want_ack and only
+  on 301. The transport passes 301 broadcasts from other radios to `Listener.onBroadcastData`, with
+  "rssi/snr/hops". JVM tests in `PrivateDataProtocolTest`.
+- Probe build `-Pphonemesh.t1probe=true` (debug only; `BuildConfig.T1_PROBE` is false otherwise):
+  - `T1ProbeRun` is started by adb broadcast and logs to `files/t1-probe.log`.
+  - Its payload is `core/T1Probe`, with every byte checked on arrival.
+  - Results are in `.local/accounts-t1.md` and the spec.
+- **Reconnecting (Fairphone 3, Android 10):** the app asked for the 512 MTU 1-2 ms after the link came up, and
+  Android 10 dropped the request ("configureMTU() - No connection"). The app then gave up after 10 s. Connects that
+  failed with status 133 were not retried, so one session needed four tries. Fix:
+  - The first request now waits 500 ms after the link comes up.
+  - The MTU request times out after 4 s.
+  - A setup that fails before the radio is ready is tried twice more, 1 s and 3 s later (`SetupRetry`), but never
+    after the radio was ready or while pairing.
+  - JVM tests: `SetupRetryTest`, `SafeGattQueueTest`; 687 JVM tests pass.
+  - Emulator: `AppBoundaryTest` and `AppCoreTest`, 44 OK (receipt `ble-retry`). Those are the only androidTest
+    classes that reach `BleMeshTransport` (grep).

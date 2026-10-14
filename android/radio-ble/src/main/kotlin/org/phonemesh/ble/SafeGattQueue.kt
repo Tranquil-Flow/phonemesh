@@ -10,16 +10,17 @@ internal class SafeGattQueue(
     private val timeoutMs:Long=10000,
     private val maxPending:Int=32,
 ) {
-    private class Operation(val name:String,val start:()->Boolean) {
+    private class Operation(val name:String,val timeoutMs:Long,val start:()->Boolean) {
         var rejected=false
         var timer:Runnable=Runnable {}
     }
     private val pending=ArrayDeque<Operation>()
     private var active:Operation?=null
     private fun held():Int = pending.size+(if(active==null) 0 else 1)
-    fun enqueue(name:String,start:()->Boolean):Boolean {
+    /** [timeoutMs] overrides the queue's timeout for this one operation. */
+    fun enqueue(name:String,timeoutMs:Long=this.timeoutMs,start:()->Boolean):Boolean {
         if(!room(1)) return false
-        val op=Operation(name,start)
+        val op=Operation(name,timeoutMs,start)
         pending.add(op)
         pump()
         return !op.rejected
@@ -50,7 +51,7 @@ internal class SafeGattQueue(
         op.timer=Runnable { if(active===op) fail("GATT operation timed out: ${op.name}") }
         try {
             if(!op.start()) { fail("GATT operation failed to start: ${op.name}"); return }
-            schedule(op.timer,timeoutMs)
+            schedule(op.timer,op.timeoutMs)
         } catch(error:Exception) {
             fail("GATT operation failed: ${op.name} (${error.javaClass.simpleName})")
         }

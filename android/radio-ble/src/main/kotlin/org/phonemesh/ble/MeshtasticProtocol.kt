@@ -25,9 +25,13 @@ internal object MeshtasticProtocol {
     /** Meshtastic's Data payload limit (mesh.proto DATA_PAYLOAD_LEN); PKI direct messages fit less on air. */
     const val MAX_DATA_BYTES = 233
 
-    /** Private ports this app sends and listens on: 300 = pictures (core PictureWire.PORT). */
+    /**
+     * Private ports this app sends and listens on: 300 = pictures (core PictureWire.PORT), 301 = accounts (wire v2,
+     * docs/specs/2026-10-14-accounts-design.md), which travel as broadcasts.
+     */
     const val PICTURE_PORT = MeshRadio.PICTURE_PORT
-    val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT)
+    const val ACCOUNT_PORT = MeshRadio.ACCOUNT_PORT
+    val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT, ACCOUNT_PORT)
     const val BROADCAST_NUM: Long = 0xffffffffL
     const val FIRST_HEARTBEAT_NONCE = 2
 
@@ -117,6 +121,31 @@ internal object MeshtasticProtocol {
             .setId(packetId)
             .setPriority(MeshProtos.MeshPacket.Priority.RELIABLE)
             .setWantAck(true)
+            .setHopLimit(hopLimit)
+            .setDecoded(data)
+            .build()
+        return MeshProtos.ToRadio.newBuilder().setPacket(packet).build().toByteArray()
+    }
+
+    /**
+     * One accounts-port packet for every radio on [channel]: no destination and no want_ack (Meshtastic acknowledges no
+     * broadcast), so delivery is confirmed by the app itself. Only the accounts port is broadcast.
+     */
+    fun buildBroadcastDataToRadio(port: Int, payload: ByteArray, channel: Int, packetId: Int = newPacketId(), hopLimit: Int = 3): ByteArray {
+        require(port == ACCOUNT_PORT) { "only the accounts port $ACCOUNT_PORT is broadcast, not $port" }
+        require(channel in 0..7) { "channel must be in 0..7" }
+        require(hopLimit in 0..7) { "hop limit must be in 0..7" }
+        require(payload.size in 1..MAX_DATA_BYTES) { "payload is ${payload.size} bytes; must be 1..$MAX_DATA_BYTES" }
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnumValue(port)
+            .setPayload(ByteString.copyFrom(payload))
+            .setWantResponse(false)
+            .build()
+        val packet = MeshProtos.MeshPacket.newBuilder()
+            .setTo(BROADCAST_NUM.toInt())
+            .setChannel(channel)
+            .setId(packetId)
+            .setWantAck(false)
             .setHopLimit(hopLimit)
             .setDecoded(data)
             .build()
@@ -226,9 +255,11 @@ internal object MeshtasticProtocol {
     private fun dataEvent(packet: MeshProtos.MeshPacket, decoded: MeshProtos.Data): RadioEvent? {
         val payload = decoded.payload.toByteArray()
         if (payload.isEmpty() || payload.size > MAX_DATA_BYTES) return null
+        // hop_start 0 is unknown (older firmware), not direct.
+        val hops = if (packet.hopStart > 0) "${packet.hopStart - packet.hopLimit}" else "?"
         return RadioEvent.Data(
             nodeId(packet.`from`.toLong()), decoded.portnumValue, payload, packet.channel, packet.to.toLong() and BROADCAST_NUM,
-            packet.id.toLong() and BROADCAST_NUM,
+            packet.id.toLong() and BROADCAST_NUM, "rssi=${packet.rxRssi} snr=${packet.rxSnr} hops=$hops",
         )
     }
 
@@ -310,7 +341,10 @@ internal sealed class RadioEvent {
         val packetId: Long = 0, val replyTo: Long = 0, val reaction: Boolean = false,
     ) : RadioEvent()
     /** [packetId]: the mesh packet's own id, what a reply or reaction to it names. */
-    class Data(val sender: String, val port: Int, val payload: ByteArray, val channel: Int, val to: Long, val packetId: Long = 0) : RadioEvent()
+    class Data(
+        val sender: String, val port: Int, val payload: ByteArray, val channel: Int, val to: Long, val packetId: Long = 0,
+        val signal: String = "",
+    ) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()
     data class Routing(
         val from: Long,

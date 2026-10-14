@@ -40,6 +40,14 @@ JNIEXPORT jstring JNICALL Java_org_phonemesh_app_NativeGpu_device(JNIEnv *env, j
     return env->NewStringUTF(info.device_name());
 }
 
+// Whether the graphics chip really stores or computes 16-bit floats. Without either (the Fairphone 3's Adreno 506 driver),
+// ncnn's 16-bit mode is the 32-bit mode again, and trying it only lengthens the setup.
+JNIEXPORT jboolean JNICALL Java_org_phonemesh_app_NativeGpu_fp16(JNIEnv *, jclass) {
+    if (!gpu_ready()) return JNI_FALSE;
+    const ncnn::GpuInfo &info = ncnn::get_gpu_info(ncnn::get_default_gpu_index());
+    return (info.support_fp16_storage() || info.support_fp16_arithmetic()) ? JNI_TRUE : JNI_FALSE;
+}
+
 // [vulkan] false runs ncnn on the processor instead: used by the checks to tell a conversion fault from a driver fault.
 // [fp16] lets ncnn store and compute in 16-bit floats where the hardware can; false keeps 32-bit throughout.
 JNIEXPORT jlong JNICALL Java_org_phonemesh_app_NativeGpu_open(

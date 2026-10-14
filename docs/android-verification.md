@@ -499,3 +499,9 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   never back. With no time known yet it rises like 90·(1−e^(−t/4 s)). Tests `theNextViewOfAModelKnowsAboutHowLongItTakes`,
   `theEngineTrialGivesAFirstGuessAtTheSpeed`; receipt `bar-b`, 14 tests.
 - Updating the app keeps its engine choices, so a model set up under an earlier build skips the setup.
+- **Fairphone 3 (Adreno 506, Vulkan 1.1, driver 2020-05-28), first-use trial (log `fp3-trial-log.txt`):** the
+  graphics chip's pictures are right (mean difference 2.5e-4 in 32-bit) but it is slower than ncnn on the
+  processor: AI quick 586 ms vs 95 ms, AI large 9.0 s vs 2.9 s per trial piece (ONNX Runtime 206 ms / 3.3 s). ncnn on
+  the processor is kept for both families, which is correct. The driver has no 16-bit storage or arithmetic, so its
+  "16-bit" run equalled the 32-bit one (596 vs 586 ms) and only lengthened the large setup (about 56 s). The trial now
+  skips 16-bit on such chips (`NativeGpu.fp16()`).

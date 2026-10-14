@@ -46,6 +46,7 @@ object NativeGpu {
     @JvmStatic external fun close(handle: Long)
     @JvmStatic external fun lastError(): String
     @JvmStatic external fun device(): String
+    @JvmStatic external fun fp16(): Boolean
 }
 
 /**
@@ -287,6 +288,11 @@ object PictureLooks {
         var best = cpu to ENGINE_CPU
         var bestMillis = cpuMillis
         for ((index, engine) in NCNN_ENGINES.withIndex()) {
+            if (engine == ENGINE_GPU && NativeGpu.loaded && !NativeGpu.fp16()) {
+                Log.i(TAG, "engine GPU-fp16 skipped for ${file.name}: ${NativeGpu.device()} has no real 16-bit floats")
+                preparing((index + 2) * 100 / steps)
+                continue
+            }
             val handle = open(engine, file)
             if (handle == 0L) {
                 Log.i(TAG, "engine ${engineName(engine)} not available for ${file.name}: ${NativeGpu.lastError()}")

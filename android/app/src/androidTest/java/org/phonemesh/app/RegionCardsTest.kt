@@ -269,13 +269,12 @@ class RegionCardsTest {
     @Test fun sendAgainIsOffWhileSendingIsBlocked() {
         radio("UNSET", "TG")
         val group = TestCore.onMain { TestCore.core.groupChatId() }
-        TestCore.onMain {
-            radio.connected(false)
-            TestCore.core.setDraft(group, "Bonjour")
-            TestCore.core.send(group)
-            radio.connected(true)
+        // A message the radio reported it could not send (no radio at all makes a message wait instead).
+        val failed = TestCore.onMain {
+            val m = TestCore.core.history.addOutgoing(group, "Bonjour", "fr", System.currentTimeMillis())
+            TestCore.core.history.setStatus(m.id, DeliveryStatus.FAILED)
+            TestCore.core.history.message(m.id)!!
         }
-        val failed = TestCore.onMain { TestCore.core.history.lastMessage(group)!! }
         assertEquals(DeliveryStatus.FAILED, failed.status)
         val screen = conversation(null)
         val again = "resend:${failed.id}"

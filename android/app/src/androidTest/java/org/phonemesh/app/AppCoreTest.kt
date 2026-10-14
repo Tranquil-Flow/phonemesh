@@ -127,8 +127,19 @@ class AppCoreTest {
         main { radio.receive("!0000bbbb", "x".repeat(40), false, org.phonemesh.ble.TextMark(packetId = 702, replyTo = 700, reaction = true)) }
         assertEquals("too long to be a reaction: dropped", 2, core.history.reactions(group).size)
         main { radio.connected(false) }
-        assertFalse(main { core.react(news.id, "🙏") })
-        assertEquals("nothing kept when the radio cannot take it", 2, core.history.reactions(group).size)
+        assertTrue(main { core.react(news.id, "🙏") })
+        assertEquals("no radio: it waits on this phone, marked", Reaction(700, null, "🙏", waiting = true),
+            core.history.reactions(group).single { it.senderId == null })
+        assertEquals("and says so", core.localized().getString(R.string.reaction_waiting), core.text(checkNotNull(core.lastNote)))
+        assertEquals("nothing went out", 1, radio.sent.size)
+        main { radio.connected(true) }
+        assertEquals("it goes once a radio is ready", 2, radio.sent.size)
+        assertEquals("🙏", radio.sent.last().text)
+        assertTrue(radio.sent.last().reaction)
+        assertEquals(700L, radio.sent.last().replyTo)
+        assertFalse(core.history.reactions(group).single { it.senderId == null }.waiting)
+        main { radio.connected(true) }
+        assertEquals("sent once only", 2, radio.sent.size)
     }
 
     @Test fun planningKeepsTheDraftAsAPlannedMessageAndArmsTheAlarm() {
@@ -291,17 +302,24 @@ class AppCoreTest {
         assertEquals(DeliveryStatus.DELIVERED, core.history.message(inPrivate.id)!!.status)
     }
 
-    /** Review Focus 1. */
-    @Test fun aRadioThatIsNotReadyMakesAFailureThatCanBeResent() {
+    /** Review Focus 1, changed by the owner on 2026-10-13: no radio means waiting, said on the bubble, then sent by itself. */
+    @Test fun withoutARadioMessagesWaitSayingSoAndGoInOrderOnceOneIsReady() {
         TestCore.install()
         val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
         main { radio.connected(false) }
         val failed = sendIn(direct, "Tu es là ?")
-        assertEquals(DeliveryStatus.FAILED, failed.status)
+        val next = sendIn(direct, "Réponds-moi")
+        assertEquals(DeliveryStatus.QUEUED, failed.status)
+        assertEquals(DeliveryStatus.QUEUED, next.status)
+        assertFalse("nothing to resend: it goes by itself", DeliveryStatus.QUEUED.canResend)
         assertTrue(radio.sent.isEmpty())
+        TestCore.restart()
+        assertEquals("closing the app keeps it waiting", DeliveryStatus.QUEUED, core.history.message(failed.id)!!.status)
         main { radio.connected(true) }
-        assertTrue(main { core.resend(failed.id) })
-        val packet = radio.sent.single().packetId
+        assertEquals("both went, in the order they were written", 2, radio.sent.size)
+        assertTrue(radio.sent[0].text.endsWith("Tu es là ?"))
+        assertTrue(radio.sent[1].text.endsWith("Réponds-moi"))
+        val packet = radio.sent.first().packetId
         assertEquals(DeliveryStatus.WAITING, core.history.message(failed.id)!!.status)
         assertEquals(packet, core.history.message(failed.id)!!.packetId)
         // Lost after the radio took it: unconfirmed, resend gets a new packet, the old one's late report changes nothing.
@@ -312,7 +330,7 @@ class AppCoreTest {
         assertNotEquals(packet, second)
         main { radio.deliver(packet, DeliveryState.FAILED); radio.deliver(second, DeliveryState.ACKNOWLEDGED) }
         assertEquals(DeliveryStatus.DELIVERED, core.history.message(failed.id)!!.status)
-        assertEquals(1, core.history.messages(direct).size)
+        assertEquals(2, core.history.messages(direct).size)
     }
 
     /** Review Focus 2. */

@@ -48,6 +48,9 @@ interface MeshRadio : AutoCloseable {
 
         /** [peers] changed: a name arrived or the session ended. Coalesced, at most every 500 ms. */
         fun onPeersChanged() {}
+
+        /** A private-port packet addressed to this radio (see [MeshtasticProtocol.PRIVATE_DATA_PORTS]); never a broadcast. */
+        fun onData(sender: String, port: Int, payload: ByteArray, channel: Int) {}
     }
 
     fun scan()
@@ -57,6 +60,16 @@ interface MeshRadio : AutoCloseable {
     fun peers(): List<RadioPeer>
     /** [replyTo] is the radio id of the message answered (0 for none); [reaction] marks [text] as a reaction to it. */
     fun send(text: String, destinationId: String, channel: Int, replyTo: Long = 0, reaction: Boolean = false): Long
+
+    /**
+     * One private-port packet to one other radio, with want_ack; returns its packet id for [Listener.onDelivery],
+     * like [send]. Never resends.
+     */
+    fun sendData(port: Int, payload: ByteArray, destinationId: String, channel: Int): Long =
+        throw UnsupportedOperationException("this radio cannot send private data")
+
+    /** The radio's modem preset name from the handshake (\"LONG_FAST\", ...); null before it arrives or when custom. */
+    fun modemPreset(): String? = null
 
     /** The name the connected radio announces for itself, the one other radios show; null while away or when it has none. */
     fun ownName(): String?
@@ -74,4 +87,9 @@ interface MeshRadio : AutoCloseable {
      * Throws IllegalArgumentException, and writes nothing, for a [region] that is not in [RadioRegions.all].
      */
     fun setRegion(region: String, done: (RegionResult) -> Unit)
+
+    companion object {
+        /** The private Meshtastic port pictures travel on (core PictureWire.PORT must match). */
+        const val PICTURE_PORT = 300
+    }
 }

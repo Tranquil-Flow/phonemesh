@@ -109,6 +109,7 @@ class BleMeshTransport(
     @Volatile private var ownName: String? = null
     @Volatile private var channelName: String? = null
     @Volatile private var configuredHopLimit: Int? = null
+    @Volatile private var modemPreset: String? = null
     private var drainInProgress = false
     private var drainAgain = false
     private var drainReadsRemaining = 0
@@ -434,21 +435,34 @@ class BleMeshTransport(
      * [Listener.onDelivery]. Never resends and never infers acknowledgement from frontend behaviour.
      * Callers that ignore the return value remain source compatible.
      */
-    override fun send(text: String, destinationId: String, channel: Int, replyTo: Long, reaction: Boolean): Long {
+    override fun send(text: String, destinationId: String, channel: Int, replyTo: Long, reaction: Boolean): Long =
+        submit(destinationId, "text channel=$channel destination=$destinationId") { packetId, hops ->
+            MeshtasticProtocol.buildTextToRadio(
+                text,
+                destinationId,
+                channel,
+                packetId = packetId,
+                hopLimit = hops,
+                replyTo = replyTo,
+                reaction = reaction,
+            )
+        }
+
+    /** Like [send], for one private-port packet (pictures). */
+    override fun sendData(port: Int, payload: ByteArray, destinationId: String, channel: Int): Long =
+        submit(destinationId, "data port=$port channel=$channel destination=$destinationId") { packetId, hops ->
+            MeshtasticProtocol.buildDataToRadio(port, payload, destinationId, channel, packetId = packetId, hopLimit = hops)
+        }
+
+    override fun modemPreset(): String? = modemPreset
+
+    private fun submit(destinationId: String, label: String, build: (packetId: Int, hops: Int) -> ByteArray): Long {
         checkOpen()
         val target = gatt
         check(ready && target != null && toRadio != null) { "Meshtastic radio is not ready" }
         val hops = checkNotNull(configuredHopLimit) { "Radio LoRa configuration has not arrived" }
         val packetId = MeshtasticProtocol.newPacketId().toLong() and MeshtasticProtocol.BROADCAST_NUM
-        val payload = MeshtasticProtocol.buildTextToRadio(
-            text,
-            destinationId,
-            channel,
-            packetId = packetId.toInt(),
-            hopLimit = hops,
-            replyTo = replyTo,
-            reaction = reaction,
-        )
+        val payload = build(packetId.toInt(), hops)
         val maxWrite = maxWriteBytes()
         require(payload.size <= maxWrite) {
             "Encoded ToRadio is ${payload.size} bytes but negotiated BLE write limit is $maxWrite bytes"
@@ -469,7 +483,7 @@ class BleMeshTransport(
                 return@post
             }
             postEmissions(listOf(DeliveryTracker.Emission(packetId, DeliveryState.SUBMITTING, "Writing packet $packetId to the radio")))
-            if (!writeToRadio(payload, "text channel=$channel destination=$destinationId")) {
+            if (!writeToRadio(payload, label)) {
                 postEmissions(delivery.onQueueRejected(packetId, "BLE GATT queue rejected the write"))
             } else {
                 post(status.diagnostic("Submitted packet $packetId to the radio GATT queue; a recipient ACK has not arrived"))
@@ -559,6 +573,7 @@ class BleMeshTransport(
         ready = false
         // A new handshake: only the settings it delivers count from here on.
         configuredHopLimit = null
+        modemPreset = null
         regions.reset()
         val packet = MeshtasticProtocol.buildWantConfig(nonce)
         if (packet.size > maxWriteBytes()) {
@@ -701,6 +716,7 @@ class BleMeshTransport(
                 val hops = event.lora.hopLimit
                 if (hops in 0..7) {
                     configuredHopLimit = hops
+                    modemPreset = if (event.lora.usePreset) event.lora.modemPreset.name else null
                     regions.onSettings(event.lora)
                 } else {
                     disconnectAndCleanup("Radio supplied an invalid hop limit")
@@ -725,6 +741,11 @@ class BleMeshTransport(
                 if (event.sender != ownId && direct != null) {
                     postText(event.sender, event.text, event.channel, direct, TextMark(event.packetId, event.replyTo, event.reaction))
                 }
+            }
+            is RadioEvent.Data -> {
+                val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
+                val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
+                if (local != null && event.to == local && event.sender != ownId) postData(event.sender, event.port, event.payload, event.channel)
             }
             is RadioEvent.QueueStatus -> {
                 val ok = event.res == 0
@@ -796,6 +817,7 @@ class BleMeshTransport(
         ownName = null
         channelName = null
         configuredHopLimit = null
+        modemPreset = null
         synchronized(peersById) { peersById.clear() }
         postPeersChanged()
         wantedConfigId = null
@@ -880,6 +902,10 @@ class BleMeshTransport(
 
     private fun postText(sender: String, text: String, channel: Int, direct: Boolean, mark: TextMark) {
         mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel, direct, mark) }
+    }
+
+    private fun postData(sender: String, port: Int, payload: ByteArray, channel: Int) {
+        mainHandler.post { if (!closed.get()) listener.onData(sender, port, payload, channel) }
     }
 
     private fun postDevice(address: String, name: String, rssi: Int) {

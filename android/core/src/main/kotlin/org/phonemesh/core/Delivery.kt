@@ -11,7 +11,9 @@ enum class DeliveryStatus {
     /** ⚠ "Pas confirmé" + Renvoyer. Never called a failure. */
     UNCONFIRMED,
     /** ⚠ "Échec" + Renvoyer. */
-    FAILED;
+    FAILED,
+    /** 🕓 "En attente d'une radio": no radio could take it yet; it goes by itself once one is ready, even after a restart. */
+    QUEUED;
 
     val canResend: Boolean get() = this == UNCONFIRMED || this == FAILED
 }

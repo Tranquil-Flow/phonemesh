@@ -20,6 +20,7 @@ object Looks {
         DeliveryStatus.DELIVERED -> StatusLook(R.drawable.ic_check, palette.good, R.string.status_delivered, false)
         DeliveryStatus.UNCONFIRMED -> StatusLook(R.drawable.ic_warning, palette.bad, R.string.status_unconfirmed, true)
         DeliveryStatus.FAILED -> StatusLook(R.drawable.ic_warning, palette.bad, R.string.status_failed, true)
+        DeliveryStatus.QUEUED -> StatusLook(R.drawable.ic_clock, palette.muted, R.string.waiting_radio, true)
     }
 
     /** Group: rounded square, people on yellow. Private: circle with a person. */

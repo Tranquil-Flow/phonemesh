@@ -14,6 +14,8 @@ require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phon
 // -Pphonemesh.packBaseUrl=https://.../ replaces the address in every build type. Without it, release uses the
 // published packs and debug builds use the test pack server on the development machine as the emulator sees it
 // (scripts/test_pack_server.py), which a real phone cannot reach.
+// Pictures over the radio (branch feat/image-messages). -Pphonemesh.pictures=false builds the voice-only app from this branch.
+val picturesBuild = project.findProperty("phonemesh.pictures") != "false"
 val publishedPackBaseUrl = "https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/"
 val emulatorPackBaseUrl = "http://10.0.2.2:8777/"
 val packBaseUrl = project.findProperty("phonemesh.packBaseUrl") as String?
@@ -33,6 +35,7 @@ android {
         testProguardFiles("proguard-rules.pro")
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
         buildConfigField("boolean", "SECURE_SCREENS", "true")
+        buildConfigField("boolean", "PICTURES", picturesBuild.toString())
         buildConfigField("String", "FAKE_COUNTRY", "\"\"")
         buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
     }

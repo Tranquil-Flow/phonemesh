@@ -403,3 +403,17 @@ Emulator `Phonemesh_API_35`, fake radio and fake speech, 2026-10-12. Owner appro
 - Help has a new group, "Autres gestes", with eight pictures: hold, reply, react, forward, delete, pin, later, later_pick. They draw the app's own icons and words. Four approved sentences were shortened to meet the eight-word rule (see the spec).
 - New screenshot states (light and dark): `05-forward-to`, `05-hold-tip`, `06-plan-window`, `06-plan-window-day`, `06-plan-clock`, `06-plan-calendar`, `10-help-more`; plus eight `howto-*.png` stills. No existing screenshot changed. `docs/screenshots-phase3/` holds 135 files.
 - Not checked on a phone: the real alarm sending a planned message while the app is closed, and the Fairphone (Android 10) look of the clock and calendar.
+
+### Picture messages folded in, photo and camera fixes, and "waiting for a radio"
+
+Emulator `Phonemesh_API_35`, fake radio, 2026-10-13/14. Picture work from `~/Desktop/phonemesh-pictures.patch` (sha256 `dd1f4adb…`), applied to `b13c3aa`. Spec: `docs/specs/2026-10-12-picture-messages-design.md`.
+
+- Gate `pic-gate4`: the build, unit tests and size checks passed; device batches 1–8 passed; the emulator was then killed (exit -9, "Failed to find ColorBuffer"). After a cold boot, batches 9–11 passed on their own: `ScreenChecksTest` + `ScreenshotTour` 44/44 (`fin-9`), Settings/Sharing/StoryView/Theme 50/50 (`fin-10`). The run before that (`pic-gate3`) passed all 417 tests before the last layout fix. JVM: core 238, radio-ble 105, app 106.
+- Size: release arm64 12,693,389 B, armeabi-v7a 11,736,149 B; growth 341,015 B. The owner raised the Gradle limits to 12,800,000 / 11,800,000 B and the growth allowance to 450,000 B (2026-10-14).
+- **"Picture cannot be opened" on every photo (owner report):** `PictureMaker.load` took Android's measuring step, which returns no picture by design, as a failure. Fixed; `PictureMakerTest` reads a real JPEG and rejects a non-photo.
+- **Taking a photo (owner report):** the screen only had the photo picker. Now "Prendre une photo" (camera app, writing into `CaptureProvider`'s one cache file, no permission, nothing in the gallery, deleted when the screen closes) and "Choisir une photo". Each failure has its own sentence.
+- **WebP colour profile:** Android's encoder added about 500 B to every picture (a flat 31×21 picture was 548 B), so the 500 B Medium budget could never be met. `WebpContainer.minimal` drops it (`WebpContainerTest`); a scene photo at Medium is now 96×72 px, 492 B, about 8 s on air at LongFast.
+- **Nothing that needs the radio is silent any more (owner decision):** with no radio ready, messages, pictures and reactions wait with a clock and "En attente d'une radio" (new status `QUEUED`), survive closing the app, and go by themselves in order once a radio is ready. FAILED now means the radio took a message and then reported it could not send it (tests updated to make failures that way).
+- The six picture tests that had never run (`PictureCoreTest`) pass, plus one for a picture waiting for a radio.
+- New screenshots (light and dark): `05-picture-choose`, `05-picture-ready`, `05-picture-bubbles`. On pictures, the status words go under the picture so they are never cut; the size and look buttons have no tick, so French words are not split.
+- Not checked on phones yet: camera and gallery on the Pixel and Fairphone, real radio delivery times per size, the owner's reports.

@@ -47,3 +47,12 @@ Meshtastic's SDK and eSpeak bring GPL-family components. Voice/model/dictionary 
 can carry additional attribution or distribution requirements. Confirm the proposed
 AGPL-3.0 project licence and audit the exact redistributed assets before release.
 No XTTS or non-commercial-only model dependency is included in v1.
+
+## Code ported into the Android app
+
+| Code | Where | Licence | Notes |
+|---|---|---|---|
+| ThumbHash (Evan Wallace, <https://github.com/evanw/thumbhash>) | `android/core/src/main/kotlin/org/phonemesh/core/ThumbHash.kt` | MIT | Line-for-line Kotlin port; the MIT notice is kept in the file. The reference Java is test-only (`android/core/src/test/java`) and checks bytes and pixels against the port. |
+
+Pictures otherwise use only what Android already has (BitmapFactory, ExifInterface, the platform WebP encoder), so the app
+gains no runtime library.

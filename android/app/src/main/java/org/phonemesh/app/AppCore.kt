@@ -24,6 +24,12 @@ import org.phonemesh.core.PackInfo
 import org.phonemesh.core.PackKind
 import org.phonemesh.core.PackStore
 import org.phonemesh.core.PeopleHeard
+import org.phonemesh.core.LoraAirtime
+import org.phonemesh.core.LoraShape
+import org.phonemesh.core.PictureAssembler
+import org.phonemesh.core.PictureCodec
+import org.phonemesh.core.PictureSender
+import org.phonemesh.core.PictureWire
 import org.phonemesh.core.RadioReport
 import org.phonemesh.core.Readiness
 import org.phonemesh.core.RecordGesture
@@ -31,6 +37,7 @@ import org.phonemesh.core.SetupPlan
 import org.phonemesh.core.readiness
 import java.io.File
 import java.io.FileNotFoundException
+import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -81,7 +88,8 @@ class AppCore private constructor(
             override fun cancel(task: Runnable) = main.removeCallbacks(task)
         },
         guess = { BuildConfig.FAKE_COUNTRY.ifEmpty { null } ?: access.countryCode() },
-        changed = { changed(Change.REGION) },
+        // A region set or confirmed may free what waits for a radio.
+        changed = { changed(Change.REGION); main.post { sendQueued() } },
         log = { warn, line -> if (warn) Log.w(TAG, line) else Log.i(TAG, line) },
         now = { SystemClock.elapsedRealtime() },
     )
@@ -144,8 +152,25 @@ class AppCore private constructor(
     var lastNote: UiText? = null
         private set
 
+    // ---- Pictures (branch feat/image-messages): see docs/specs/2026-10-12-picture-messages-design.md
+    private class Outgoing(val messageId: Long, val address: String, val sender: PictureSender)
+    private val outgoing = HashMap<Long, Outgoing>()
+    /** Packet id on the radio -> (message id, packet index) for the picture packet in flight. */
+    private val picturePackets = HashMap<Long, Pair<Long, Int>>()
+    private val assembler = PictureAssembler(now = { SystemClock.elapsedRealtime() })
+    private val incoming = HashMap<Pair<String, Int>, Long>()
+    private val pictureTick = object : Runnable {
+        override fun run() {
+            onPictureEvents(assembler.expire())
+            if (assembler.pending > 0) main.postDelayed(this, PICTURE_TICK_MS)
+        }
+    }
+    private val random = SecureRandom()
+    val picturesDir: File get() = File(app.filesDir, "pictures").apply { mkdirs() }
+
     init {
         history.expireWaiting()
+        history.loseUnfinishedPictures()
         history.groupChat(PRIMARY_CHANNEL)
         // A new process (or a phone that restarted) arms the next planned message again.
         armPlans()
@@ -322,6 +347,7 @@ class AppCore private constructor(
         // Only a real change of the link reaches the region check: ready means a new handshake has finished.
         if (becameReady) region.onReady()
         if (becameReady) sendDue()
+        if (becameReady) sendQueued()
         if (was && !connected) region.onLost()
         if (connected != was || attempting) changed(Change.RADIO)
     }
@@ -395,6 +421,7 @@ class AppCore private constructor(
     }
 
     override fun onDelivery(packetId: Long, state: DeliveryState, detail: String) {
+        if (picturePackets.containsKey(packetId)) { onPicturePacket(packetId, state); return }
         val message = history.byPacket(packetId) ?: return
         val chat = history.chat(message.chatId) ?: return
         val current = message.status ?: return
@@ -558,6 +585,7 @@ class AppCore private constructor(
     fun resend(messageId: Long): Boolean {
         val message = history.message(messageId) ?: return false
         if (message.direction != Direction.OUT || message.status?.canResend != true) return false
+        if (message.kind == MessageKind.PICTURE) return resendPicture(message)
         val chat = history.chat(message.chatId) ?: return false
         // Like send: no region yet, or a region write is running. Nothing goes out and the message stays as it is.
         if (region.blocksSending) { changed(Change.REGION); return false }
@@ -567,14 +595,19 @@ class AppCore private constructor(
         return true
     }
 
-    /** A radio that is not ready makes the message a failure the user can resend. */
-    private fun transmit(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?) {
-        val destination = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
-        try {
-            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destination, PRIMARY_CHANNEL, replyTo ?: 0L))
+    /**
+     * Hands the message to the radio. With no radio ready it waits instead (QUEUED, "Waiting for a radio") and goes by
+     * itself once one is (sendQueued). True when the radio took it.
+     */
+    private fun transmit(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?): Boolean {
+        if (!mayTransmit()) { history.setStatus(messageId, DeliveryStatus.QUEUED); return false }
+        return try {
+            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destinationOf(chat), PRIMARY_CHANNEL, replyTo ?: 0L))
+            true
         } catch (e: RuntimeException) {
-            Log.w(TAG, "send failed", e)
-            history.setStatus(messageId, DeliveryStatus.FAILED)
+            Log.w(TAG, "kept until a radio is ready", e)
+            history.setStatus(messageId, DeliveryStatus.QUEUED)
+            false
         }
     }
 
@@ -657,18 +690,58 @@ class AppCore private constructor(
         val message = history.message(messageId) ?: return false
         val target = message.packetId ?: return false
         val chat = history.chat(message.chatId) ?: return false
-        if (region.blocksSending) { changed(Change.REGION); return false }
-        val destination = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
-        try {
-            radio.send(emoji, destination, PRIMARY_CHANNEL, replyTo = target, reaction = true)
+        val now = System.currentTimeMillis()
+        val sent = mayTransmit() && try {
+            radio.send(emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = target, reaction = true)
+            true
         } catch (e: RuntimeException) {
-            Log.w(TAG, "reaction not sent", e)
-            note(UiText(R.string.reaction_not_sent))
-            return false
+            Log.w(TAG, "reaction kept until a radio is ready", e)
+            false
         }
-        history.addReaction(chat.id, null, emoji, target, System.currentTimeMillis())
+        // Never silent: no radio means the reaction waits on this phone, marked, and goes when one is ready.
+        history.addReaction(chat.id, null, emoji, target, now, waiting = !sent)
+        if (!sent) note(UiText(R.string.reaction_waiting))
         changed(Change.MESSAGES)
         return true
+    }
+
+    /** True while the picture [messageId] waits for a radio, not yet sending. */
+    fun pictureWaitsForRadio(messageId: Long): Boolean = history.message(messageId)?.status == DeliveryStatus.QUEUED
+
+    /** A radio is connected and may send now (it has a region and none is being written). */
+    private fun mayTransmit(): Boolean = connected && !region.blocksSending
+
+    private fun destinationOf(chat: Chat): String = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
+
+    /**
+     * Sends what waits for a radio once one is ready: messages and pictures in the order they were sent, then reactions.
+     * Stops at the first the radio refuses; the rest keeps waiting.
+     */
+    fun sendQueued() {
+        if (!mayTransmit()) return
+        var any = false
+        for (message in history.queued()) {
+            val chat = history.chat(message.chatId) ?: continue
+            any = true
+            if (message.kind == MessageKind.PICTURE) {
+                if (!resendPicture(message)) history.setStatus(message.id, DeliveryStatus.FAILED)
+                continue
+            }
+            history.setStatus(message.id, DeliveryStatus.WAITING)
+            if (!transmit(message.id, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)) break
+        }
+        for (queued in history.queuedReactions()) {
+            val chat = history.chat(queued.chatId) ?: continue
+            val packetId = try {
+                radio.send(queued.emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = queued.target, reaction = true)
+            } catch (e: RuntimeException) {
+                Log.w(TAG, "queued reaction still waiting", e)
+                return
+            }
+            history.reactionSent(queued.id, packetId)
+            any = true
+        }
+        if (any) changed(Change.MESSAGES)
     }
 
     fun pinChat(chatId: Long, pinned: Boolean) {
@@ -681,14 +754,16 @@ class AppCore private constructor(
         val playing = playingId?.let { history.message(it) }
         if (playing?.chatId == chatId) stopPlayback()
         setDraft(chatId, null)
+        val files = history.pictureFiles(chatId)
         if (!history.deleteChat(chatId)) return false
+        files.forEach { File(picturesDir, it).delete() }
         changed(Change.MESSAGES)
         return true
     }
 
     /** Puts a message's words in another chat's draft, to hear and send there. Nothing goes out until Send. */
     fun forward(messageId: Long, toChatId: Long): Boolean {
-        val message = history.message(messageId) ?: return false
+        val message = history.message(messageId)?.takeIf { it.kind == MessageKind.TEXT } ?: return false
         history.chat(toChatId) ?: return false
         val kept = DraftRules.trimToFit(message.text, currentLanguage().tag)
         setDraft(toChatId, kept)
@@ -696,9 +771,147 @@ class AppCore private constructor(
         return true
     }
 
+    // ---- Pictures
+
+    /** Pictures go only in private chats, and only in builds that carry them. */
+    fun canSendPictures(chatId: Long): Boolean =
+        BuildConfig.PICTURES && history.chat(chatId)?.kind == ChatKind.DIRECT
+
+    /** The connected radio's modulation for time-on-air estimates; LongFast (the default) when unknown. */
+    fun radioShape(): LoraShape = (if (connected) radio.modemPreset() else null)?.let { LoraAirtime.preset(it) } ?: LoraAirtime.DEFAULT
+
+    /** Estimated seconds on air for [picture], one hop, every packet with its acknowledgement. */
+    fun pictureSeconds(picture: PreparedPicture): Double {
+        val packets = PictureWire.split(0, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+        return LoraAirtime.pictureSeconds(packets.map { PictureWire.encode(it).size }, radioShape())
+    }
+
+    /** Sends [picture] in the private chat [chatId]. Nothing is sent without this call (the Send button). */
+    fun sendPicture(chatId: Long, picture: PreparedPicture): Boolean {
+        if (!canSendPictures(chatId)) return false
+        val chat = history.chat(chatId) ?: return false
+        val pictureId = random.nextInt(0x10000)
+        val name = "out-${System.currentTimeMillis()}-$pictureId.pic"
+        File(picturesDir, name).writeBytes(picture.bytes)
+        val packets = PictureWire.split(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+        val row = PictureRow(0, pictureId, picture.codec.wire, picture.width, picture.height, picture.sketch, name, 0, packets.size, false)
+        val message = history.addOutgoingPicture(chatId, row, System.currentTimeMillis())
+        settings.firstMessageSent = true
+        // No radio ready: the bubble says it waits, and it goes when one is (sendQueued).
+        if (mayTransmit()) startPicture(message.id, chat.address, packets) else history.setStatus(message.id, DeliveryStatus.QUEUED)
+        changed(Change.MESSAGES)
+        return true
+    }
+
+    /** Same picture, same id, from the start: the other phone keeps the pieces it already has for 10 minutes. */
+    private fun resendPicture(message: Message): Boolean {
+        val chat = history.chat(message.chatId) ?: return false
+        if (region.blocksSending) { changed(Change.REGION); return false }
+        val row = history.picture(message.id) ?: return false
+        val codec = PictureCodec.of(row.codec) ?: return false
+        val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes() ?: return false
+        val packets = PictureWire.split(row.pictureId, codec, row.width, row.height, bytes, row.sketch)
+        history.setPictureProgress(message.id, 0)
+        // No radio: it waits, saying so, and starts once one is ready (sendQueued).
+        if (!mayTransmit()) { history.setStatus(message.id, DeliveryStatus.QUEUED); changed(Change.DELIVERY); return true }
+        history.setStatus(message.id, DeliveryStatus.WAITING)
+        startPicture(message.id, chat.address, packets)
+        changed(Change.DELIVERY)
+        return true
+    }
+
+    private fun startPicture(messageId: Long, address: String, packets: List<PictureWire.Packet>) {
+        val sender = PictureSender(packets.map { PictureWire.encode(it) })
+        outgoing[messageId] = Outgoing(messageId, address, sender)
+        act(outgoing.getValue(messageId), sender.start())
+    }
+
+    private fun act(transfer: Outgoing, action: PictureSender.Action?) {
+        when (action) {
+            null -> Unit
+            is PictureSender.Action.Send -> {
+                val packetId = try {
+                    radio.sendData(PictureWire.PORT, transfer.sender.packet(action.index), transfer.address, PRIMARY_CHANNEL)
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "picture packet not sent", e)
+                    act(transfer, transfer.sender.cancel())
+                    return
+                }
+                picturePackets[packetId] = transfer.messageId to action.index
+            }
+            is PictureSender.Action.Finished -> {
+                outgoing.remove(transfer.messageId)
+                picturePackets.values.removeAll { it.first == transfer.messageId }
+                history.setPictureProgress(transfer.messageId, transfer.sender.acknowledged)
+                history.setStatus(transfer.messageId, if (action.delivered) DeliveryStatus.DELIVERED else DeliveryStatus.FAILED)
+                changed(Change.DELIVERY)
+            }
+        }
+    }
+
+    private fun onPicturePacket(packetId: Long, state: DeliveryState) {
+        val acknowledged = when (state) {
+            DeliveryState.ACKNOWLEDGED -> true
+            DeliveryState.FAILED, DeliveryState.UNCONFIRMED -> false
+            else -> return
+        }
+        val (messageId, index) = picturePackets.remove(packetId) ?: return
+        val transfer = outgoing[messageId] ?: return
+        val action = transfer.sender.onOutcome(index, acknowledged)
+        if (acknowledged) {
+            history.setPictureProgress(messageId, transfer.sender.acknowledged)
+            changed(Change.DELIVERY)
+        }
+        act(transfer, action)
+    }
+
+    override fun onData(sender: String, port: Int, payload: ByteArray, channel: Int) {
+        if (!BuildConfig.PICTURES || port != PictureWire.PORT || channel != PRIMARY_CHANNEL) return
+        val packet = PictureWire.decode(payload) ?: return
+        onPictureEvents(assembler.accept(sender, packet))
+        main.removeCallbacks(pictureTick)
+        if (assembler.pending > 0) main.postDelayed(pictureTick, PICTURE_TICK_MS)
+    }
+
+    private fun onPictureEvents(events: List<PictureAssembler.Event>) {
+        for (event in events) {
+            val key = event.sender to event.id
+            when (event) {
+                is PictureAssembler.Event.Started -> {
+                    val chat = history.directChat(event.sender, knownName(event.sender))
+                    val head = event.head
+                    val row = PictureRow(0, head.id, head.codec.wire, head.width, head.height, head.sketch, null, event.have, head.parts, false)
+                    incoming[key] = history.addIncomingPicture(chat.id, event.sender, row, System.currentTimeMillis(), countUnread = openChatId != chat.id).id
+                    changed(Change.MESSAGES)
+                }
+                is PictureAssembler.Event.Progress -> incoming[key]?.let { history.setPictureProgress(it, event.have); changed(Change.DELIVERY) }
+                is PictureAssembler.Event.Done -> incoming.remove(key)?.let { id ->
+                    val name = "in-$id.pic"
+                    File(picturesDir, name).writeBytes(event.bytes)
+                    history.setPictureFile(id, name, event.head.parts)
+                    changed(Change.MESSAGES)
+                }
+                is PictureAssembler.Event.Broken, is PictureAssembler.Event.Expired -> incoming.remove(key)?.let {
+                    history.setPictureLost(it)
+                    changed(Change.MESSAGES)
+                }
+            }
+        }
+    }
+
+    /** A picture message's pixels for the screen: the received or sent picture, else its sketch. */
+    fun pictureBitmap(messageId: Long): android.graphics.Bitmap? {
+        val row = history.picture(messageId) ?: return null
+        val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes()
+        return PictureMaker.decode(row.codec, bytes, row.sketch)
+    }
+
     /** Deletes a message on this phone only: what the radio sent cannot be called back. A late receipt finds nothing. */
     fun deleteMessage(messageId: Long): Boolean {
         if (playingId == messageId) stopPlayback()
+        outgoing.remove(messageId)?.sender?.cancel()
+        picturePackets.values.removeAll { it.first == messageId }
+        history.picture(messageId)?.file?.let { File(picturesDir, it).delete() }
         if (!history.deleteMessage(messageId)) return false
         changed(Change.MESSAGES)
         return true
@@ -717,6 +930,7 @@ class AppCore private constructor(
     fun play(messageId: Long) {
         if (playingId == messageId) { stopPlayback(); return }
         val message = history.message(messageId) ?: return
+        if (message.kind != MessageKind.TEXT) return
         speakAs(messageId, message.text, message.language)
     }
 
@@ -933,6 +1147,7 @@ class AppCore private constructor(
         const val CONNECT_WAIT_MS = 35_000L
         const val SCAN_WAIT_MS = 30_000L
         const val POLL_MS = 1_000L
+        const val PICTURE_TICK_MS = 30_000L
         const val HISTORY_DB = "history.db"
         /** A reaction is one emoji, perhaps with a skin tone or joined parts; anything longer is not a reaction. */
         const val MAX_REACTION_BYTES = 32

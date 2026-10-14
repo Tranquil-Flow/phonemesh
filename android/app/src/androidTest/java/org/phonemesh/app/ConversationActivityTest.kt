@@ -749,8 +749,10 @@ class ConversationActivityTest {
         TestCore.onMain { core.setDraft(group, "Au groupe"); core.send(group) }
         val groupMessage = core.history.lastMessage(group)!!
         TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sent.last().packetId, DeliveryState.QUEUED) }
-        TestCore.onMain { TestCore.radio.ready = false; core.setDraft(group, "Perdu"); core.send(group) }
+        // The radio took it, then reported it could not send it: a failure to resend (no radio at all waits instead).
+        TestCore.onMain { core.setDraft(group, "Perdu"); core.send(group) }
         val failed = core.history.lastMessage(group)!!
+        TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sent.last().packetId, DeliveryState.FAILED) }
         a = open(group)
         assertEquals("parti", Views.textOf(Views.tagged(a, "status_label:${groupMessage.id}")!!))
         assertEquals("Échec", Views.textOf(Views.tagged(a, "status_label:${failed.id}")!!))
@@ -1096,8 +1098,10 @@ class ConversationActivityTest {
         val opened = window.due
         assertTrue("an hour ahead, rounded up to a quarter",
             opened in org.phonemesh.core.PlanWindow.opening(before, zone)..org.phonemesh.core.PlanWindow.opening(System.currentTimeMillis(), zone))
-        assertTrue(TestCore.onMain { inPlan(window, "plan_today").isSelected })
-        assertFalse(TestCore.onMain { inPlan(window, "plan_tomorrow").isSelected })
+        // Late in the evening an hour ahead is already tomorrow; the window shows the day it opened on.
+        val openDay = org.phonemesh.core.PlanWindow.day(opened, System.currentTimeMillis(), zone)
+        assertEquals(openDay == org.phonemesh.core.PlanDay.TODAY, TestCore.onMain { inPlan(window, "plan_today").isSelected })
+        assertEquals(openDay == org.phonemesh.core.PlanDay.TOMORROW, TestCore.onMain { inPlan(window, "plan_tomorrow").isSelected })
         assertEquals("Choisir un jour", TestCore.onMain { (inPlan(window, "plan_day") as android.widget.Button).text.toString() })
         tapPlan(window, "plan_plus")
         assertEquals(opened + 15 * 60_000, window.due)
@@ -1132,6 +1136,8 @@ class ConversationActivityTest {
         TestCore.onMain { core.setDraft(group, "Trop tard") }
         val a = open(group)
         val window = planWindow(a)
+        // Today, whatever the hour: late in the evening the window opens on tomorrow.
+        tapPlan(window, "plan_today")
         tapPlan(window, "plan_time")
         val clock = checkNotNull(window.picker) as android.app.TimePickerDialog
         TestCore.onMain {
@@ -1606,5 +1612,47 @@ class ConversationActivityTest {
                 .let { it is ConversationActivity && it !== old }
         }
         return checkNotNull(Views.resumed()).also { activity = it }
+    }
+    @Test fun thePictureScreenOffersTheCameraAndThePhotosAndSaysWhatToDo() {
+        TestCore.install()
+        val chat = TestCore.onMain { TestCore.core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
+        val a = Views.launch<PictureActivity>(PictureActivity.intent(context, chat)).also { activity = it }
+        val words = TestCore.core.localized()
+        assertNotNull(Views.tagged(a, "picture_take"))
+        assertNotNull(Views.tagged(a, "picture_choose"))
+        assertNull("nothing to send before a photo", Views.tagged(a, "picture_send"))
+        assertEquals(words.getString(R.string.picture_start), Views.textOf(Views.tagged(a, "picture_time")!!))
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+    }
+
+    @Test fun aReactionWithoutARadioSaysItWaitsUnderItsMessage() {
+        TestCore.install()
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        TestCore.onMain { TestCore.radio.receive("!0000aaaa", "[pm1:fr] Le marché est ouvert", false, org.phonemesh.ble.TextMark(packetId = 700)) }
+        val news = TestCore.core.history.lastMessage(group)!!
+        TestCore.onMain { TestCore.radio.connected(false) }
+        TestCore.onMain { TestCore.core.react(news.id, "👍") }
+        val a = open(group)
+        assertNotNull("the waiting reaction is marked", Views.tagged(a, "reaction_waiting:${news.id}"))
+        assertTrue(Views.all(a).any { it is android.widget.TextView && it.text.toString() == TestCore.core.localized().getString(R.string.waiting_radio) })
+        TestCore.onMain { TestCore.radio.connected(true) }
+        Views.waitUntil { Views.descendants(a.window.decorView).none { it.tag == "reaction_waiting:${news.id}" && it.isShown } }
+    }
+    @Test fun aMessageWithoutARadioSaysItWaitsAndGoesOnceOneIsReady() {
+        TestCore.install()
+        val group = TestCore.onMain { TestCore.core.groupChatId() }
+        TestCore.onMain { TestCore.radio.connected(false) }
+        TestCore.onMain { TestCore.core.setDraft(group, "On se voit demain") }
+        val a = open(group)
+        TestCore.onMain { TestCore.core.send(group) }
+        val mine = TestCore.core.history.lastMessage(group)!!
+        Views.waitUntil { Views.descendants(a.window.decorView).any { it.tag == "status_label:${mine.id}" && it.isShown } }
+        assertEquals(TestCore.core.localized().getString(R.string.waiting_radio), Views.textOf(Views.tagged(a, "status_label:${mine.id}")!!))
+        assertNull("nothing to resend: it goes by itself", Views.tagged(a, "resend:${mine.id}"))
+        assertTrue(TestCore.radio.sent.isEmpty())
+        assertEquals(emptyList<String>(), A11yCheck.problems(a))
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertEquals(1, TestCore.radio.sent.size)
+        Views.waitUntil { TestCore.core.history.message(mine.id)!!.status != org.phonemesh.core.DeliveryStatus.QUEUED }
     }
 }

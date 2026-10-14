@@ -38,6 +38,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.phonemesh.core.DayName
 import org.phonemesh.core.Days
+import org.phonemesh.core.DeliveryStatus
 import org.phonemesh.core.DraftFit
 import org.phonemesh.core.PlanDay
 import org.phonemesh.core.PlanWindow
@@ -385,12 +386,22 @@ class ConversationActivity : ScreenActivity() {
         // Wrapping its own words: a sentence longer than the microphone is wide stays on one line.
         column.addView(micLabel, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         micBar.addView(column)
-        val right = FrameLayout(this)
+        val right = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        }
+        // Pictures: private chats only, and only in builds that carry them (BuildConfig.PICTURES).
+        if (core.canSendPictures(chatId)) {
+            right.addView(Ui.iconButton(this, palette, R.drawable.ic_picture, getString(R.string.picture_button)).apply {
+                tag = "picture"
+                setOnClickListener { startActivity(PictureActivity.intent(this@ConversationActivity, chatId)) }
+            }, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)))
+        }
         keyboard = Ui.iconButton(this, palette, R.drawable.ic_keyboard, getString(R.string.keyboard)).apply {
             tag = "keyboard"
             setOnClickListener { startEditing() }
         }
-        right.addView(keyboard, FrameLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48), Gravity.END or Gravity.CENTER_VERTICAL))
+        right.addView(keyboard, LinearLayout.LayoutParams(Ui.dp(this, 48), Ui.dp(this, 48)))
         micBar.addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         return micBar
     }
@@ -757,9 +768,11 @@ class ConversationActivity : ScreenActivity() {
                 ellipsize = TextUtils.TruncateAt.END
             }))
         }
+        val picture = if (message.kind == MessageKind.PICTURE) core.history.picture(message.id) else null
+        val words = if (picture != null) pictureCaption(message, picture).ifEmpty { getString(R.string.picture_label) } else message.text
         // A long press deletes, so the bubble is a target and is named: who wrote it, then the words.
         box.contentDescription = listOfNotNull(
-            message.senderId?.takeIf { group && !mine }?.let { core.senderName(it) }, message.text,
+            message.senderId?.takeIf { group && !mine }?.let { core.senderName(it) }, words,
         ).joinToString(", ")
         if (message.replyTo != null) {
             val quoted = core.quoted(message)
@@ -772,15 +785,24 @@ class ConversationActivity : ScreenActivity() {
                 background = Ui.outline(this@ConversationActivity, palette.background, palette.outline)
             }))
         }
-        box.addView(Ui.content(Ui.text(this, message.text, palette.text).apply {
-            maxWidth = (resources.displayMetrics.widthPixels * 0.7f).toInt()
-        }))
+        if (picture != null) {
+            box.addView(pictureView(message, picture))
+            pictureCaption(message, picture).takeIf { it.isNotEmpty() }?.let { caption ->
+                box.addView(Ui.text(this, caption, if (picture.lost) palette.bad else palette.muted, bold = picture.lost).apply {
+                    tag = "picture_caption:${message.id}"
+                })
+            }
+        } else {
+            box.addView(Ui.content(Ui.text(this, message.text, palette.text).apply {
+                maxWidth = (resources.displayMetrics.widthPixels * 0.7f).toInt()
+            }))
+        }
         val line = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val playing = core.playingId == message.id
-        line.addView(Ui.iconButton(this, palette, if (playing) R.drawable.ic_pause else R.drawable.ic_play,
+        if (picture == null) line.addView(Ui.iconButton(this, palette, if (playing) R.drawable.ic_pause else R.drawable.ic_play,
             getString(if (playing) R.string.stop_listening else R.string.listen), color = if (playing) palette.good else palette.text).apply {
             tag = "play:${message.id}"
             setOnClickListener {
@@ -791,15 +813,21 @@ class ConversationActivity : ScreenActivity() {
         line.addView(Ui.text(this, DateFormat.getTimeFormat(this).format(Date(message.time)), palette.muted).apply {
             setPadding(pad() / 2, 0, pad() / 2, 0)
         })
+        var labelBelow: View? = null
         message.status?.let { status ->
             val look = Looks.status(status, palette)
             line.addView(Looks.statusIcon(this, look).apply { tag = "status:${message.id}" })
-            if (look.showLabel) line.addView(Ui.text(this, getString(look.label), look.color, bold = true).apply {
-                tag = "status_label:${message.id}"
-                setPadding(pad() / 4, 0, 0, 0)
-            })
+            if (look.showLabel) {
+                val label = Ui.text(this, getString(look.label), look.color, bold = true).apply {
+                    tag = "status_label:${message.id}"
+                    setPadding(pad() / 4, 0, 0, 0)
+                }
+                // A picture bubble is only as wide as its picture: its words go on their own line, whole.
+                if (picture != null) labelBelow = label else line.addView(label)
+            }
         }
         box.addView(line)
+        labelBelow?.let { box.addView(it) }
         message.plannedAt?.let { planned ->
             box.addView(Ui.text(this, getString(R.string.planned_for, DateFormat.getTimeFormat(this).format(Date(planned))), palette.muted).apply {
                 tag = "planned_for:${message.id}"
@@ -811,6 +839,8 @@ class ConversationActivity : ScreenActivity() {
                 tag = "reactions:${message.id}"
                 contentDescription = getString(R.string.reactions, shown)
             }))
+            // The user's own reaction that no radio has taken yet says so, under the marks.
+            if (list.any { it.waiting }) box.addView(waitingLine("reaction_waiting:${message.id}"))
         }
         if (message.status?.canResend == true) {
             box.addView(Ui.button(this, palette, getString(R.string.resend), R.drawable.ic_retry).apply {
@@ -826,6 +856,46 @@ class ConversationActivity : ScreenActivity() {
         // A vertical row would stretch the bubble to its width; a bubble fits its words.
         row.addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         return row
+    }
+
+    /** A clock and "Waiting for a radio": something of the user's that goes out once a radio is ready. */
+    private fun waitingLine(tag: String): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        this.tag = tag
+        addView(ImageView(this@ConversationActivity).apply {
+            setImageResource(R.drawable.ic_clock)
+            imageTintList = android.content.res.ColorStateList.valueOf(palette.muted)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(Ui.dp(this@ConversationActivity, 18), Ui.dp(this@ConversationActivity, 18)))
+        addView(Ui.text(this@ConversationActivity, getString(R.string.waiting_radio), palette.muted, bold = true).apply {
+            setPadding(pad() / 4, 0, 0, 0)
+        })
+    }
+
+    /**
+     * "Picture arriving: 2 of 4", "Sending picture: 1 of 3", "The picture did not arrive", or
+     * nothing once it is whole.
+     */
+    private fun pictureCaption(message: Message, picture: PictureRow): String = when {
+        picture.lost -> getString(R.string.picture_lost)
+        message.direction == Direction.IN && picture.file == null -> getString(R.string.picture_arriving, picture.have, picture.total)
+        message.direction == Direction.OUT && message.status == DeliveryStatus.WAITING ->
+            getString(R.string.picture_sending, picture.have, picture.total)
+        else -> ""
+    }
+
+    /** The picture, enlarged smoothly to the bubble's width; its blurred sketch until every piece has arrived. */
+    private fun pictureView(message: Message, picture: PictureRow): View {
+        val width = (resources.displayMetrics.widthPixels * 0.6f).toInt()
+        val ratio = picture.height.toFloat() / picture.width.coerceAtLeast(1)
+        return ImageView(this).apply {
+            tag = "picture:${message.id}"
+            scaleType = ImageView.ScaleType.FIT_XY
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            core.pictureBitmap(message.id)?.let { setImageDrawable(android.graphics.drawable.BitmapDrawable(resources, it).apply { isFilterBitmap = true }) }
+            layoutParams = LinearLayout.LayoutParams(width, (width * ratio).toInt().coerceAtLeast(1))
+        }
     }
 
     /** TalkBack names a message's long press after what it does. */
@@ -863,9 +933,9 @@ class ConversationActivity : ScreenActivity() {
         show(Actions.menu(this, palette, listOfNotNull(
             if (overRadio) Actions.Item("action_reply", R.string.reply, R.drawable.ic_reply) { core.setReplyTarget(chatId, message.id) } else null,
             if (overRadio) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,
-            Actions.Item("action_copy", R.string.copy, R.drawable.ic_copy) { copy(message.text) },
-            Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) },
-            if (others.isEmpty()) null else Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) },
+            if (message.kind != MessageKind.TEXT) null else Actions.Item("action_copy", R.string.copy, R.drawable.ic_copy) { copy(message.text) },
+            if (message.kind != MessageKind.TEXT) null else Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) },
+            if (others.isEmpty() || message.kind != MessageKind.TEXT) null else Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) },
             Actions.Item("action_delete", R.string.delete, R.drawable.ic_delete) {
                 show(Actions.confirm(this, R.string.delete_title, R.string.delete_only_here, R.string.delete) { core.deleteMessage(message.id) })
             },

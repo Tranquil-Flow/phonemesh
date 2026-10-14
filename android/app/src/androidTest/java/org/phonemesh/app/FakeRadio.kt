@@ -9,8 +9,10 @@ import org.phonemesh.ble.RegionResult
 /** Test radio: records what the app asks for and lets a test play the radio's side. Main thread only. */
 class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     data class Sent(val text: String, val destinationId: String, val channel: Int, val packetId: Long, val replyTo: Long = 0, val reaction: Boolean = false)
+    class SentData(val port: Int, val payload: ByteArray, val destinationId: String, val channel: Int, val packetId: Long)
 
     val sent = mutableListOf<Sent>()
+    val sentData = mutableListOf<SentData>()
     val connects = mutableListOf<String>()
     var scans = 0
         private set
@@ -44,6 +46,14 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
         sent += Sent(text, destinationId, channel, id, replyTo, reaction)
         return id
     }
+    override fun sendData(port: Int, payload: ByteArray, destinationId: String, channel: Int): Long {
+        check(ready) { "Meshtastic radio is not ready" }
+        val id = nextPacket++
+        sentData += SentData(port, payload.copyOf(), destinationId, channel, id)
+        return id
+    }
+    var modemPreset: String? = "LONG_FAST"
+    override fun modemPreset(): String? = if (ready) modemPreset else null
     /** The region the fake radio reports while ready; tests change it to play a restart. */
     var region: String? = "EU_868"
     val regionWrites = mutableListOf<String>()
@@ -71,6 +81,7 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     /** A text with its radio id and Meshtastic's reply / reaction marks, as the real radio delivers it. */
     fun receive(sender: String, text: String, direct: Boolean, mark: org.phonemesh.ble.TextMark, channel: Int = 0) =
         listener.onText(sender, text, channel, direct, mark)
+    fun receiveData(sender: String, port: Int, payload: ByteArray, channel: Int = 0) = listener.onData(sender, port, payload, channel)
     fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")
     fun found(address: String, name: String, rssi: Int) = listener.onDevice(address, name, rssi)
     fun setPeers(peers: List<RadioPeer>) {

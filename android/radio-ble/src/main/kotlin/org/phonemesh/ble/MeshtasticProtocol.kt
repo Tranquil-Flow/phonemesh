@@ -21,6 +21,13 @@ internal const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 /** Pure Meshtastic protobuf helpers; deliberately has no Android dependency. */
 internal object MeshtasticProtocol {
     const val MAX_TEXT_BYTES = 200
+
+    /** Meshtastic's Data payload limit (mesh.proto DATA_PAYLOAD_LEN); PKI direct messages fit less on air. */
+    const val MAX_DATA_BYTES = 233
+
+    /** Private ports this app sends and listens on: 300 = pictures (core PictureWire.PORT). */
+    const val PICTURE_PORT = MeshRadio.PICTURE_PORT
+    val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT)
     const val BROADCAST_NUM: Long = 0xffffffffL
     const val FIRST_HEARTBEAT_NONCE = 2
 
@@ -82,6 +89,34 @@ internal object MeshtasticProtocol {
             .setId(packetId)
             .setPriority(MeshProtos.MeshPacket.Priority.RELIABLE)
             .setWantAck(destination != BROADCAST_NUM)
+            .setHopLimit(hopLimit)
+            .setDecoded(data)
+            .build()
+        return MeshProtos.ToRadio.newBuilder().setPacket(packet).build().toByteArray()
+    }
+
+    /**
+     * One private-port packet for one other radio, with want_ack so that radio's acknowledgement comes back.
+     * Never broadcast: pictures go only in private chats.
+     */
+    fun buildDataToRadio(port: Int, payload: ByteArray, destinationId: String, channel: Int, packetId: Int = newPacketId(), hopLimit: Int = 3): ByteArray {
+        val destination = parseDestinationId(destinationId)
+        require(destination != BROADCAST_NUM) { "private data goes to one radio, never to everyone" }
+        require(port in 256..511) { "port $port is not a private Meshtastic port" }
+        require(channel in 0..7) { "channel must be in 0..7" }
+        require(hopLimit in 0..7) { "hop limit must be in 0..7" }
+        require(payload.size in 1..MAX_DATA_BYTES) { "payload is ${payload.size} bytes; must be 1..$MAX_DATA_BYTES" }
+        val data = MeshProtos.Data.newBuilder()
+            .setPortnumValue(port)
+            .setPayload(ByteString.copyFrom(payload))
+            .setWantResponse(false)
+            .build()
+        val packet = MeshProtos.MeshPacket.newBuilder()
+            .setTo(destination.toInt())
+            .setChannel(channel)
+            .setId(packetId)
+            .setPriority(MeshProtos.MeshPacket.Priority.RELIABLE)
+            .setWantAck(true)
             .setHopLimit(hopLimit)
             .setDecoded(data)
             .build()
@@ -172,6 +207,7 @@ internal object MeshtasticProtocol {
         val decoded = packet.decoded
         if (decoded.portnum == Portnums.PortNum.ROUTING_APP) return routingEvent(packet, decoded)
         if (decoded.portnum == Portnums.PortNum.ADMIN_APP) return adminEvent(packet, decoded)
+        if (decoded.portnumValue in PRIVATE_DATA_PORTS) return dataEvent(packet, decoded)
         if (decoded.portnum != Portnums.PortNum.TEXT_MESSAGE_APP) return null
         val payload = decoded.payload.toByteArray()
         if (payload.isEmpty() || payload.size > MAX_TEXT_BYTES) return null
@@ -185,6 +221,12 @@ internal object MeshtasticProtocol {
             sender, text, packet.channel, packet.to.toLong() and BROADCAST_NUM,
             packet.id.toLong() and BROADCAST_NUM, decoded.replyId.toLong() and BROADCAST_NUM, decoded.emoji != 0,
         )
+    }
+
+    private fun dataEvent(packet: MeshProtos.MeshPacket, decoded: MeshProtos.Data): RadioEvent? {
+        val payload = decoded.payload.toByteArray()
+        if (payload.isEmpty() || payload.size > MAX_DATA_BYTES) return null
+        return RadioEvent.Data(nodeId(packet.`from`.toLong()), decoded.portnumValue, payload, packet.channel, packet.to.toLong() and BROADCAST_NUM)
     }
 
     /**
@@ -264,6 +306,7 @@ internal sealed class RadioEvent {
         val sender: String, val text: String, val channel: Int, val to: Long,
         val packetId: Long = 0, val replyTo: Long = 0, val reaction: Boolean = false,
     ) : RadioEvent()
+    class Data(val sender: String, val port: Int, val payload: ByteArray, val channel: Int, val to: Long) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()
     data class Routing(
         val from: Long,

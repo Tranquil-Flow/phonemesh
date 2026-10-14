@@ -77,6 +77,12 @@ Status is always shape plus colour.
 | UNCONFIRMED before QUEUED (connection lost first) | ⚠ "Pas confirmé" + "↻ Renvoyer" | ⚠ "Pas confirmé" + "↻ Renvoyer" |
 | FAILED | ⚠ "Échec" + "↻ Renvoyer" | ⚠ "Échec" + "↻ Renvoyer" |
 
+**Changed by the owner on 2026-10-13:** when no radio can take a message (none connected, or the radio refuses the write
+because it is not ready), the message is not a failure. It shows a grey clock with "En attente d'une radio" / "Waiting for a
+radio", has no Resend button, and goes by itself, in the order written, once a radio is ready, even after the app was
+closed. Reactions and pictures wait the same way. FAILED now means the radio took the message and then reported it could
+not send it. The user must always see what is happening; nothing that needs the radio is ever silently dropped.
+
 Both UNCONFIRMED and FAILED use the same red triangle shape, but their spoken and visible labels differ, so the UI never calls an unconfirmed message a failure. Resending an unconfirmed private message may duplicate it at the recipient; this is accepted.
 
 - Resend reuses the same bubble with a new packet.

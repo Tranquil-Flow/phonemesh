@@ -108,10 +108,12 @@ class RegionFlowTest {
     /** A message that failed while the radio was away, in the group chat; the radio is back with the same region. */
     private fun failedMessage(): Message {
         val group = main { core.groupChatId() }
-        main { radio.connected(false); core.setDraft(group, "Bonjour") }
-        assertTrue(main { core.send(group) })
-        main { radio.connected(true) }
-        val failed = main { core.history.lastMessage(group)!! }
+        // A message the radio reported it could not send (no radio at all makes a message wait instead).
+        val failed = main {
+            val m = core.history.addOutgoing(group, "Bonjour", "fr", System.currentTimeMillis())
+            core.history.setStatus(m.id, DeliveryStatus.FAILED)
+            core.history.message(m.id)!!
+        }
         assertEquals(DeliveryStatus.FAILED, failed.status)
         assertTrue(radio.sent.isEmpty())
         return failed

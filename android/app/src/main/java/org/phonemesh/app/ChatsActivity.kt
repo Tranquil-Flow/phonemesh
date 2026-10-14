@@ -449,7 +449,8 @@ class ChatsActivity : ScreenActivity() {
                 last.direction == Direction.OUT -> getString(R.string.you)
                 else -> core.senderName(last.senderId.orEmpty())
             }
-            val text = if (prefix != null) getString(R.string.sender_prefix, prefix, last.text) else last.text
+            val said = if (last.kind == MessageKind.PICTURE) getString(R.string.picture_label) else last.text
+            val text = if (prefix != null) getString(R.string.sender_prefix, prefix, said) else said
             lastLine.addView(Ui.content(Ui.text(this, text, palette.muted).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END

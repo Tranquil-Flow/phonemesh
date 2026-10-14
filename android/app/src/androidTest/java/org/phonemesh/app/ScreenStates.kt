@@ -1,6 +1,11 @@
 package org.phonemesh.app
 
 import android.app.Activity
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.net.Uri
 import android.view.MotionEvent
 import androidx.test.platform.app.InstrumentationRegistry
 import org.phonemesh.ble.DeliveryState
@@ -272,6 +277,68 @@ object ScreenStates {
         inst.waitForIdleSync()
         val list = checkNotNull(screen.dialogForTest)
         expect(TestCore.onMain { Views.descendants(list.window!!.decorView).any { (it.tag as? String)?.startsWith("forward_to:") == true } }, "the chats to forward to")
+        return screen
+    }
+
+    /** An everyday scene as a camera would give it: sky, sun, ground and a house, at photo size. */
+    private fun scenePhoto(sky: Int = Color.rgb(120, 180, 230), ground: Int = Color.rgb(170, 140, 80)): Bitmap =
+        Bitmap.createBitmap(1600, 1200, Bitmap.Config.ARGB_8888).apply {
+            val c = Canvas(this)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            c.drawColor(sky)
+            paint.color = ground; c.drawRect(0f, 760f, 1600f, 1200f, paint)
+            paint.color = Color.rgb(250, 210, 60); c.drawCircle(1250f, 260f, 140f, paint)
+            paint.color = Color.rgb(200, 90, 50); c.drawRect(420f, 520f, 860f, 860f, paint)
+            paint.color = Color.rgb(90, 60, 40); c.drawRect(600f, 680f, 690f, 860f, paint)
+            paint.color = Color.rgb(40, 120, 60); c.drawCircle(1100f, 700f, 150f, paint)
+        }
+
+    /** The picture screen: the camera and photo buttons, or a chosen photo made ready with its size and radio time. */
+    fun pictureScreen(withPhoto: Boolean): Activity {
+        TestCore.install()
+        seedChats()
+        val chat = TestCore.onMain { TestCore.core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val photo = if (withPhoto) {
+            val file = java.io.File(context.cacheDir, "screen-photo.jpg")
+            file.outputStream().use { scenePhoto().compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            Uri.fromFile(file)
+        } else null
+        val screen = Views.launch<PictureActivity>(PictureActivity.intent(context, chat, photo))
+        expect(Views.tagged(screen, "picture_take") != null && Views.tagged(screen, "picture_choose") != null, "camera and photo buttons")
+        if (withPhoto) {
+            Views.waitUntil(15_000) { Views.descendants(screen.window.decorView).any { it.tag == "picture_send" && it.isShown && it.isEnabled } }
+            expect(Views.tagged(screen, "size:MEDIUM") != null, "the sizes")
+        }
+        return screen
+    }
+
+    /** A private chat with a whole picture, one still arriving, and the user's picture, message and reaction waiting for a radio. */
+    fun pictureBubbles(): Activity {
+        TestCore.install()
+        seedChats()
+        val chat = TestCore.onMain { TestCore.core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val whole = PictureMaker.prepare(scenePhoto(), PictureSize.MEDIUM, grey = false, sketchOnly = false)
+        val coming = PictureMaker.prepare(scenePhoto(Color.rgb(240, 160, 90), Color.rgb(90, 140, 60)), PictureSize.MEDIUM, grey = false, sketchOnly = false)
+        val mine = PictureMaker.prepare(scenePhoto(Color.rgb(150, 150, 200)), PictureSize.MEDIUM, grey = false, sketchOnly = false)
+        TestCore.onMain {
+            val radio = TestCore.radio
+            val core = TestCore.core
+            core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet()
+            org.phonemesh.core.PictureWire.split(41, org.phonemesh.core.PictureCodec.WEBP, whole.width, whole.height, whole.bytes, whole.sketch)
+                .forEach { radio.receiveData("!0000aaaa", org.phonemesh.ble.MeshRadio.PICTURE_PORT, org.phonemesh.core.PictureWire.encode(it)) }
+            org.phonemesh.core.PictureWire.split(42, org.phonemesh.core.PictureCodec.WEBP, coming.width, coming.height, coming.bytes, coming.sketch)
+                .take(2).forEach { radio.receiveData("!0000aaaa", org.phonemesh.ble.MeshRadio.PICTURE_PORT, org.phonemesh.core.PictureWire.encode(it)) }
+            radio.connected(false)
+            core.sendPicture(chat, mine)
+            core.setDraft(chat, "Je t'envoie la mienne.")
+            core.send(chat)
+            radio.receive("!0000aaaa", "[pm1:fr] Bravo, elle est belle !", true, org.phonemesh.ble.TextMark(packetId = 900))
+            val news = core.history.messages(chat).first { it.packetId == 900L }
+            core.react(news.id, "👍")
+        }
+        val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chat))
+        expect(tagsOf(screen, "picture:").size >= 2, "picture bubbles")
+        expect(tagsOf(screen, "reaction_waiting:").isNotEmpty(), "a reaction waiting for a radio")
         return screen
     }
 
@@ -593,10 +660,10 @@ object ScreenStates {
         core.setDraft(group, "Je suis en route.")
         core.send(group)
         radio.deliver(radio.sent.last().packetId, DeliveryState.QUEUED)
-        radio.ready = false
         core.setDraft(group, "Attendez-moi.")
         core.send(group)
-        radio.ready = true
+        // The radio took it and then could not send it: a failure to resend. (With no radio at all it would wait.)
+        radio.deliver(radio.sent.last().packetId, DeliveryState.FAILED)
         group
     }
 
@@ -620,6 +687,9 @@ object ScreenStates {
         "05-conversation-reply" to { conversationReply() },
         "05-forward-to" to { forwardTo() },
         "05-hold-tip" to { holdTip() },
+        "05-picture-choose" to { pictureScreen(withPhoto = false) },
+        "05-picture-ready" to { pictureScreen(withPhoto = true) },
+        "05-picture-bubbles" to { pictureBubbles() },
         "06-draft-too-long" to { draftTooLong() },
         "06-draft-cut" to { draftCut() },
         "06-draft-planned" to { draftPlanned() },

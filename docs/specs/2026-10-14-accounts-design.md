@@ -205,9 +205,30 @@ against 200 for today's text port. So:
 
 | | Today | Wire v2 |
 |---|---|---|
-| Longest text | 200 bytes | 200 bytes normally (25 + 1 + 200 = 226); 167 when the ratchet key rides along, in which case the key moves to the next packet instead |
-| Picture part | 200 bytes of picture | 197 bytes of picture (25 + 6 + 197 = 228); a picture needs about 1.5 % more parts |
+| Longest text | 191 bytes (200 less its `[pm1:fr] ` tag) | 199 bytes with a 2-letter language (25 + 1 kind + 3 language + 199 = 228); 164 when the ratchet key rides along, in which case the key moves to the next packet instead |
+| Picture part | 200 bytes of picture | 198 bytes of picture (25 + 1 kind + 4 part header + 198 = 228); a picture needs about 1 % more parts |
+| Receipt | none | 30 bytes |
 | Radio time, full packet (LongFast) | about 1.95 s | about 1.95 to 2.0 s |
+
+### How the code settles the ratchet (steps 3-6, 2026-10-14)
+
+These follow from the binding contracts in the build plan; the crypto review checks them.
+
+- **Root steps alternate, L first.** A phone steps only when it is its turn and the other phone spoke since it last
+  sent. L may step from the start; H waits for L's first step. This keeps both phones' root keys in one sequence
+  even when both write at once.
+- **Before its first step, a phone's ratchet key is its signed prekey.** So L's first step is DH(new key, H's
+  signed prekey). On a link start the owner never needs the opener's prekey.
+- **One next header key (NHK) at a time.** Each root step gives the header key of the *other* phone's next new chain.
+  The initial NHK is for L's first step. The receiver looks for codes 0-19 under NHK only while waiting for the
+  other phone's step.
+- **A packet of a new chain without the key** (its body was too long to carry it) is recognised but held until a
+  packet with the key arrives. A step that is due waits for a packet short enough to carry the key.
+- **The hello** is sealed once, under chain LH's first key, and resent as the same bytes, never sealed again. The
+  name and colour in a card or a link are not signed; only the prekey is. The safety picture is the check.
+- **Language** is a length-prefixed canonical tag (`fr`, `pt-BR`), as today's texts use.
+- **The shared chat's text limit** is what is left of 228 bytes after the header: 192 bytes for a 6-letter name in
+  `fr`.
 
 ### Shared chat with names
 
@@ -219,7 +240,7 @@ The shared chat moves from Meshtastic's text port to port 303, so it can show th
 | 8 | Sender's account id |
 | 1 + up to 24 | Name, UTF-8 |
 | 1–2 | Language |
-| up to 196 | Text, UTF-8 |
+| up to 228 less the rest | Text, UTF-8 |
 
 The radio's channel key protects it, as today. The name is claimed, not proven: a contact's name and colour show only
 when the account id matches a contact. Replies and reactions name a message by the first 4 bytes of a hash of its

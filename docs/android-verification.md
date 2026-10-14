@@ -544,3 +544,33 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   - Bad points, out-of-range and non-strict signatures, and every tampered GCM byte are refused.
 - Still to confirm on Android (step 9): the same JCA names (`AlgorithmParameters EC`, `ECDH`, `SHA256withECDSA`,
   `AES/GCM/NoPadding`) on Android 10 and 15, and Keystore keys with `KeyAgreement` on Android 12+.
+
+### Accounts crypto, steps 3-6: cards, starts, ratchet, wire v2 (2026-10-14)
+
+- `core/.../account/`:
+  - `ContactCard`: v1, the prekey signed by the identity key; strict decoding.
+  - `AccountId`: SHA-256(IK)[0..8], ordered unsigned.
+  - `InviteLink`: base64url after `#`, no padding.
+  - `SafetyPicture`: 4 of 16 icons.
+- `core/.../session/`:
+  - `OwnKeys` and `SoftKeys`.
+  - `Start`: the QR start and the link start with its hello and hello codes.
+  - `Ratchet` and `SessionState`, versioned bytes.
+- `core/.../wire/`: `WireV2` header, `Body` kinds 1-7, `HubAck` (port 302), `SharedChatWire` (port 303). Packets
+  are at most 228 bytes.
+- Tests: core 290 pass. The new classes are `AccountTest` 7, `StartTest` 6, `RatchetTest` 8, `TranscriptTest` 1
+  and `WireTest` 7. They cover:
+  - both QR sides agree and either may write first; the L/H split; a hello opens only for its owner on its day
+    (±1);
+  - forward secrecy (a stored state cannot reopen a delivered packet, and no used key is kept); healing (a state
+    copied mid-conversation cannot read after two turns); replay refused; state round-trips;
+  - the delayed step, and a held keyless packet;
+  - no key and nonce pair is ever used twice (1,200+ seals watched);
+  - 10,000 seeded random-delivery runs (order, loss, duplicates): nothing is delivered twice or altered, and
+    without loss everything arrives;
+  - the size limits (text 199/164, picture part 198, receipt 30, shared chat 228);
+  - 100,000 random inputs into every decoder: no exception.
+- **Independent cross-implementation:** `.local/crypto-vectors/transcript.py` (pyca/cryptography 44.0.2)
+  implements the same rules and writes `core/src/test/resources/crypto/transcript.txt`. It holds 15 packets: QR and
+  link starts, steps, out-of-order delivery across a step, a delayed step and a replay. Kotlin reproduces every
+  packet byte for byte.

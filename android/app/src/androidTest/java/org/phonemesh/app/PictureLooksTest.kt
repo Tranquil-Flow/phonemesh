@@ -72,6 +72,37 @@ class PictureLooksTest {
         assertTrue(PictureScaleTiles.count(100, 70, PictureLook.AI_LARGE.tile) > 1)
     }
 
+    @Test fun aCancelledViewStopsBetweenPiecesAndTheNextOneRuns() {
+        place(PictureLook.AI_LARGE.model!!)
+        place(PictureLook.AI_QUICK.model!!)
+        val source = photo(200, 150)
+        val pieces = PictureScaleTiles.count(200, 150, PictureLook.AI_LARGE.tile)
+        assertTrue(pieces > 4)
+        val before = PictureLooks.Job().apply { cancelled = true }
+        var started = false
+        try {
+            PictureLooks.make(context, PictureLook.AI_QUICK, source, before, started = { started = true })
+            fail("a request cancelled before it starts never runs")
+        } catch (expected: PictureLooks.Cancelled) {
+        }
+        assertFalse(started)
+        val job = PictureLooks.Job()
+        val steps = mutableListOf<Int>()
+        try {
+            PictureLooks.make(context, PictureLook.AI_LARGE, source, job) { percent ->
+                steps += percent
+                if (steps.size == 2) job.cancelled = true
+            }
+            fail("a cancelled view stops")
+        } catch (expected: PictureLooks.Cancelled) {
+        }
+        assertEquals("it stops at the next piece, not at the end", 2, steps.size)
+        // The lock is free again: the next request runs, and its clock counts only its own work.
+        val next = PictureLooks.make(context, PictureLook.AI_QUICK, source)
+        assertEquals(800, next.bitmap.width)
+        assertTrue(next.millis >= 0)
+    }
+
     @Test fun theViewsWithoutAModelAreFourTimesLarger() {
         val source = photo(24, 18)
         for (look in listOf(PictureLook.EXACT, PictureLook.SMOOTH, PictureLook.SHARPER)) {

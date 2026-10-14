@@ -25,6 +25,8 @@ class PictureViewActivity : ScreenActivity() {
     private var look = PictureLook.SMOOTH
     private val made = HashMap<PictureLook, PictureLooks.Made>()
     private var job = 0
+    /** The view being made; a newer choice, or leaving the screen, cancels it. */
+    private var running: PictureLooks.Job? = null
     private lateinit var image: ImageView
     private lateinit var info: TextView
     private lateinit var aiNote: TextView
@@ -169,24 +171,38 @@ class PictureViewActivity : ScreenActivity() {
     private fun make(next: PictureLook) {
         val from = source ?: return
         val mine = ++job
+        val previous = running
+        previous?.cancelled = true
+        val request = PictureLooks.Job()
+        running = request
         enableActions(false)
-        showProgress(0)
+        // Until the view before it has stopped (at most one piece of the picture), say so rather than sit at 0 %.
+        if (previous != null) showWaiting() else showProgress(0)
         val context: Context = applicationContext
         Thread {
             val result = runCatching {
-                PictureLooks.make(context, next, from) { percent ->
+                PictureLooks.make(context, next, from, request, started = {
+                    runOnUiThread { if (mine == job && !isDestroyed) showProgress(0) }
+                }) { percent ->
                     runOnUiThread { if (mine == job && !isDestroyed) showProgress(percent) }
                 }
-            }.onFailure { Log.w(TAG, "view ${next.key} not made", it) }
+            }.onFailure { if (it !is PictureLooks.Cancelled) Log.w(TAG, "view ${next.key} not made", it) }
             runOnUiThread {
+                if (running === request) running = null
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.getOrNull()?.let { made[next] = it }
-                if (mine != job) return@runOnUiThread
+                if (mine != job || result.exceptionOrNull() is PictureLooks.Cancelled) return@runOnUiThread
                 progress.visibility = View.GONE
                 val done = result.getOrNull()
                 if (done != null) display(done) else info.text = getString(R.string.look_failed)
             }
         }.start()
+    }
+
+    private fun showWaiting() {
+        progress.visibility = View.VISIBLE
+        progress.isIndeterminate = true
+        info.text = getString(R.string.look_waiting)
     }
 
     private fun showProgress(percent: Int) {
@@ -256,7 +272,11 @@ class PictureViewActivity : ScreenActivity() {
 
     override fun onDestroy() {
         // A large model holds hundreds of MB while open; it is let go with the screen.
-        if (isFinishing) Thread { PictureLooks.release() }.start()
+        // Leaving stops the view being made (at the end of its current piece), then lets the model go.
+        if (isFinishing) {
+            running?.cancelled = true
+            Thread { PictureLooks.release() }.start()
+        }
         super.onDestroy()
     }
 

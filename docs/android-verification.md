@@ -442,3 +442,12 @@ Results (2026-10-14):
 - Full suite: 429 tests. Batch 10 hit the harness timeout under host load after 33 passing tests; the remaining 11 passed
   as `Class#method` (receipt `use-rest`).
 - Phone speeds of the AI views are not yet measured; the viewer shows the time each view took.
+
+### Upscaling: cancelling a view (2026-10-14)
+
+A Pixel test with screen recording showed every AI view stuck at 0 %. The log showed no error: the picture screen was
+opened five times in 80 s, and each AI request waited behind the first large-model job, which kept running after the
+screen closed. Fix: a newer choice, or leaving the screen, cancels the running view at its next piece; "Arrêt de
+l'affichage précédent…" shows meanwhile; the time shown counts only the work; each view's time goes to the app log
+(tag `PhonemeshPicture`). `PictureLooksTest` (5 with the new cancellation test) and the viewer test in
+`ConversationActivityTest` pass (receipt `cancel-a`). No other test or screenshot state reaches the viewer.

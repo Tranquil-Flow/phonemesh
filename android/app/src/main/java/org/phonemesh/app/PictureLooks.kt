@@ -3,6 +3,7 @@ package org.phonemesh.app
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.SystemClock
+import android.util.Log
 import org.phonemesh.core.PictureScale
 import java.io.File
 
@@ -50,31 +51,58 @@ object PictureLooks {
     fun available(context: Context, look: PictureLook): Boolean =
         look.model == null || (NativeUpscale.loaded && modelFile(context, look) != null)
 
+    /** [millis] counts only the work, not any wait for the view before it to stop. */
     class Made(val bitmap: Bitmap, val millis: Long)
 
-    /** Makes [look] of [source] off the main thread; throws with the reason when it cannot. [progress] gets 0-100. */
-    fun make(context: Context, look: PictureLook, source: Bitmap, progress: (Int) -> Unit = {}): Made {
-        val start = SystemClock.elapsedRealtime()
+    /** One request for a view. Setting [cancelled] stops it before it starts, or between two pieces of the picture. */
+    class Job {
+        @Volatile var cancelled = false
+    }
+
+    /** Thrown by [make] when its [Job] was cancelled; not a failure. */
+    class Cancelled : RuntimeException("cancelled")
+
+    /**
+     * Makes [look] of [source] off the main thread; throws with the reason when it cannot, or [Cancelled]. Only one AI
+     * view is made at a time: a later request waits until the one before it stops, then [started] is called and the
+     * clock starts. [progress] gets 0-100.
+     */
+    fun make(
+        context: Context, look: PictureLook, source: Bitmap, job: Job = Job(), started: () -> Unit = {}, progress: (Int) -> Unit = {},
+    ): Made {
         val w = source.width * SCALE
         val h = source.height * SCALE
+        if (look.ai) return synchronized(lock) {
+            if (job.cancelled) throw Cancelled()
+            started()
+            val start = SystemClock.elapsedRealtime()
+            val bitmap = ai(context, look, source, job, progress)
+            Made(bitmap, SystemClock.elapsedRealtime() - start).also {
+                Log.i(TAG, "view ${look.key} ${source.width}x${source.height} -> ${w}x$h in ${it.millis} ms, ${threads()} threads")
+            }
+        }
+        started()
+        val start = SystemClock.elapsedRealtime()
         val bitmap = when (look) {
             PictureLook.EXACT -> Bitmap.createScaledBitmap(source, w, h, false)
             PictureLook.SMOOTH -> Bitmap.createScaledBitmap(source, w, h, true)
-            PictureLook.SHARPER -> {
+            else -> {
                 val big = Bitmap.createScaledBitmap(source, w, h, true)
                 val pixels = IntArray(w * h).also { big.getPixels(it, 0, w, 0, 0, w, h) }
                 Bitmap.createBitmap(PictureScale.unsharp(pixels, w, h, radius = 3, amount = 1.0f, threshold = 3), w, h, Bitmap.Config.ARGB_8888)
             }
-            else -> ai(context, look, source, progress)
         }
         return Made(bitmap, SystemClock.elapsedRealtime() - start)
     }
+
+    /** Held while an AI view is made, and while a model is opened or let go. */
+    private val lock = Any()
+    private const val TAG = "PhonemeshPicture"
 
     /** One model open at a time: the large ones take hundreds of MB while they work. */
     private var openPath: String? = null
     private var openHandle = 0L
 
-    @Synchronized
     private fun session(file: File): Long {
         if (openPath == file.path && openHandle != 0L) return openHandle
         if (openHandle != 0L) NativeUpscale.close(openHandle)
@@ -87,9 +115,8 @@ object PictureLooks {
         return handle
     }
 
-    /** Lets go of the open model (when the picture screen closes), giving its memory back. */
-    @Synchronized
-    fun release() {
+    /** Lets go of the open model (when the picture screen closes), giving its memory back; waits for a running piece. */
+    fun release() = synchronized(lock) {
         if (openHandle != 0L) NativeUpscale.close(openHandle)
         openHandle = 0L
         openPath = null
@@ -97,8 +124,8 @@ object PictureLooks {
 
     private fun threads(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
 
-    @Synchronized
-    private fun ai(context: Context, look: PictureLook, source: Bitmap, progress: (Int) -> Unit): Bitmap {
+    /** Called with [lock] held. */
+    private fun ai(context: Context, look: PictureLook, source: Bitmap, job: Job, progress: (Int) -> Unit): Bitmap {
         check(NativeUpscale.loaded) { "the AI engine is not in this build" }
         val file = checkNotNull(modelFile(context, look)) { "model ${look.model} is not on this phone" }
         val handle = session(file)
@@ -110,6 +137,10 @@ object PictureLooks {
         val out = IntArray(outW * outH)
         val tiles = PictureScale.tiles(w, h, look.tile, PAD)
         tiles.forEachIndexed { index, t ->
+            if (job.cancelled) {
+                Log.i(TAG, "view ${look.key} stopped after ${index} of ${tiles.size} pieces")
+                throw Cancelled()
+            }
             progress(index * 100 / tiles.size)
             val plane = t.width * t.height
             val input = FloatArray(3 * plane)

@@ -290,6 +290,7 @@
     <string name="look_ai_bsrgan">AI, large (BSRGAN)</string>
     <string name="look_ai_note">AI may invent details.</string>
     <string name="look_working">Making this view: %1$d%%</string>
+    <string name="look_waiting">Stopping the previous view…</string>
     <string name="look_failed">This view could not be made.</string>
     <string name="look_time">%1$d × %2$d · %3$s s</string>
     <string name="look_missing">AI model not on this phone.</string>

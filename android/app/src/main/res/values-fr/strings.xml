@@ -286,6 +286,7 @@
     <string name="look_ai_bsrgan">IA grande (BSRGAN)</string>
     <string name="look_ai_note">L\'IA peut inventer des détails.</string>
     <string name="look_working">Préparation de cet affichage : %1$d %%</string>
+    <string name="look_waiting">Arrêt de l\'affichage précédent…</string>
     <string name="look_failed">Cet affichage n\'a pas pu être fait.</string>
     <string name="look_time">%1$d × %2$d · %3$s s</string>
     <string name="look_missing">Modèle IA absent de ce téléphone.</string>

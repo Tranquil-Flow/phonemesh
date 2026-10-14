@@ -4,6 +4,7 @@
 #include <jni.h>
 #include <dlfcn.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include "onnxruntime_c_api.h"
 
@@ -35,14 +36,27 @@ static int ready(void) {
     return ok(g_api->CreateEnv(ORT_LOGGING_LEVEL_ERROR, "phonemesh-upscale", &g_env));
 }
 
-JNIEXPORT jlong JNICALL Java_org_phonemesh_app_NativeUpscale_open(JNIEnv *env, jclass type, jstring path, jint threads) {
+/*
+ * engine 0: ONNX Runtime's own CPU kernels with [threads] threads.
+ * engine 1: the XNNPACK kernels built into the same runtime, with [threads] threads of their own; ONNX Runtime's pool
+ * then gets one thread, as its documentation advises, and runs only what XNNPACK cannot.
+ */
+JNIEXPORT jlong JNICALL Java_org_phonemesh_app_NativeUpscale_open(JNIEnv *env, jclass type, jstring path, jint threads, jint engine) {
     if (!ready()) return 0;
     const char *file = (*env)->GetStringUTFChars(env, path, NULL);
     OrtSessionOptions *options = NULL;
     OrtSession *session = NULL;
     int good = ok(g_api->CreateSessionOptions(&options));
-    if (good) good = ok(g_api->SetIntraOpNumThreads(options, threads));
+    if (good) good = ok(g_api->SetIntraOpNumThreads(options, engine == 1 ? 1 : threads));
     if (good) good = ok(g_api->SetSessionGraphOptimizationLevel(options, ORT_ENABLE_ALL));
+    if (good && engine == 1) {
+        char count[8];
+        snprintf(count, sizeof(count), "%d", threads);
+        const char *keys[] = {"intra_op_num_threads"};
+        const char *values[] = {count};
+        good = ok(g_api->AddSessionConfigEntry(options, "session.intra_op.allow_spinning", "0"));
+        if (good) good = ok(g_api->SessionOptionsAppendExecutionProvider(options, "XNNPACK", keys, values, 1));
+    }
     if (good) good = ok(g_api->CreateSession(g_env, file, options, &session));
     if (options != NULL) g_api->ReleaseSessionOptions(options);
     (*env)->ReleaseStringUTFChars(env, path, file);

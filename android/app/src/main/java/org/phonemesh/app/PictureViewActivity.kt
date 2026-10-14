@@ -181,11 +181,12 @@ class PictureViewActivity : ScreenActivity() {
         val context: Context = applicationContext
         Thread {
             val result = runCatching {
-                PictureLooks.make(context, next, from, request, started = {
+                // An AI view made before for this picture opens at once; a new one is kept for next time.
+                PictureLooks.cached(context, messageId, next) ?: PictureLooks.make(context, next, from, request, started = {
                     runOnUiThread { if (mine == job && !isDestroyed) showProgress(0) }
                 }) { percent ->
                     runOnUiThread { if (mine == job && !isDestroyed) showProgress(percent) }
-                }
+                }.also { PictureLooks.keep(context, messageId, next, it) }
             }.onFailure { if (it !is PictureLooks.Cancelled) Log.w(TAG, "view ${next.key} not made", it) }
             runOnUiThread {
                 if (running === request) running = null

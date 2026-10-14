@@ -451,3 +451,15 @@ screen closed. Fix: a newer choice, or leaving the screen, cancels the running v
 l'affichage précédent…" shows meanwhile; the time shown counts only the work; each view's time goes to the app log
 (tag `PhonemeshPicture`). `PictureLooksTest` (5 with the new cancellation test) and the viewer test in
 `ConversationActivityTest` pass (receipt `cancel-a`). No other test or screenshot state reaches the viewer.
+
+### Upscaling speed (2026-10-14)
+
+- Pieces for the large models follow the phone's memory: 7 GB or more → 256 px (a Maximum picture in one go), 3 GB or
+  more → 96 px, otherwise 48 px. On the Mac CPU, a Maximum picture through Real-ESRGAN x4plus took 6.8 s in 48 px
+  pieces, 4.0 s in 96 px pieces and 3.2 s whole. Peak memory: about 320 MB at 96 px, about 700 MB whole.
+- AI views already made are kept in the app's cache (JPEG 95, at most 50 MB, oldest first) and open at once; deleting
+  the picture deletes them.
+- Engine trial: the first run of a model compares ONNX Runtime's CPU kernels with XNNPACK and remembers the faster.
+  sherpa-onnx's runtime is built without XNNPACK ("not supported in this build"), so the CPU engine is kept; the
+  trial costs one failed open per model, once.
+- `PictureLooksTest` (8) and the viewer test pass (receipt `speed-a`).

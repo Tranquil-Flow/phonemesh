@@ -803,7 +803,7 @@ class AppCore private constructor(
         val pictureIds = history.pictureMessageIds(chatId)
         if (!history.deleteChat(chatId)) return false
         files.forEach { File(picturesDir, it).delete() }
-        pictureIds.forEach { forgetView(it) }
+        pictureIds.forEach { forgetView(it); PictureLooks.forget(app, it) }
         changed(Change.MESSAGES)
         return true
     }
@@ -1041,6 +1041,7 @@ class AppCore private constructor(
         picturePackets.values.removeAll { it.first == messageId }
         history.picture(messageId)?.file?.let { File(picturesDir, it).delete() }
         forgetView(messageId)
+        PictureLooks.forget(app, messageId)
         if (!history.deleteMessage(messageId)) return false
         changed(Change.MESSAGES)
         return true

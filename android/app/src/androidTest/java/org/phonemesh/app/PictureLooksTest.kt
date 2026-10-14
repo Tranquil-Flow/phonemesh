@@ -41,7 +41,7 @@ class PictureLooksTest {
     @Test fun theBridgeRunsAModelThroughTheAppsOwnOnnxRuntime() {
         assertTrue("sherpa-onnx's runtime and the bridge load", NativeUpscale.loaded)
         val file = place("bridge-test.onnx")
-        val handle = NativeUpscale.open(file.path, 2)
+        val handle = NativeUpscale.open(file.path, 2, NativeUpscale.CPU)
         assertNotEquals(NativeUpscale.lastError(), 0L, handle)
         try {
             val input = FloatArray(3 * 6 * 8) { (it % 17) / 17f }
@@ -53,7 +53,7 @@ class PictureLooksTest {
         } finally {
             NativeUpscale.close(handle)
         }
-        assertEquals("a missing model says so", 0L, NativeUpscale.open(File(context.cacheDir, "none.onnx").path, 1))
+        assertEquals("a missing model says so", 0L, NativeUpscale.open(File(context.cacheDir, "none.onnx").path, 1, NativeUpscale.CPU))
     }
 
     @Test fun anAiLookIsMadeWholeOrInTilesAtFourTimesTheSize() {
@@ -101,6 +101,46 @@ class PictureLooksTest {
         val next = PictureLooks.make(context, PictureLook.AI_QUICK, source)
         assertEquals(800, next.bitmap.width)
         assertTrue(next.millis >= 0)
+    }
+
+    @Test fun bothEnginesGiveTheSamePictureAndTheFasterIsRemembered() {
+        val file = place("engine-test.onnx")
+        val input = FloatArray(3 * 16 * 16) { (it % 23) / 23f }
+        val cpu = NativeUpscale.open(file.path, 2, NativeUpscale.CPU)
+        assertNotEquals(NativeUpscale.lastError(), 0L, cpu)
+        val expected = checkNotNull(NativeUpscale.run(cpu, input, 16, 16))
+        NativeUpscale.close(cpu)
+        val xnn = NativeUpscale.open(file.path, 2, NativeUpscale.XNNPACK)
+        if (xnn != 0L) {
+            val got = checkNotNull(NativeUpscale.run(xnn, input, 16, 16)) { NativeUpscale.lastError() }
+            NativeUpscale.close(xnn)
+            assertEquals(expected.size, got.size)
+            assertTrue("XNNPACK matches the CPU engine", expected.indices.all { kotlin.math.abs(expected[it] - got[it]) < 1e-3f })
+        }
+        val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        place(PictureLook.AI_QUICK.model!!)
+        PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
+        assertTrue("the trial's winner is kept for this phone", prefs.all.keys.any { it.startsWith("engine:${PictureLook.AI_QUICK.model}") })
+    }
+
+    @Test fun aViewMadeOnceIsKeptUntilItsPictureGoes() {
+        place(PictureLook.AI_QUICK.model!!)
+        PictureLooks.forget(context, 4242)
+        assertNull(PictureLooks.cached(context, 4242, PictureLook.AI_QUICK))
+        val made = PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
+        PictureLooks.keep(context, 4242, PictureLook.AI_QUICK, made)
+        val again = checkNotNull(PictureLooks.cached(context, 4242, PictureLook.AI_QUICK))
+        assertEquals(160 to 120, again.bitmap.width to again.bitmap.height)
+        assertEquals("the time it took when made", made.millis, again.millis)
+        assertNull("views without a model are not kept", PictureLooks.cached(context, 4242, PictureLook.SMOOTH))
+        PictureLooks.forget(context, 4242)
+        assertNull(PictureLooks.cached(context, 4242, PictureLook.AI_QUICK))
+    }
+
+    @Test fun piecesAreAsLargeAsThePhonesMemoryAllows() {
+        assertEquals("the small models keep their pieces", PictureLook.AI_QUICK.tile, PictureLooks.tileFor(context, PictureLook.AI_QUICK))
+        assertTrue(PictureLooks.tileFor(context, PictureLook.AI_LARGE) in setOf(PictureLook.AI_LARGE.tile, 96, 256))
     }
 
     @Test fun theViewsWithoutAModelAreFourTimesLarger() {

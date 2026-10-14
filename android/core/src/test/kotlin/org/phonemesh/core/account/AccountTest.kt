@@ -44,6 +44,23 @@ class AccountTest {
         assertNull("bad UTF-8", ContactCard.decode(badUtf8))
     }
 
+    /** Review F21: names cannot hide characters. */
+    @Test fun namesRefuseHiddenCharacters() {
+        for (bad in listOf("Ma\u202Ema", "Ma\u200Bma", "Ma\nma", "Ame\u0301lie", " ", "\u0000")) {
+            assertTrue("refused: ${bad.map { it.code }}", !Names.valid(bad))
+            assertTrue(runCatching { ContactCard.create(keys, bad, 0) }.isFailure)
+        }
+        assertTrue(Names.valid("Amélie") && Names.valid("Moussa 2") && Names.valid("আমিনা"))
+        assertEquals("Amélie", Names.clean(" Ame\u0301lie\u200B "))
+    }
+
+    /** Review F23: the identity key signs a labelled message, not the bare prekey. */
+    @Test fun aSignatureOverTheBarePrekeyIsRefused() {
+        val bare = keys.signIdentity(keys.prekey)
+        val forged = card.encode().also { bare.copyInto(it, 68) }
+        assertNull(ContactCard.decode(forged))
+    }
+
     @Test fun aLinkCarriesTheCardAfterTheHash() {
         val link = InviteLink.of(card)
         assertTrue(link.startsWith("https://tranquil-flow.github.io/phonemesh/add#"))

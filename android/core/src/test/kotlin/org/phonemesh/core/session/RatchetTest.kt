@@ -3,18 +3,21 @@ package org.phonemesh.core.session
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.phonemesh.core.crypto.Aead
+import org.phonemesh.core.crypto.Vectors
 import org.phonemesh.core.wire.Body
 import org.phonemesh.core.wire.WireV2
 import kotlin.random.Random
 
 class RatchetTest {
+    private fun lh(): Pair<Phone, Phone> = Phone.qrPair().let { (a, b) -> if (a.state.iAmL) a to b else b to a }
+
     @Test fun turnsStepTheRatchetAndTheKeyRidesUntilAnswered() {
-        val (a, b) = Phone.qrPair()
-        val (l, h) = if (a.state.iAmL) a to b else b to a
+        val (l, h) = lh()
         val first = l.send("1")
         assertFalse("nothing heard yet: no step", first.stepped)
         assertEquals("1", h.receive(first.packet))
@@ -25,15 +28,38 @@ class RatchetTest {
         assertTrue(step.stepped && step.withKey)
         val again = l.send("4")
         assertTrue("repeated until answered", again.withKey && !again.stepped)
-        assertEquals(WireV2.KEYED_HEADER, (WireV2.parse(again.packet)!!.associated.size))
+        assertEquals(WireV2.KEYED_HEADER, WireV2.parse(again.packet)!!.associated.size)
         assertEquals("4", h.receive(again.packet))
         assertEquals("3", h.receive(step.packet))
         val answer = h.send("5")
         assertTrue(answer.stepped)
         assertEquals("5", l.receive(answer.packet))
         assertFalse("answered: the announcement ends", l.state.announcing)
-        val next = l.send("6")
-        assertTrue("the turn changed again: a new step", next.stepped && next.withKey)
+        assertTrue("the turn changed again: a new step", l.send("6").stepped)
+    }
+
+    /** Review F7: the ratchet key is masked, differently on each packet of a turn. */
+    @Test fun aTurnsPacketsCannotBeLinkedByTheirKey() {
+        val (l, h) = lh()
+        l.receive(h.send("hi").packet)
+        val one = l.send("a").packet; val two = l.send("b").packet
+        val keyBytes = { p: ByteArray -> p.copyOfRange(WireV2.PLAIN_HEADER, WireV2.KEYED_HEADER) }
+        assertFalse(keyBytes(one).contentEquals(keyBytes(two)))
+        assertFalse("the raw key is nowhere in it", Vectors.hex(one).contains(Vectors.hex(l.state.mine!!.public)))
+        assertEquals("b", h.receive(two)); assertEquals("a", h.receive(one))
+    }
+
+    /** Review F3: sealing never changes the state it was given; the caller stores the new one. */
+    @Test fun sealingLeavesTheOldStateAlone() {
+        val (l, h) = lh()
+        l.receive(h.send("x").packet)
+        val before = l.state.encode()
+        val sealed = Ratchet.seal(l.state, Body.encode(Body.Text("fr", "y")))
+        assertArrayEquals(before, l.state.encode())
+        assertTrue(sealed.state.serial > l.state.serial)
+        val opened = Ratchet.open(h.state, sealed.packet, h.keys)
+        assertTrue(opened is Ratchet.Opened.Delivered)
+        assertTrue("opening leaves it alone too", h.state.serial < (opened as Ratchet.Opened.Delivered).state.serial)
     }
 
     @Test fun aReplayIsRefusedAndOldPacketsCannotBeOpenedLater() {
@@ -41,10 +67,9 @@ class RatchetTest {
         val packet = a.send("secret").packet
         assertEquals("secret", b.receive(packet))
         assertNull("replay", b.receive(packet))
-        // Forward secrecy: nothing stored can open it again, and no message key is kept.
         val stored = SessionState.decode(b.state.encode())!!
         assertTrue(Ratchet.open(stored, packet, b.keys) is Ratchet.Opened.NotMine)
-        assertTrue(stored.skipped.isEmpty())
+        assertEquals(0, stored.skippedCount)
     }
 
     @Test fun aStolenStateHealsAfterTwoTurns() {
@@ -62,8 +87,7 @@ class RatchetTest {
         repeat(5) { b.receive(a.send("a$it").packet); a.receive(b.send("b$it").packet) }
         val late = a.send("late").packet
         a.send("lost")
-        val next = a.send("next").packet
-        assertEquals("next", b.receive(next))
+        assertEquals("next", b.receive(a.send("next").packet))
         val bytes = b.state.encode()
         b.state = SessionState.decode(bytes)!!
         assertArrayEquals(bytes, b.state.encode())
@@ -72,12 +96,22 @@ class RatchetTest {
         assertNull(SessionState.decode(bytes.copyOf().also { it[0] = 9 }))
     }
 
+    /** Review F15: a stored state with a bad key is refused, not a crash later. */
+    @Test fun aStateWithBadKeysIsRefused() {
+        val (l, h) = lh()
+        l.receive(h.send("x").packet); l.send("step")
+        val bytes = l.state.encode()
+        val scalarAt = 2 + 32
+        assertNull("zero scalar", SessionState.decode(bytes.copyOf().also { it.fill(0, scalarAt, scalarAt + 32) }))
+        assertNull("scalar not the public key's", SessionState.decode(bytes.copyOf().also { it[scalarAt + 31] = (it[scalarAt + 31] + 1).toByte() }))
+        assertNull("their key off the curve", SessionState.decode(bytes.copyOf().also { it[scalarAt + 65] = 5 }))
+    }
+
     @Test fun aLongTextDelaysTheStepToTheNextPacket() {
-        val (a, b) = Phone.qrPair()
-        val (l, h) = if (a.state.iAmL) a to b else b to a
+        val (l, h) = lh()
         l.receive(h.send("hi").packet)
-        val long = "é".repeat(90) // 180 bytes: too long to ride with the key
-        val first = Ratchet.seal(l.state, Body.encode(Body.Text("fr", long)), l.newPair)
+        val long = "é".repeat(90)
+        val first = l.seal(Body.Text("fr", long))
         assertFalse(first.stepped)
         assertEquals(long, h.receive(first.packet))
         val next = l.send("court")
@@ -86,25 +120,66 @@ class RatchetTest {
     }
 
     @Test fun aKeylessPacketOfANewChainWaitsForItsKey() {
-        val (a, b) = Phone.qrPair()
-        val (l, h) = if (a.state.iAmL) a to b else b to a
+        val (l, h) = lh()
         l.receive(h.send("hi").packet)
-        val keyed = l.send("short") // the step, with the key
-        val long = Ratchet.seal(l.state, Body.encode(Body.Text("fr", "é".repeat(90))), l.newPair)
+        val keyed = l.send("short")
+        val long = l.seal(Body.Text("fr", "é".repeat(90)))
         assertFalse("too long for the key", long.withKey)
-        assertTrue(Ratchet.open(h.state, long.packet, h.keys) is Ratchet.Opened.Held)
+        assertTrue(h.open(long.packet) is Ratchet.Opened.Held)
         assertEquals("short", h.receive(keyed.packet))
         assertEquals("é".repeat(90), h.receive(long.packet))
+    }
+
+    /** Review F12: an ack names its chain, its highest counter and the gaps below it; a reply can carry one. */
+    @Test fun acksNameTheirChainAndGaps() {
+        val (l, h) = lh()
+        val sent = (0 until 6).map { l.send("m$it") }
+        for (i in listOf(0, 1, 3, 5)) h.receive(sent[i].packet)
+        val ack = Ratchet.ack(h.state)!!
+        assertArrayEquals(sent[0].chainTag, ack.tag)
+        assertEquals(5, ack.highest)
+        assertEquals(listOf(true, true, false, true, false, true), (0L until 6L).map { ack.covers(it) })
+        val reply = h.seal(Body.Text("fr", "ok"), ack)
+        val opened = l.open(reply.packet) as Ratchet.Opened.Delivered
+        val decoded = Body.decodeWithAck(opened.body)!!
+        assertEquals("ok", (decoded.body as Body.Text).text)
+        assertEquals(ack, decoded.ack)
+        assertArrayEquals(Ratchet.sendingTag(l.state), ack.tag)
+    }
+
+    /** Review F14: a step after many losses keeps the new chain's own late keys. */
+    @Test fun aLongOldChainDoesNotCrowdOutTheNewChainsKeys() {
+        val (l, h) = lh()
+        l.receive(h.send("hi").packet)
+        val old = (0 until 60).map { l.send("old$it") }
+        for (i in 0 until 10) h.receive(old[i].packet)
+        l.receive(h.send("turn").packet) // H answers L's step, L may step again
+        val newOnes = (0 until 3).map { l.send("new$it") }
+        assertEquals("new2", h.receive(newOnes[2].packet))
+        assertEquals("new0", h.receive(newOnes[0].packet))
+        assertEquals("new1", h.receive(newOnes[1].packet))
+    }
+
+    /** Review F24: kept keys can be forgotten after a while. */
+    @Test fun keptKeysAgeOut() {
+        val (a, b) = Phone.qrPair()
+        val late = a.send("late").packet
+        b.now = 1_000
+        b.receive(a.send("next").packet)
+        assertEquals(1, b.state.skippedCount)
+        b.state = Ratchet.forget(b.state, before = 1_000 + 30L * 86_400)
+        assertEquals(0, b.state.skippedCount)
+        assertNull(b.receive(late))
     }
 
     @Test fun neverTheSameKeyAndNonceTwice() {
         val seen = HashSet<String>()
         var repeats = 0
-        Aead.sealed = { k, n -> if (!seen.add(k.joinToString(",") + "/" + n.joinToString(","))) repeats++ }
+        Aead.sealed = { k, n -> if (!seen.add(Vectors.hex(k + n))) repeats++ }
         try {
             val random = Random(7)
             repeat(30) {
-                val (a, b) = Phone.qrPair()
+                val (a, b) = if (it % 2 == 0) Phone.qrPair() else Phone.linkPair()
                 repeat(40) {
                     val (from, to) = if (random.nextBoolean()) a to b else b to a
                     to.receive(from.send("m").packet)
@@ -123,20 +198,18 @@ class RatchetTest {
         var delivered = 0
         repeat(10_000) { run ->
             val lossy = run % 2 == 0
-            val (a, b) = Phone.qrPair()
+            val (a, b) = if (run % 3 == 0) Phone.linkPair() else Phone.qrPair()
             val phones = listOf(a, b)
-            val flight = mutableListOf<Triple<Int, String, ByteArray>>() // to, id, packet
+            val flight = mutableListOf<Triple<Int, String, ByteArray>>()
             val held = listOf(mutableListOf<ByteArray>(), mutableListOf<ByteArray>())
             val sent = HashMap<String, Int>()
             val got = HashSet<String>()
             fun deliver(to: Int, packet: ByteArray) {
-                val phone = phones[to]
-                when (val opened = Ratchet.open(phone.state, packet, phone.keys)) {
+                when (val opened = phones[to].open(packet)) {
                     is Ratchet.Opened.Delivered -> {
-                        val text = (Body.decode(opened.body) as Body.Text).text
+                        val text = (Body.decodeWithAck(opened.body)!!.body as Body.Text).text
                         assertEquals("from the other phone", 1 - to, sent[text])
                         assertTrue("delivered once: $text", got.add(text))
-                        // Packets waiting for their key may open now.
                         val waiting = held[to].toList(); held[to].clear()
                         waiting.forEach { deliver(to, it) }
                     }
@@ -155,7 +228,7 @@ class RatchetTest {
                 } else if (flight.isNotEmpty()) {
                     val pick = flight[random.nextInt(flight.size)]
                     if (!lossy || random.nextInt(4) > 0) deliver(pick.first, pick.third)
-                    if (random.nextInt(5) > 0) flight.remove(pick) // else it may come again: a duplicate
+                    if (random.nextInt(5) > 0) flight.remove(pick)
                 }
             }
             flight.shuffle(random)
@@ -164,5 +237,30 @@ class RatchetTest {
             delivered += got.size
         }
         assertTrue(delivered > 50_000)
+    }
+
+    /** Review F5: a 25-packet blackout. Flow control stops new packets in time; resending the stored ones recovers. */
+    @Test fun aLongBlackoutDoesNotSilenceADirection() {
+        val (a, b) = Phone.qrPair()
+        b.receive(a.send("hello").packet)
+        var ack = Ratchet.ack(b.state)
+        val stored = ArrayList<ByteArray>()
+        var refused = 0
+        repeat(25) { i -> if (Ratchet.maySealNew(a.state, ack)) stored += a.send("lost$i").packet else refused++ }
+        assertTrue("flow control stopped new packets: $refused", refused == 25 - Ratchet.WINDOW && stored.size == Ratchet.WINDOW)
+        // The air clears. A resends its oldest unacknowledged packet first, then the rest.
+        for ((i, packet) in stored.withIndex()) assertEquals("lost$i", b.receive(packet))
+        ack = Ratchet.ack(b.state)
+        assertTrue(Ratchet.maySealNew(a.state, ack))
+        assertEquals("after", b.receive(a.send("after").packet))
+        // Without flow control, packet 21 of the same blackout would never open.
+        val (c, d) = Phone.qrPair()
+        repeat(Ratchet.WINDOW) { c.send("gone") }
+        assertNull(d.receive(c.send("too far").packet))
+    }
+
+    @Test fun differentConversationsNeverShareCodes() {
+        val (a, _) = Phone.qrPair(); val (c, _) = Phone.qrPair()
+        assertNotEquals(Vectors.hex(a.send("x").code), Vectors.hex(c.send("x").code))
     }
 }

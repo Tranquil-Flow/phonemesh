@@ -27,7 +27,7 @@ object SharedChatWire {
 
     fun encode(message: Message): ByteArray {
         val name = message.name.toByteArray(Charsets.UTF_8)
-        require(name.size in 1..MAX_NAME_BYTES) { "a name is 1..$MAX_NAME_BYTES bytes here" }
+        require(name.size in 1..MAX_NAME_BYTES && org.phonemesh.core.account.Names.valid(message.name)) { "a name is 1..$MAX_NAME_BYTES bytes here" }
         require(MessageCodec.canonical(message.language) == message.language) { "language must be canonical" }
         val text = message.text.toByteArray(Charsets.UTF_8)
         require(text.isNotEmpty() && text.size <= maxText(message.name, message.language)) { "text does not fit" }
@@ -43,7 +43,7 @@ object SharedChatWire {
         val sender = AccountId.fromBytes(bytes.copyOfRange(at, at + AccountId.SIZE)); at += AccountId.SIZE
         val nameLength = bytes[at++].toInt() and 0xff
         if (nameLength !in 1..MAX_NAME_BYTES || at + nameLength + 1 > bytes.size) return null
-        val name = ContactCard.strictUtf8(bytes.copyOfRange(at, at + nameLength)) ?: return null; at += nameLength
+        val name = ContactCard.strictUtf8(bytes.copyOfRange(at, at + nameLength))?.takeIf { org.phonemesh.core.account.Names.valid(it) } ?: return null; at += nameLength
         val languageLength = bytes[at++].toInt() and 0xff
         if (languageLength !in 2..6 || at + languageLength >= bytes.size) return null
         val language = String(bytes.copyOfRange(at, at + languageLength), Charsets.US_ASCII); at += languageLength

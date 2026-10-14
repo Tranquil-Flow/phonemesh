@@ -14,8 +14,8 @@ object Aead {
     const val NONCE = 12
     const val TAG = 16
 
-    /** Test hook: told of every key and nonce [seal] uses. */
-    @Volatile var sealed: ((key: ByteArray, nonce: ByteArray) -> Unit)? = null
+    /** Test hook, visible to this module's tests only: told of every key and nonce [seal] uses (review F20). */
+    @Volatile internal var sealed: ((key: ByteArray, nonce: ByteArray) -> Unit)? = null
 
     fun seal(key: ByteArray, nonce: ByteArray, aad: ByteArray, plain: ByteArray): ByteArray {
         sealed?.invoke(key.copyOf(), nonce.copyOf())

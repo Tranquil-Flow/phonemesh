@@ -19,7 +19,7 @@ class ContactCard(identity: ByteArray, prekey: ByteArray, signature: ByteArray, 
 
     init {
         require(identity.size == P256.POINT && prekey.size == P256.POINT && signature.size == P256.SIGNATURE) { "bad key sizes" }
-        require(nameBytes(name).size in 1..MAX_NAME_BYTES) { "a name is 1..$MAX_NAME_BYTES UTF-8 bytes" }
+        require(nameBytes(name).size in 1..MAX_NAME_BYTES && Names.valid(name)) { "a name is 1..$MAX_NAME_BYTES UTF-8 bytes, NFC, no controls" }
         require(colour in 0..255) { "colour is one byte" }
     }
 
@@ -37,9 +37,17 @@ class ContactCard(identity: ByteArray, prekey: ByteArray, signature: ByteArray, 
         private const val FIXED = 1 + 1 + 33 + 33 + 64 + 1 + 1
         const val MAX_BYTES = FIXED + MAX_NAME_BYTES
 
-        /** This phone's card: its keys, the prekey signed with the identity key. */
+        /** This phone's card: its keys, the current prekey signed with the identity key. */
         fun create(own: OwnKeys, name: String, colour: Int): ContactCard =
-            ContactCard(own.identity, own.prekey, own.signIdentity(own.prekey), name, colour)
+            ContactCard(own.identity, own.prekey, own.signIdentity(signed(own.prekey)), name, colour)
+
+        /** What the identity key signs: a label, the version and key type, then the prekey (review F23). */
+        fun signed(prekey: ByteArray): ByteArray =
+            "Phonemesh card v1".toByteArray(Charsets.US_ASCII) + byteArrayOf(VERSION.toByte(), KEY_P256.toByte()) + prekey
+
+        /** The length of the card at the start of [bytes] (its name length decides it); 0 when too short to tell. */
+        internal fun lengthAt(bytes: ByteArray): Int =
+            if (bytes.size <= 132) 0 else FIXED + (bytes[132].toInt() and 0xff)
 
         /**
          * A card from outside; null unless every field is right: version, key type, exact length, valid points,
@@ -53,10 +61,10 @@ class ContactCard(identity: ByteArray, prekey: ByteArray, signature: ByteArray, 
             val signature = bytes.copyOfRange(68, 132)
             val nameLength = bytes[132].toInt() and 0xff
             if (nameLength !in 1..MAX_NAME_BYTES || bytes.size != FIXED + nameLength) return null
-            val name = strictUtf8(bytes.copyOfRange(133, 133 + nameLength)) ?: return null
+            val name = strictUtf8(bytes.copyOfRange(133, 133 + nameLength))?.takeIf { Names.valid(it) } ?: return null
             val colour = bytes[133 + nameLength].toInt() and 0xff
             if (P256.decompress(identity) == null || P256.decompress(prekey) == null) return null
-            if (!P256.verify(identity, prekey, signature)) return null
+            if (!P256.verify(identity, signed(prekey), signature)) return null
             return ContactCard(identity, prekey, signature, name, colour)
         }
 

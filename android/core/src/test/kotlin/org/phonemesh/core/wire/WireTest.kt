@@ -13,6 +13,7 @@ import org.phonemesh.core.session.Phone
 import org.phonemesh.core.session.Ratchet
 import org.phonemesh.core.session.SessionState
 import org.phonemesh.core.session.Start
+import org.phonemesh.core.wire.Ack
 import kotlin.random.Random
 
 class WireTest {
@@ -23,12 +24,20 @@ class WireTest {
         val part = PictureWire.encode(PictureWire.Part(9, 0, ByteArray(198) { it.toByte() }))
         val bodies = listOf(
             Body.Text("fr", "bonjour"), Body.Text("pt-BR", "é"), Body.Reply(ref, "en-US", "yes"), Body.Reaction(ref, "👍"),
-            Body.PictureHead(head), Body.PicturePart(part), Body.Receipt(0xfffffffeL), Body.Hello("Aïcha", 5),
+            Body.PictureHead(head), Body.PicturePart(part), Body.Receipt(Ack(byteArrayOf(1, 2), 0xfffffffeL, 5)), Body.Hello("Aïcha", 5),
         )
         for (body in bodies) {
             val bytes = Body.encode(body)
             assertArrayEquals(body.toString(), bytes, Body.encode(checkNotNull(Body.decode(bytes)) { "$body" }))
         }
+        val ack = Ack(byteArrayOf(9, 8), 41, 0b101)
+        for (body in bodies.filter { it !is Body.Receipt && it !is Body.Hello }) {
+            val bytes = Body.encode(body, ack)
+            val decoded = checkNotNull(Body.decodeWithAck(bytes)) { "$body with an ack" }
+            assertEquals(ack, decoded.ack)
+            assertArrayEquals(Body.encode(body), Body.encode(decoded.body))
+        }
+        assertTrue("a hello carries no ack", runCatching { Body.encode(Body.Hello("x", 1), ack) }.isFailure)
     }
 
     @Test fun theLongestTextsFit() {
@@ -52,7 +61,7 @@ class WireTest {
 
     @Test fun aReceiptIsSmall() {
         val (a, _) = Phone.qrPair()
-        assertEquals(30, Ratchet.seal(a.state, Body.encode(Body.Receipt(3))).packet.size)
+        assertEquals(36, Ratchet.seal(a.state, Body.encode(Body.Receipt(Ack(byteArrayOf(0, 0), 3, 0)))).packet.size)
     }
 
     @Test fun badBodiesAreRefused() {
@@ -91,14 +100,16 @@ class WireTest {
             val bytes = if (i % 3 == 0) valid.copyOf().also { repeat(1 + random.nextInt(4)) { _ -> it[random.nextInt(it.size)] = random.nextInt().toByte() } }
             else random.nextBytes(random.nextInt(0, 240)).also { if (it.isNotEmpty() && i % 2 == 0) it[0] = (1 + random.nextInt(8)).toByte() }
             Body.decode(bytes)
+            Body.decodeWithAck(bytes)
             WireV2.parse(bytes)
             HubAck.decode(bytes)
             SharedChatWire.decode(bytes)
             ContactCard.decode(bytes)
             SessionState.decode(bytes)
             if (i % 50 == 0) {
-                Start.hello(keys, bytes, 100)
-                Ratchet.open(a.state.copy(), bytes, a.keys)
+                Start.hello(keys, bytes)
+                if (bytes.isNotEmpty()) Start.hello(keys, byteArrayOf(WireV2.HELLO_BYTE) + bytes.copyOfRange(1, bytes.size))
+                Ratchet.open(a.state, bytes, a.keys)
             }
         }
     }

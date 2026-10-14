@@ -90,7 +90,8 @@ Each phone shows a QR code holding a contact card:
 | Name, UTF-8 | up to 40 |
 | Colour | 1 |
 
-That is about 172 bytes, a small QR code. Both people scan each other. The contact is then marked "met in person", and
+After the card comes a one-time key (33 bytes) made for this showing, so a second scan starts fresh keys. That is
+about 205 bytes, a small QR code. Both people scan each other. The contact is then marked "met in person", and
 the safety pictures already match.
 
 ### Link, at a distance
@@ -100,14 +101,13 @@ the safety pictures already match.
   is open question O2.
 - **Why https:** WhatsApp and SMS make only `http(s)` links tappable.
 - **The person who opens the link** sends a hello over the radio:
-  - a hello code (8 bytes), derived from the link owner's signed prekey so the owner recognises it
-  - their identity key (33)
-  - an ephemeral key (33)
-  - their card, encrypted (name, colour; about 45)
-  - an authentication tag (16)
   - a marker (1)
+  - an ephemeral key (33)
+  - their identity key, encrypted to the owner's prekey (33 + 16 tag)
+  - their name and colour, encrypted (up to 43 + 16 tag)
 
-  About 136 bytes: one packet. The hello code shows only that someone is adding the link's owner, not who.
+  At most 142 bytes: one packet. It names neither person and carries no date; the owner's phone recognises hellos to
+  itself by trying to open them (one key agreement per live prekey).
 - **The link's owner** hears "<name> wants to talk to you", with the spoken name, and accepts or ignores it.
 - **Trust marker:** link contacts show "not met in person" until the two compare safety pictures or scan QR codes.
 
@@ -408,3 +408,40 @@ Each step is gated as now: the full suite, screenshots, and the verification not
 
 None blocking. Still open from earlier handovers and not part of this design: the project name, which also decides
 the domain.
+
+## Changes after the crypto review (step 7)
+
+An independent review (`.local/accounts-crypto-review.md`, 2026-10-14) found 4 high, 8 medium, 10 low and 4 info
+issues. Fixed in the core, each with a test that runs the attack:
+
+| Finding | Fix |
+|---|---|
+| F1 a second QR scan reused every key | each QR code carries a one-time key made for that showing |
+| F2 a replayed hello rebuilt the owner's state | the owner steps with a fresh key before its first packet; hellos have an id to remember |
+| F3 sealing changed state in place | seal and open return the next state; store it with the packet, resend stored bytes, never reseal |
+| F5 20 lost packets could silence a direction | flow control: at most 20 packets past the last ack, then resend |
+| F7 the ratchet key linked a turn's packets | the 35 key bytes are masked per packet with the chain's header key |
+| F8, F10, F18 the hello showed who and needed today's date | the identity key is encrypted; no hello code, no date |
+| F11 prekey rotation broke links | phones keep older prekeys; hellos and starts name the one they used |
+| F12 receipts were ambiguous | an ack names its chain (2 bytes), highest counter and the 32 below it (10 bytes); any message can carry one |
+| F14, F24 kept keys | old and new chains keep their keys fairly; kept keys are dated and can be forgotten |
+| F15 bad stored keys crashed later | a stored state with bad keys is refused |
+| F20 a global key hook | test-only |
+| F21 names hid characters | names must be NFC, no control, format or direction characters |
+| F22, F23 | QR starts get forward secrecy from the one-time keys; signatures and secrets bind labels and both identity keys |
+
+Sizes now: receipt 36 bytes; text 199 bytes, or 164 with the ratchet key; an ack riding on a message costs 10 bytes.
+
+Rules for the screens and outbox (steps 9 and later):
+
+- **F6:** keep each session's highest `serial` outside the session bytes and refuse an older state. If a contact's
+  packets stop opening after several resends, offer "start again" (a new QR scan or hello), never silently.
+- **F9:** the shared chat shows the claimed name uncoloured, never a saved contact's colour or name, until posts are
+  signed.
+- **F13:** two sessions for one contact: keep the newer QR session; between link sessions, keep the one whose opener
+  has the smaller account id.
+- **F16:** held packets are not authenticated: at most 10 per contact, dropped after a day.
+- **F17:** a hub ack only stops resending to the hub; it never shows "Reçu".
+- **F19:** receipts wait 15-60 s at random, and ride on a reply when there is one.
+- **F25:** the phone-to-hub link uses TLS pinned to the hub key from the hub QR (before step 15).
+- **F4, open:** the 4-icon safety picture is 16 bits; a link attacker can find a match in seconds. Owner decision.

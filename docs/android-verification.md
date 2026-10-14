@@ -574,3 +574,13 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   implements the same rules and writes `core/src/test/resources/crypto/transcript.txt`. It holds 15 packets: QR and
   link starts, steps, out-of-order delivery across a step, a delayed step and a replay. Kotlin reproduces every
   packet byte for byte.
+
+## Accounts crypto review fixes (step 7)
+
+- Review: `.local/accounts-crypto-review.md` (independent sub-agent, report only, PoCs in its scratch dir).
+- Fixes listed in the accounts spec, "Changes after the crypto review".
+- `./gradlew :core:test`: 304 tests, 0 failed (`.local/receipts/crypto-review-fixes3.log`). Includes
+  `TranscriptTest` (the Python implementation `.local/crypto-vectors/transcript.py`, rewritten for the new rules: 31
+  sends, receipts and the hello byte for byte), the 10,000-run random delivery test, the key-and-nonce reuse watch
+  over QR and link sessions, and one attack test per fixed finding.
+- `:radio-ble:test :app:testDebugUnitTest :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin`: OK.

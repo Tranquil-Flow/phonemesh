@@ -34,6 +34,8 @@ object P256 {
     private val a: BigInteger = params.curve.a
     private val b: BigInteger = params.curve.b
     private val sqrtExponent = p.add(BigInteger.ONE).shiftRight(2)
+    /** The base point G, compressed: ECDH of a scalar with it gives that scalar's own public x coordinate. */
+    val generator: ByteArray by lazy { compress(params.generator) }
 
     fun generate(random: SecureRandom = SecureRandom()): KeyPair =
         KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1"), random) }.generateKeyPair()

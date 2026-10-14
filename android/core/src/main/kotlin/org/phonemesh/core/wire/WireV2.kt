@@ -5,9 +5,11 @@ import org.phonemesh.core.crypto.P256
 
 /**
  * Wire v2 packets on port 301 (accounts spec, "Message format"):
- * `byte 0 | recipient code (8) | [ratchet key (33) | previous chain length (2)] | AES-GCM body with its 16-byte tag`.
- * Byte 0 = version (4 bits) | key type (2 bits) | ratchet key included (1 bit) | spare 0. The header is the GCM
- * associated data. A packet is at most [MAX_PACKET] bytes: what a phone can hand its radio in one Bluetooth write.
+ * `byte 0 | recipient code (8) | [masked ratchet key and previous chain length (35)] | AES-GCM body with its tag`.
+ * Byte 0 = version (4 bits) | key type (2 bits) | ratchet key included (1 bit) | hello (1 bit). The header, as sent,
+ * is the GCM associated data. The 35 key bytes are masked with a key only the two phones hold, so an outsider cannot
+ * link a turn's packets by them (review F7). A packet is at most [MAX_PACKET] bytes: what a phone can hand its radio
+ * in one Bluetooth write. Hellos (hello bit set) have their own layout, see Start.
  */
 object WireV2 {
     const val PORT = 301
@@ -19,25 +21,24 @@ object WireV2 {
     const val PLAIN_HEADER = 1 + CODE
     const val KEYED_HEADER = PLAIN_HEADER + RATCHET
     private const val FLAG_KEY = 0x02
+    private const val FLAG_HELLO = 0x01
 
-    class Header(code: ByteArray, ratchetKey: ByteArray?, val previousLength: Int) {
+    /** Byte 0 of a hello. */
+    val HELLO_BYTE: Byte = ((VERSION shl 4) or (KEY_P256 shl 2) or FLAG_HELLO).toByte()
+
+    class Header(code: ByteArray, masked: ByteArray?) {
         val code: ByteArray = code.copyOf()
-        val ratchetKey: ByteArray? = ratchetKey?.copyOf()
+        /** The masked ratchet key and previous chain length, or null. */
+        val masked: ByteArray? = masked?.copyOf()
 
         init {
             require(code.size == CODE) { "a code is $CODE bytes" }
-            require(ratchetKey == null || ratchetKey.size == P256.POINT) { "a ratchet key is ${P256.POINT} bytes" }
-            require(previousLength in 0..0xffff) { "previous chain length is 2 bytes" }
-            require(ratchetKey != null || previousLength == 0) { "a previous length only rides with a ratchet key" }
+            require(masked == null || masked.size == RATCHET) { "the key field is $RATCHET bytes" }
         }
 
-        val size: Int get() = if (ratchetKey == null) PLAIN_HEADER else KEYED_HEADER
-
         fun encode(): ByteArray {
-            val first = ((VERSION shl 4) or (KEY_P256 shl 2) or (if (ratchetKey != null) FLAG_KEY else 0)).toByte()
-            val base = byteArrayOf(first) + code
-            return if (ratchetKey == null) base
-            else base + ratchetKey + byteArrayOf((previousLength ushr 8).toByte(), previousLength.toByte())
+            val first = ((VERSION shl 4) or (KEY_P256 shl 2) or (if (masked != null) FLAG_KEY else 0)).toByte()
+            return byteArrayOf(first) + code + (masked ?: ByteArray(0))
         }
     }
 
@@ -47,23 +48,15 @@ object WireV2 {
     /** The largest body (kind byte included) that fits a packet, with or without the ratchet key. */
     fun maxBody(withKey: Boolean): Int = MAX_PACKET - (if (withKey) KEYED_HEADER else PLAIN_HEADER) - Aead.TAG
 
-    /**
-     * A packet from the radio; null unless byte 0 is version 1, P-256, spare bit clear, and the sizes fit. The ratchet
-     * key is not checked for being on the curve here: the ratchet does that before using it.
-     */
+    /** A message packet from the radio; null unless byte 0 is version 1, P-256, not a hello, and the sizes fit. */
     fun parse(packet: ByteArray): Parsed? {
         if (packet.size > MAX_PACKET || packet.size < PLAIN_HEADER + Aead.TAG + 1) return null
         val first = packet[0].toInt() and 0xff
-        if (first ushr 4 != VERSION || (first ushr 2) and 0x03 != KEY_P256 || first and 0x01 != 0) return null
+        if (first ushr 4 != VERSION || (first ushr 2) and 0x03 != KEY_P256 || first and FLAG_HELLO != 0) return null
         val keyed = first and FLAG_KEY != 0
         val headerSize = if (keyed) KEYED_HEADER else PLAIN_HEADER
         if (packet.size < headerSize + Aead.TAG + 1) return null
-        val code = packet.copyOfRange(1, 1 + CODE)
-        val header = if (!keyed) Header(code, null, 0) else Header(
-            code,
-            packet.copyOfRange(PLAIN_HEADER, PLAIN_HEADER + P256.POINT),
-            ((packet[KEYED_HEADER - 2].toInt() and 0xff) shl 8) or (packet[KEYED_HEADER - 1].toInt() and 0xff),
-        )
+        val header = Header(packet.copyOfRange(1, 1 + CODE), if (keyed) packet.copyOfRange(PLAIN_HEADER, KEYED_HEADER) else null)
         return Parsed(header, packet.copyOfRange(0, headerSize), packet.copyOfRange(headerSize, packet.size))
     }
 }

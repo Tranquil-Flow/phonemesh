@@ -184,6 +184,8 @@ class PictureViewActivity : ScreenActivity() {
                 // An AI view made before for this picture opens at once; a new one is kept for next time.
                 PictureLooks.cached(context, messageId, next) ?: PictureLooks.make(context, next, from, request, started = {
                     runOnUiThread { if (mine == job && !isDestroyed) showProgress(0) }
+                }, preparing = { percent ->
+                    runOnUiThread { if (mine == job && !isDestroyed) showPreparing(percent) }
                 }) { percent ->
                     runOnUiThread { if (mine == job && !isDestroyed) showProgress(percent) }
                 }.also { PictureLooks.keep(context, messageId, next, it) }
@@ -198,6 +200,14 @@ class PictureViewActivity : ScreenActivity() {
                 if (done != null) display(done) else info.text = getString(R.string.look_failed)
             }
         }.start()
+    }
+
+    /** The first use of a model on this phone tries each engine once; it can take a while, so it says so. */
+    private fun showPreparing(percent: Int) {
+        progress.visibility = View.VISIBLE
+        progress.isIndeterminate = false
+        progress.progress = percent
+        info.text = getString(R.string.look_preparing, percent)
     }
 
     private fun showWaiting() {

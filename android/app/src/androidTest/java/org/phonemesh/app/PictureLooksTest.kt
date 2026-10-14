@@ -26,12 +26,21 @@ class PictureLooksTest {
     }
 
     /** The tiny test model under [name], in the app's private model folder. */
-    private fun place(name: String): File {
+    private fun place(name: String, asset: String = "tiny-test.onnx"): File {
         val file = File(PictureLooks.folders(context).last(), name)
         file.parentFile!!.mkdirs()
-        testContext.assets.open("tiny-test.onnx").use { input -> file.outputStream().use { input.copyTo(it) } }
+        testContext.assets.open(asset).use { input -> file.outputStream().use { input.copyTo(it) } }
         placed += file
         return file
+    }
+
+    /** The tiny model and its ncnn copy, as [model]. */
+    private fun placeWithNcnn(model: String): File {
+        val onnx = place(model)
+        val base = model.removeSuffix(".onnx")
+        place("$base.ncnn.param", "tiny-test.ncnn.param")
+        place("$base.ncnn.bin", "tiny-test.ncnn.bin")
+        return onnx
     }
 
     private fun photo(w: Int, h: Int) = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
@@ -103,17 +112,38 @@ class PictureLooksTest {
         assertTrue(next.millis >= 0)
     }
 
-    @Test fun theEngineTrialPicksAWorkingEngineAndRemembersIt() {
+    @Test fun withoutAnNcnnCopyThereIsNoTrialAndNoSettingUp() {
         val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         val onnx = place(PictureLook.AI_QUICK.model!!)
-        assertNull("no ncnn copy placed: the graphics chip is not tried", PictureLooks.gpuFiles(onnx))
-        val made = PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30))
+        assertNull(PictureLooks.gpuFiles(onnx))
+        assertFalse(PictureLooks.needsTrial(context, PictureLook.AI_QUICK))
+        val steps = mutableListOf<Int>()
+        assertEquals(160, PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30), preparing = { steps += it }).bitmap.width)
+        assertEquals("nothing to choose between", emptyList<Int>(), steps)
+        assertTrue(prefs.all.isEmpty())
+    }
+
+    @Test fun theOneTimeTrialSaysHowFarItIsThenNeverRunsAgain() {
+        val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val onnx = placeWithNcnn(PictureLook.AI_QUICK.model!!)
+        assertNotNull(PictureLooks.gpuFiles(onnx))
+        assertTrue(PictureLooks.needsTrial(context, PictureLook.AI_QUICK))
+        val steps = mutableListOf<Int>()
+        var startedAfterTrial = false
+        val made = PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30),
+            started = { startedAfterTrial = steps.lastOrNull() == 100 }, preparing = { steps += it })
         assertEquals(160, made.bitmap.width)
-        val key = prefs.all.keys.single { it.startsWith("engine3:${PictureLook.AI_QUICK.model}") }
-        assertEquals("only the processor could run it", PictureLooks.ENGINE_CPU, prefs.getInt(key, -1))
+        assertEquals("one step per engine, from 0 to 100", listOf(0, 25, 50, 75, 100), steps)
+        assertTrue("the view's own clock starts after the trial", startedAfterTrial)
+        val kept = prefs.all.entries.single { it.key.startsWith("engine3:${PictureLook.AI_QUICK.model}") }.value as Int
+        assertTrue(kept in setOf(PictureLooks.ENGINE_CPU, PictureLooks.ENGINE_GPU, PictureLooks.ENGINE_GPU32, PictureLooks.ENGINE_NCNN_CPU))
+        assertFalse(PictureLooks.needsTrial(context, PictureLook.AI_QUICK))
         PictureLooks.release()
-        assertEquals("the remembered engine is used again", 160, PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30)).bitmap.width)
+        steps.clear()
+        assertEquals(160, PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30), preparing = { steps += it }).bitmap.width)
+        assertEquals("the remembered engine is used without a new trial", emptyList<Int>(), steps)
     }
 
     @Test fun theGraphicsChipBridgeLoadsAndSaysWhetherItHasADevice() {

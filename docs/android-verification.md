@@ -481,3 +481,8 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   and 32-bit. It keeps the fastest whose picture matches ONNX Runtime's (mean difference ≤ 0.004, largest ≤ 0.05), and
   logs each result under `PhonemeshPicture`. The trial is not counted in the time shown.
 - `PictureLooksTest`, `PictureGpuModelsCheck` (no models: nothing to compare) and the viewer test pass (receipt `gpu-b`).
+- **First-use trial (2026-10-14):** the trial now runs on a 48 px piece. A way whose warm-up picture is already wrong
+  is not timed. Without an ncnn copy there is no trial. While it runs, the viewer shows "Setting up for this phone
+  (once): N %" with a bar, one step per engine. `PictureLooksTest` covers the steps (0, 25, 50, 75, 100), no second
+  trial, and no trial without an ncnn copy, using a tiny ncnn test model in `androidTest/assets` (receipt `prep-a`;
+  10 tests with the viewer test).

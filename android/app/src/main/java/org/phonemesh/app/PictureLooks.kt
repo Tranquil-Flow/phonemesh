@@ -90,7 +90,8 @@ object PictureLooks {
      * clock starts. [progress] gets 0-100.
      */
     fun make(
-        context: Context, look: PictureLook, source: Bitmap, job: Job = Job(), started: () -> Unit = {}, progress: (Int) -> Unit = {},
+        context: Context, look: PictureLook, source: Bitmap, job: Job = Job(), started: () -> Unit = {},
+        preparing: (Int) -> Unit = {}, progress: (Int) -> Unit = {},
     ): Made {
         val w = source.width * SCALE
         val h = source.height * SCALE
@@ -98,7 +99,7 @@ object PictureLooks {
             if (job.cancelled) throw Cancelled()
             // Opening the model (and, the first time on this phone, the engine trial) is not counted in the time.
             check(NativeUpscale.loaded) { "the AI engine is not in this build" }
-            session(context, checkNotNull(modelFile(context, look)) { "model ${look.model} is not on this phone" })
+            session(context, checkNotNull(modelFile(context, look)) { "model ${look.model} is not on this phone" }, preparing)
             if (job.cancelled) throw Cancelled()
             started()
             val start = SystemClock.elapsedRealtime()
@@ -157,10 +158,10 @@ object PictureLooks {
     private var openHandle = 0L
     private var openEngine = ENGINE_CPU
 
-    private fun session(context: Context, file: File): Long {
+    private fun session(context: Context, file: File, preparing: (Int) -> Unit = {}): Long {
         if (openPath == file.path && openHandle != 0L) return openHandle
         closeOpen()
-        val (handle, engine) = fastest(context, file)
+        val (handle, engine) = fastest(context, file, preparing)
         openPath = file.path
         openHandle = handle
         openEngine = engine
@@ -200,32 +201,55 @@ object PictureLooks {
      * picture matches ONNX Runtime's (a faulty graphics driver, or 16-bit arithmetic, can give a wrong one); the
      * fastest of those is kept for that model on this phone. Changing the model files starts a new trial.
      */
-    private fun fastest(context: Context, file: File): Pair<Long, Int> {
+    /**
+     * Whether [look] still needs its one-time engine trial on this phone (so the screen can say it is setting up).
+     * Without an ncnn copy there is nothing to choose between, so no trial.
+     */
+    fun needsTrial(context: Context, look: PictureLook): Boolean {
+        val file = modelFile(context, look) ?: return false
+        if (gpuFiles(file) == null) return false
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(trialKey(file), -1) < 0
+    }
+
+    private fun trialKey(file: File) = "engine3:${file.name}:${file.length()}:${gpuFiles(file)?.second?.length() ?: 0}"
+
+    private fun fastest(context: Context, file: File, preparing: (Int) -> Unit): Pair<Long, Int> {
+        // Only ONNX Runtime can run it: nothing to try.
+        if (gpuFiles(file) == null) {
+            val handle = open(ENGINE_CPU, file)
+            check(handle != 0L) { NativeUpscale.lastError() }
+            return handle to ENGINE_CPU
+        }
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val key = "engine3:${file.name}:${file.length()}:${gpuFiles(file)?.second?.length() ?: 0}"
+        val key = trialKey(file)
         val known = prefs.getInt(key, -1)
         if (known >= 0) {
             val handle = open(known, file)
             if (handle != 0L) return handle to known
         }
+        val steps = 1 + NCNN_ENGINES.size
+        preparing(0)
         val cpu = open(ENGINE_CPU, file)
         check(cpu != 0L) { NativeUpscale.lastError() }
-        val (cpuMillis, reference) = trial(ENGINE_CPU, cpu)
+        val (cpuMillis, reference) = trial(ENGINE_CPU, cpu, null)
         Log.i(TAG, "engine CPU on ${file.name}: $cpuMillis ms for a trial piece")
+        preparing(100 / steps)
         var best = cpu to ENGINE_CPU
         var bestMillis = cpuMillis
-        if (gpuFiles(file) == null) Log.i(TAG, "no ncnn copy of ${file.name}: only the processor is tried")
-        else for (engine in NCNN_ENGINES) {
+        for ((index, engine) in NCNN_ENGINES.withIndex()) {
             val handle = open(engine, file)
             if (handle == 0L) {
                 Log.i(TAG, "engine ${engineName(engine)} not available for ${file.name}: ${NativeGpu.lastError()}")
+                preparing((index + 2) * 100 / steps)
                 continue
             }
-            val (millis, picture) = trial(engine, handle)
+            val (millis, picture) = trial(engine, handle, reference)
+            preparing((index + 2) * 100 / steps)
             val (mean, worst) = difference(reference, picture)
             val good = mean <= MEAN_TOLERANCE && worst <= WORST_TOLERANCE
             val device = if (engine == ENGINE_NCNN_CPU) "" else " (${NativeGpu.device()})"
-            Log.i(TAG, "engine ${engineName(engine)}$device on ${file.name}: $millis ms for a trial piece, " +
+            val time = if (millis == Long.MAX_VALUE) "not timed" else "$millis ms"
+            Log.i(TAG, "engine ${engineName(engine)}$device on ${file.name}: $time for a trial piece, " +
                 "difference mean $mean, worst $worst${if (good) "" else ": wrong picture, not used"}")
             if (good && millis < bestMillis) {
                 close(best.second, best.first)
@@ -255,10 +279,10 @@ object PictureLooks {
     }
 
     /**
-     * One warm-up run, then a timed one, on a 64 x 64 piece that looks like part of a photo (smooth shading, a few
+     * One warm-up run, then a timed one, on a [TRIAL]-pixel square that looks like part of a photo (smooth shading, a few
      * edges); the time (Long.MAX_VALUE when it fails) and the picture.
      */
-    private fun trial(engine: Int, handle: Long): Pair<Long, FloatArray?> {
+    private fun trial(engine: Int, handle: Long, reference: FloatArray?): Pair<Long, FloatArray?> {
         val n = TRIAL * TRIAL
         val input = FloatArray(3 * n)
         for (y in 0 until TRIAL) for (x in 0 until TRIAL) {
@@ -268,7 +292,10 @@ object PictureLooks {
             input[n + i] = if (square) 0.1f else 0.3f + 0.5f * y / TRIAL
             input[2 * n + i] = 0.5f + 0.35f * kotlin.math.sin(x * 0.21f) * kotlin.math.cos(y * 0.17f)
         }
-        if (run(engine, handle, input, TRIAL, TRIAL) == null) return Long.MAX_VALUE to null
+        val first = run(engine, handle, input, TRIAL, TRIAL) ?: return Long.MAX_VALUE to null
+        // A way whose first picture is already wrong is not timed: one run is enough to rule it out.
+        val (mean, worst) = difference(reference, first)
+        if (reference != null && (mean > MEAN_TOLERANCE || worst > WORST_TOLERANCE)) return Long.MAX_VALUE to first
         val start = SystemClock.elapsedRealtime()
         val picture = run(engine, handle, input, TRIAL, TRIAL) ?: return Long.MAX_VALUE to null
         return SystemClock.elapsedRealtime() - start to picture
@@ -320,7 +347,8 @@ object PictureLooks {
     }
 
     private const val PREFS = "picture_looks"
-    private const val TRIAL = 64
+    /** The trial piece's side: small, so the one-time trial stays short (a large model runs it about 8 times). */
+    private const val TRIAL = 48
     private const val SMALL_MODEL_TILE = 128
     private const val CACHE_BYTES = 50L shl 20
     private const val CACHE_QUALITY = 95

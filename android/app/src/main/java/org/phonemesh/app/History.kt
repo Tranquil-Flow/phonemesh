@@ -281,6 +281,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         arrayOf(chatId.toString()),
     ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
 
+    /** Every picture message of a chat, before the chat is deleted. */
+    fun pictureMessageIds(chatId: Long): List<Long> = readableDatabase.rawQuery(
+        "SELECT p.message_id FROM pictures p JOIN messages m ON m.id = p.message_id WHERE m.chat_id = ?",
+        arrayOf(chatId.toString()),
+    ).use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }
+
     fun setPictureProgress(messageId: Long, have: Int) =
         writableDatabase.update("pictures", ContentValues().apply { put("have", have) }, "message_id = ?", arrayOf(messageId.toString()))
 

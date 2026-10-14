@@ -29,6 +29,7 @@ class ShareProvider : ContentProvider() {
     override fun getType(uri: Uri): String? = when {
         uri.lastPathSegment?.endsWith(".apk") == true -> "application/vnd.android.package-archive"
         uri.lastPathSegment?.endsWith(".zip") == true -> "application/zip"
+        uri.lastPathSegment?.endsWith(".png") == true -> "image/png"
         else -> null
     }
 

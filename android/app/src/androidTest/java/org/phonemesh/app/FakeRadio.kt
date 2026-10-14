@@ -81,7 +81,8 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
     /** A text with its radio id and Meshtastic's reply / reaction marks, as the real radio delivers it. */
     fun receive(sender: String, text: String, direct: Boolean, mark: org.phonemesh.ble.TextMark, channel: Int = 0) =
         listener.onText(sender, text, channel, direct, mark)
-    fun receiveData(sender: String, port: Int, payload: ByteArray, channel: Int = 0) = listener.onData(sender, port, payload, channel)
+    fun receiveData(sender: String, port: Int, payload: ByteArray, channel: Int = 0, packetId: Long = 0) =
+        listener.onData(sender, port, payload, channel, packetId)
     fun deliver(packetId: Long, state: DeliveryState) = listener.onDelivery(packetId, state, "test")
     fun found(address: String, name: String, rssi: Int) = listener.onDevice(address, name, rssi)
     fun setPeers(peers: List<RadioPeer>) {

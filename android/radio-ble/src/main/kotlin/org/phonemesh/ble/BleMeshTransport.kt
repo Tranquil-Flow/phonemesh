@@ -745,7 +745,7 @@ class BleMeshTransport(
             is RadioEvent.Data -> {
                 val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
                 val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
-                if (local != null && event.to == local && event.sender != ownId) postData(event.sender, event.port, event.payload, event.channel)
+                if (local != null && event.to == local && event.sender != ownId) postData(event.sender, event.port, event.payload, event.channel, event.packetId)
             }
             is RadioEvent.QueueStatus -> {
                 val ok = event.res == 0
@@ -904,8 +904,8 @@ class BleMeshTransport(
         mainHandler.post { if (!closed.get()) listener.onText(sender, text, channel, direct, mark) }
     }
 
-    private fun postData(sender: String, port: Int, payload: ByteArray, channel: Int) {
-        mainHandler.post { if (!closed.get()) listener.onData(sender, port, payload, channel) }
+    private fun postData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {
+        mainHandler.post { if (!closed.get()) listener.onData(sender, port, payload, channel, packetId) }
     }
 
     private fun postDevice(address: String, name: String, rssi: Int) {

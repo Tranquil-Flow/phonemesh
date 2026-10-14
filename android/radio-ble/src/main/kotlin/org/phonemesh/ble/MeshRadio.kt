@@ -49,8 +49,11 @@ interface MeshRadio : AutoCloseable {
         /** [peers] changed: a name arrived or the session ended. Coalesced, at most every 500 ms. */
         fun onPeersChanged() {}
 
-        /** A private-port packet addressed to this radio (see [MeshtasticProtocol.PRIVATE_DATA_PORTS]); never a broadcast. */
-        fun onData(sender: String, port: Int, payload: ByteArray, channel: Int) {}
+        /**
+         * A private-port packet addressed to this radio (see [MeshtasticProtocol.PRIVATE_DATA_PORTS]); never a broadcast.
+         * [packetId] is its mesh packet id (0 when unknown).
+         */
+        fun onData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {}
     }
 
     fun scan()

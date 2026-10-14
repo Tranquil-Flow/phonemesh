@@ -349,6 +349,8 @@ class AppCore private constructor(
         if (becameReady) sendDue()
         if (becameReady) sendQueued()
         if (was && !connected) region.onLost()
+        // The radio went: what was on its way is its own message's business now; the next waits for a radio again.
+        if (was && !connected) { draining = null; main.removeCallbacks(drainStalled) }
         if (connected != was || attempting) changed(Change.RADIO)
     }
 
@@ -421,6 +423,7 @@ class AppCore private constructor(
     }
 
     override fun onDelivery(packetId: Long, state: DeliveryState, detail: String) {
+        onDrainReport(packetId, state)
         if (picturePackets.containsKey(packetId)) { onPicturePacket(packetId, state); return }
         val message = history.byPacket(packetId) ?: return
         val chat = history.chat(message.chatId) ?: return
@@ -718,30 +721,72 @@ class AppCore private constructor(
      * Stops at the first the radio refuses; the rest keeps waiting.
      */
     fun sendQueued() {
-        if (!mayTransmit()) return
-        var any = false
-        for (message in history.queued()) {
-            val chat = history.chat(message.chatId) ?: continue
-            any = true
-            if (message.kind == MessageKind.PICTURE) {
-                if (!resendPicture(message)) history.setStatus(message.id, DeliveryStatus.FAILED)
-                continue
-            }
-            history.setStatus(message.id, DeliveryStatus.WAITING)
-            if (!transmit(message.id, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)) break
-        }
-        for (queued in history.queuedReactions()) {
-            val chat = history.chat(queued.chatId) ?: continue
-            val packetId = try {
-                radio.send(queued.emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = queued.target, reaction = true)
-            } catch (e: RuntimeException) {
-                Log.w(TAG, "queued reaction still waiting", e)
+        if (!mayTransmit() || draining != null) return
+        // One at a time: the radio's Bluetooth queue holds three, and a fourth write is dropped without a word.
+        val message = history.queued().firstOrNull()
+        if (message != null) {
+            val chat = history.chat(message.chatId)
+            if (chat == null) {
+                history.setStatus(message.id, DeliveryStatus.FAILED)
+                main.post { sendQueued() }
                 return
             }
-            history.reactionSent(queued.id, packetId)
-            any = true
+            if (message.kind == MessageKind.PICTURE) {
+                if (resendPicture(message)) drainUntilTaken(Drain.Picture(message.id))
+                else { history.setStatus(message.id, DeliveryStatus.FAILED); main.post { sendQueued() } }
+            } else {
+                history.setStatus(message.id, DeliveryStatus.WAITING)
+                if (transmit(message.id, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)) {
+                    history.message(message.id)?.packetId?.let { drainUntilTaken(Drain.Packet(it)) }
+                }
+            }
+            changed(Change.MESSAGES)
+            return
         }
-        if (any) changed(Change.MESSAGES)
+        val queued = history.queuedReactions().firstOrNull() ?: return
+        val chat = history.chat(queued.chatId) ?: return
+        val packetId = try {
+            radio.send(queued.emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = queued.target, reaction = true)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "queued reaction still waiting", e)
+            return
+        }
+        history.reactionSent(queued.id, packetId)
+        drainUntilTaken(Drain.Packet(packetId))
+        changed(Change.MESSAGES)
+    }
+
+    /** What sendQueued handed the radio last: a text or reaction packet, or a picture's first packet. */
+    private sealed interface Drain {
+        data class Packet(val id: Long) : Drain
+        data class Picture(val messageId: Long) : Drain
+    }
+
+    /** The waiting item on its way; the next goes once the radio reports on it, or after [DRAIN_WAIT_MS] without a word. */
+    private var draining: Drain? = null
+    private val drainStalled = Runnable { drained() }
+
+    private fun drainUntilTaken(item: Drain) {
+        draining = item
+        main.removeCallbacks(drainStalled)
+        main.postDelayed(drainStalled, DRAIN_WAIT_MS)
+    }
+
+    private fun drained() {
+        if (draining == null) return
+        draining = null
+        main.removeCallbacks(drainStalled)
+        main.post { sendQueued() }
+    }
+
+    /** Any report but "being written" means the radio has dealt with it: the next waiting item may go. */
+    private fun onDrainReport(packetId: Long, state: DeliveryState) {
+        if (state == DeliveryState.SUBMITTING) return
+        when (val item = draining) {
+            is Drain.Packet -> if (item.id == packetId) drained()
+            is Drain.Picture -> if (picturePackets[packetId]?.first == item.messageId) drained()
+            null -> Unit
+        }
     }
 
     fun pinChat(chatId: Long, pinned: Boolean) {
@@ -755,8 +800,10 @@ class AppCore private constructor(
         if (playing?.chatId == chatId) stopPlayback()
         setDraft(chatId, null)
         val files = history.pictureFiles(chatId)
+        val pictureIds = history.pictureMessageIds(chatId)
         if (!history.deleteChat(chatId)) return false
         files.forEach { File(picturesDir, it).delete() }
+        pictureIds.forEach { forgetView(it) }
         changed(Change.MESSAGES)
         return true
     }
@@ -833,8 +880,14 @@ class AppCore private constructor(
                 val packetId = try {
                     radio.sendData(PictureWire.PORT, transfer.sender.packet(action.index), transfer.address, PRIMARY_CHANNEL)
                 } catch (e: RuntimeException) {
-                    Log.w(TAG, "picture packet not sent", e)
-                    act(transfer, transfer.sender.cancel())
+                    // This phone's radio could not take the piece: not a failure. The picture waits for a radio and
+                    // starts again with the same id, so the other phone keeps the pieces it already has.
+                    Log.w(TAG, "picture kept until a radio is ready", e)
+                    outgoing.remove(transfer.messageId)
+                    picturePackets.values.removeAll { it.first == transfer.messageId }
+                    history.setStatus(transfer.messageId, DeliveryStatus.QUEUED)
+                    if ((draining as? Drain.Picture)?.messageId == transfer.messageId) { draining = null; main.removeCallbacks(drainStalled) }
+                    changed(Change.DELIVERY)
                     return
                 }
                 picturePackets[packetId] = transfer.messageId to action.index
@@ -858,6 +911,8 @@ class AppCore private constructor(
         val (messageId, index) = picturePackets.remove(packetId) ?: return
         val transfer = outgoing[messageId] ?: return
         val action = transfer.sender.onOutcome(index, acknowledged)
+        // The first piece the other radio confirmed: its id is what replies and reactions to this picture name.
+        if (acknowledged && index == 0 && history.message(messageId)?.packetId == null) history.attachPacket(messageId, packetId)
         if (acknowledged) {
             history.setPictureProgress(messageId, transfer.sender.acknowledged)
             changed(Change.DELIVERY)
@@ -865,33 +920,46 @@ class AppCore private constructor(
         act(transfer, action)
     }
 
-    override fun onData(sender: String, port: Int, payload: ByteArray, channel: Int) {
+    override fun onData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {
         if (!BuildConfig.PICTURES || port != PictureWire.PORT || channel != PRIMARY_CHANNEL) return
         val packet = PictureWire.decode(payload) ?: return
+        // The first piece's radio id is what a reply or reaction to this picture names, on both phones.
+        if (packet is PictureWire.Head && packetId != 0L) pictureHeads[sender to packet.id] = packetId
         onPictureEvents(assembler.accept(sender, packet))
         main.removeCallbacks(pictureTick)
         if (assembler.pending > 0) main.postDelayed(pictureTick, PICTURE_TICK_MS)
     }
 
+    /** Radio ids of pictures' first pieces as they arrived, until the picture is whole, broken or gone. */
+    private val pictureHeads = HashMap<Pair<String, Int>, Long>()
+
+    private fun rememberHead(key: Pair<String, Int>, messageId: Long) {
+        pictureHeads[key]?.let { if (history.message(messageId)?.packetId == null) history.attachPacket(messageId, it) }
+    }
+
     private fun onPictureEvents(events: List<PictureAssembler.Event>) {
         for (event in events) {
             val key = event.sender to event.id
+            if (event is PictureAssembler.Event.Progress) incoming[key]?.let { rememberHead(key, it) }
             when (event) {
                 is PictureAssembler.Event.Started -> {
                     val chat = history.directChat(event.sender, knownName(event.sender))
                     val head = event.head
                     val row = PictureRow(0, head.id, head.codec.wire, head.width, head.height, head.sketch, null, event.have, head.parts, false)
                     incoming[key] = history.addIncomingPicture(chat.id, event.sender, row, System.currentTimeMillis(), countUnread = openChatId != chat.id).id
+                    rememberHead(key, incoming.getValue(key))
                     changed(Change.MESSAGES)
                 }
                 is PictureAssembler.Event.Progress -> incoming[key]?.let { history.setPictureProgress(it, event.have); changed(Change.DELIVERY) }
                 is PictureAssembler.Event.Done -> incoming.remove(key)?.let { id ->
+                    rememberHead(key, id)
+                    pictureHeads.remove(key)
                     val name = "in-$id.pic"
                     File(picturesDir, name).writeBytes(event.bytes)
                     history.setPictureFile(id, name, event.head.parts)
                     changed(Change.MESSAGES)
                 }
-                is PictureAssembler.Event.Broken, is PictureAssembler.Event.Expired -> incoming.remove(key)?.let {
+                is PictureAssembler.Event.Broken, is PictureAssembler.Event.Expired -> incoming.remove(key).also { pictureHeads.remove(key) }?.let {
                     history.setPictureLost(it)
                     changed(Change.MESSAGES)
                 }
@@ -900,6 +968,66 @@ class AppCore private constructor(
     }
 
     /** A picture message's pixels for the screen: the received or sent picture, else its sketch. */
+    /** A whole picture (its pixels are on this phone) can go to another private chat. */
+    fun canForwardPicture(messageId: Long): Boolean =
+        BuildConfig.PICTURES && history.picture(messageId)?.file?.let { File(picturesDir, it).isFile } == true
+
+    /** A whole picture as it would go out again: the same bytes and sketch, nothing re-encoded. */
+    fun preparedPicture(messageId: Long): PreparedPicture? {
+        val row = history.picture(messageId) ?: return null
+        val codec = PictureCodec.of(row.codec) ?: return null
+        val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes() ?: return null
+        val preview = PictureMaker.decode(row.codec, bytes, row.sketch) ?: return null
+        return PreparedPicture(codec, row.width, row.height, bytes, row.sketch, preview, -1)
+    }
+
+    /**
+     * The view of a picture chosen for the chat (see [useView]), kept at the bubble's own size as a JPEG: tens of KB on
+     * disk and about a megabyte in memory, however large the AI made it. The full size is made again when the picture
+     * is opened. "view-<id>.png" is the full-size copy an earlier test build kept; it is still read, and goes with
+     * [forgetView].
+     */
+    private fun viewFile(messageId: Long) = File(picturesDir, "view-$messageId.jpg")
+    private fun oldViewFile(messageId: Long) = File(picturesDir, "view-$messageId.png")
+    private fun viewLookFile(messageId: Long) = File(picturesDir, "view-$messageId.look")
+    private fun shownViewFile(messageId: Long) = viewFile(messageId).takeIf { it.isFile } ?: oldViewFile(messageId).takeIf { it.isFile }
+
+    /** Which view the chat shows for [messageId] (a [PictureLook] key), or null for the picture as it came. */
+    fun chosenLook(messageId: Long): String? =
+        viewLookFile(messageId).takeIf { it.isFile && shownViewFile(messageId) != null }?.readText()?.trim()?.ifEmpty { null }
+
+    /** A chat bubble is 60% of the screen wide (see ConversationActivity.pictureView). */
+    private fun bubbleWidth(): Int = (app.resources.displayMetrics.widthPixels * 0.6f).toInt().coerceAtLeast(1)
+
+    /** From now on the chat shows [bitmap] for this picture. Only on this phone; nothing is sent and the other phone keeps its own. */
+    fun useView(messageId: Long, bitmap: android.graphics.Bitmap, lookKey: String): Boolean = runCatching {
+        val width = minOf(bitmap.width, bubbleWidth())
+        val small = if (width == bitmap.width) bitmap
+        else android.graphics.Bitmap.createScaledBitmap(bitmap, width, (bitmap.height.toLong() * width / bitmap.width).toInt().coerceAtLeast(1), true)
+        val tmp = File(picturesDir, "view-$messageId.tmp")
+        tmp.outputStream().use { check(small.compress(android.graphics.Bitmap.CompressFormat.JPEG, VIEW_QUALITY, it)) }
+        oldViewFile(messageId).delete()
+        check(tmp.renameTo(viewFile(messageId)))
+        viewLookFile(messageId).writeText(lookKey)
+        changed(Change.MESSAGES)
+    }.onFailure { Log.w(TAG, "chosen view not kept", it) }.isSuccess
+
+    /** The chat shows the picture as it came again. */
+    fun useOriginal(messageId: Long) {
+        forgetView(messageId)
+        changed(Change.MESSAGES)
+    }
+
+    /** What the chat shows: the chosen view when there is one, otherwise the picture as it came. */
+    fun pictureShown(messageId: Long): android.graphics.Bitmap? =
+        shownViewFile(messageId)?.let { android.graphics.BitmapFactory.decodeFile(it.path) } ?: pictureBitmap(messageId)
+
+    private fun forgetView(messageId: Long) {
+        viewFile(messageId).delete()
+        oldViewFile(messageId).delete()
+        viewLookFile(messageId).delete()
+    }
+
     fun pictureBitmap(messageId: Long): android.graphics.Bitmap? {
         val row = history.picture(messageId) ?: return null
         val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes()
@@ -912,6 +1040,7 @@ class AppCore private constructor(
         outgoing.remove(messageId)?.sender?.cancel()
         picturePackets.values.removeAll { it.first == messageId }
         history.picture(messageId)?.file?.let { File(picturesDir, it).delete() }
+        forgetView(messageId)
         if (!history.deleteMessage(messageId)) return false
         changed(Change.MESSAGES)
         return true
@@ -1153,11 +1282,15 @@ class AppCore private constructor(
         const val MAX_REACTION_BYTES = 32
         /** A due message the radio could not take yet is tried again this often while the app lives. */
         const val PLAN_RETRY_MS = 60_000L
+        /** How long a waiting item may go without a word from the radio before the next one goes anyway. */
+        const val DRAIN_WAIT_MS = 15_000L
         /** The reactions offered: few, large, and readable without words. */
         val REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
         private const val MAX_FOUND = 50
         private const val IMPORT_PROGRESS_STEP = 5_000_000L
         private const val TAG = "AppCore"
+        /** JPEG quality of a view kept for the chat; at bubble size the loss does not show. */
+        private const val VIEW_QUALITY = 90
 
         @Volatile private var instance: AppCore? = null
 

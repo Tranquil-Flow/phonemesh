@@ -35,6 +35,7 @@
         <activity android:name=".HelpActivity" android:exported="false" />
         <activity android:name=".RegionActivity" android:exported="false" />
         <activity android:name=".PictureActivity" android:exported="false" />
+        <activity android:name=".PictureViewActivity" android:exported="false" />
         <activity android:name=".ConversationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <receiver android:name=".PlannedReceiver" android:exported="false" />
         <service android:name=".PlannedSendService" android:exported="false" android:foregroundServiceType="shortService" />

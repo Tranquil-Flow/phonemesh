@@ -316,10 +316,16 @@ class AppCoreTest {
         TestCore.restart()
         assertEquals("closing the app keeps it waiting", DeliveryStatus.QUEUED, core.history.message(failed.id)!!.status)
         main { radio.connected(true) }
-        assertEquals("both went, in the order they were written", 2, radio.sent.size)
+        assertEquals("one at a time: the radio's queue drops a fourth write", 1, radio.sent.size)
         assertTrue(radio.sent[0].text.endsWith("Tu es là ?"))
-        assertTrue(radio.sent[1].text.endsWith("Réponds-moi"))
+        assertEquals(DeliveryStatus.QUEUED, core.history.message(next.id)!!.status)
         val packet = radio.sent.first().packetId
+        main { radio.deliver(packet, DeliveryState.SUBMITTING) }
+        assertEquals("being written is not taken", 1, radio.sent.size)
+        main { radio.deliver(packet, DeliveryState.QUEUED) }
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertEquals("the next goes once the radio took the first, in the order written", 2, radio.sent.size)
+        assertTrue(radio.sent[1].text.endsWith("Réponds-moi"))
         assertEquals(DeliveryStatus.WAITING, core.history.message(failed.id)!!.status)
         assertEquals(packet, core.history.message(failed.id)!!.packetId)
         // Lost after the radio took it: unconfirmed, resend gets a new packet, the old one's late report changes nothing.

@@ -41,17 +41,34 @@ class PictureActivity : ScreenActivity() {
     private lateinit var sendButton: Button
     private lateinit var choices: View
 
-    private enum class Look(val label: Int) { COLOUR(R.string.picture_colour), GREY(R.string.picture_grey), SKETCH(R.string.picture_sketch) }
+    private enum class Look(val label: Int) { COLOUR(R.string.picture_colour), GREY(R.string.picture_grey) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!core.canSendPictures(chatId)) { finish(); return }
         @Suppress("DEPRECATION")
         uri = savedInstanceState?.getParcelable(STATE_URI) ?: intent.getParcelableExtra(EXTRA_PHOTO)
-        savedInstanceState?.getString(STATE_SIZE)?.let { size = PictureSize.valueOf(it) }
-        savedInstanceState?.getString(STATE_LOOK)?.let { look = Look.valueOf(it) }
+        // A choice saved by an older version may no longer exist: the default stays.
+        savedInstanceState?.getString(STATE_SIZE)?.let { saved -> PictureSize.entries.firstOrNull { it.name == saved }?.let { size = it } }
+        savedInstanceState?.getString(STATE_LOOK)?.let { saved -> Look.entries.firstOrNull { it.name == saved }?.let { look = it } }
         build()
-        if (uri != null) load() else say(R.string.picture_start, bad = false)
+        when {
+            forwardId > 0 -> forward()
+            uri != null -> load()
+            else -> say(R.string.picture_start, bad = false)
+        }
+    }
+
+    /** A picture from another chat goes as it is: the same bytes, so no choice of size or look, only Send. */
+    private val forwardId by lazy { intent.getLongExtra(EXTRA_FORWARD, -1L) }
+
+    private fun forward() {
+        val picture = core.preparedPicture(forwardId) ?: run { say(R.string.picture_unreadable); return }
+        prepared = picture
+        choices.visibility = View.GONE
+        showPrepared()
+        sizes.visibility = View.GONE
+        looks.visibility = View.GONE
     }
 
     /** The camera app writes a new photo into this app's own file (CaptureProvider): nothing goes to the gallery. */
@@ -113,19 +130,21 @@ class PictureActivity : ScreenActivity() {
             visibility = View.GONE
         }
         column.addView(heavy)
+        // Side by side, so the sizes, looks and Send still fit on the screen once a photo is chosen.
         choices = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+            orientation = LinearLayout.HORIZONTAL
             setPadding(0, pad() / 2, 0, 0)
+            val half = { LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = pad() / 4 } }
             addView(Ui.button(this@PictureActivity, palette, getString(R.string.picture_take), R.drawable.ic_camera).apply {
                 tag = "picture_take"
+                hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
                 setOnClickListener { takePhoto() }
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = pad() / 2
-            })
+            }, half())
             addView(Ui.button(this@PictureActivity, palette, getString(R.string.picture_choose), R.drawable.ic_picture).apply {
                 tag = "picture_choose"
+                hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
                 setOnClickListener { choosePhoto() }
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            }, half())
         }
         column.addView(choices)
         // Measurements for the test bench (debug builds), not a sentence: content, like a message's words.
@@ -134,7 +153,7 @@ class PictureActivity : ScreenActivity() {
             visibility = if (BuildConfig.DEBUG) View.VISIBLE else View.GONE
         }
         column.addView(details)
-        sizes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, pad() / 2, 0, 0) }
+        sizes = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, pad() / 2, 0, 0) }
         looks = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, pad() / 2, 0, 0) }
         column.addView(sizes)
         column.addView(looks)
@@ -161,10 +180,14 @@ class PictureActivity : ScreenActivity() {
 
     private fun renderChoices() {
         sizes.removeAllViews()
-        listOf(PictureSize.SMALL to R.string.picture_small, PictureSize.MEDIUM to R.string.picture_medium, PictureSize.LARGE to R.string.picture_large)
-            .forEach { (choice, label) ->
-                sizes.addView(choiceButton(getString(label), choice == size, "size:${choice.name}") { size = choice; renderChoices(); prepare() })
+        // Four sizes in two rows of two, so "Très grande" keeps its words whole.
+        PictureSize.entries.chunked(2).forEach { pair ->
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, pad() / 4) }
+            pair.forEach { choice ->
+                row.addView(choiceButton(getString(choice.label), choice == size, "size:${choice.name}") { size = choice; renderChoices(); prepare() })
             }
+            sizes.addView(row, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
         looks.removeAllViews()
         Look.entries.forEach { choice ->
             looks.addView(choiceButton(getString(choice.label), choice == look, "look:${choice.name}") { look = choice; renderChoices(); prepare() })
@@ -239,7 +262,7 @@ class PictureActivity : ScreenActivity() {
         Ui.enable(sendButton, false)
         say(R.string.picture_working, bad = false)
         Thread {
-            val result = runCatching { PictureMaker.prepare(from, chosenSize, chosenLook == Look.GREY, chosenLook == Look.SKETCH) }
+            val result = runCatching { PictureMaker.prepare(from, chosenSize, chosenLook == Look.GREY) }
                 .onFailure { Log.w(TAG, "picture not made", it) }.getOrNull()
             runOnUiThread {
                 if (isFinishing || isDestroyed || mine != job) return@runOnUiThread
@@ -299,5 +322,10 @@ class PictureActivity : ScreenActivity() {
         /** [photo]: one already chosen (from this app only; the screen is not exported). */
         fun intent(context: Context, chatId: Long, photo: Uri? = null): Intent =
             Intent(context, PictureActivity::class.java).putExtra(EXTRA_CHAT_ID, chatId).apply { if (photo != null) putExtra(EXTRA_PHOTO, photo) }
+
+        /** The picture of message [messageId], ready to send in [chatId]; nothing goes before Send. */
+        fun forwarding(context: Context, chatId: Long, messageId: Long): Intent = intent(context, chatId).putExtra(EXTRA_FORWARD, messageId)
+
+        const val EXTRA_FORWARD = "forward"
     }
 }

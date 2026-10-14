@@ -317,9 +317,9 @@ object ScreenStates {
         TestCore.install()
         seedChats()
         val chat = TestCore.onMain { TestCore.core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
-        val whole = PictureMaker.prepare(scenePhoto(), PictureSize.MEDIUM, grey = false, sketchOnly = false)
-        val coming = PictureMaker.prepare(scenePhoto(Color.rgb(240, 160, 90), Color.rgb(90, 140, 60)), PictureSize.MEDIUM, grey = false, sketchOnly = false)
-        val mine = PictureMaker.prepare(scenePhoto(Color.rgb(150, 150, 200)), PictureSize.MEDIUM, grey = false, sketchOnly = false)
+        val whole = PictureMaker.prepare(scenePhoto(), PictureSize.MEDIUM, grey = false)
+        val coming = PictureMaker.prepare(scenePhoto(Color.rgb(240, 160, 90), Color.rgb(90, 140, 60)), PictureSize.MEDIUM, grey = false)
+        val mine = PictureMaker.prepare(scenePhoto(Color.rgb(150, 150, 200)), PictureSize.MEDIUM, grey = false)
         TestCore.onMain {
             val radio = TestCore.radio
             val core = TestCore.core

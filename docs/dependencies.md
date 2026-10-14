@@ -53,6 +53,24 @@ No XTTS or non-commercial-only model dependency is included in v1.
 | Code | Where | Licence | Notes |
 |---|---|---|---|
 | ThumbHash (Evan Wallace, <https://github.com/evanw/thumbhash>) | `android/core/src/main/kotlin/org/phonemesh/core/ThumbHash.kt` | MIT | Line-for-line Kotlin port; the MIT notice is kept in the file. The reference Java is test-only (`android/core/src/test/java`) and checks bytes and pixels against the port. |
+| ONNX Runtime C API headers 1.28.2 (Microsoft) | `android/app/src/main/cpp/include/` | MIT | Headers only, unchanged. The picture upscaling bridge (`upscale_jni.c`, about 7 KB per ABI) uses the `libonnxruntime.so` that sherpa-onnx already ships, found at run time; nothing new is linked. |
 
 Pictures otherwise use only what Android already has (BitmapFactory, ExifInterface, the platform WebP encoder), so the app
 gains no runtime library.
+
+## Picture upscaling models (not in the app)
+
+Test phones get these files copied into the app's own folder (`Android/data/org.phonemesh.app/files/upscalers/`); the
+app works without them and shows the AI views as unavailable. Exported to ONNX by `.local/upscalers/export.py`
+(the export matches PyTorch to within 3e-6).
+
+| Model | File | Size | Licence | Source |
+|---|---|---|---|---|
+| Real-ESRGAN general x4v3 | `realesr-x4v3-strong.onnx` | 4.9 MB | BSD-3-Clause | <https://github.com/xinntao/Real-ESRGAN> release v0.2.5.0 |
+| Real-ESRGAN general x4v3, gentle (0.5 blend with wdn-x4v3, as Real-ESRGAN's own `-dn 0.5`) | `realesr-x4v3-gentle.onnx` | 4.9 MB | BSD-3-Clause | same release |
+| Real-ESRGAN x4plus | `realesrgan-x4plus.onnx` | 67 MB | BSD-3-Clause | release v0.1.0 |
+| BSRGAN | `bsrgan-x4.onnx` | 67 MB | MIT (KAIR) | <https://github.com/cszn/KAIR> release v1.0 |
+
+These are generative models: they can invent detail, and the app labels their views so. They were trained on DIV2K and
+similar sets, whose "academic research only" terms may or may not reach model weights; record this before shipping
+any of them. Non-commercial models (4x-UltraSharp, Remacri, CodeFormer) are left out: they conflict with AGPL-3.0.

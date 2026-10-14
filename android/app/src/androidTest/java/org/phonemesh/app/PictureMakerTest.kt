@@ -29,7 +29,7 @@ class PictureMakerTest {
             jpeg(file.outputStream(), 2400, 1600)
             val bitmap = checkNotNull(PictureMaker.load(context.contentResolver, Uri.fromFile(file))) { "a plain JPEG must be readable" }
             assertTrue("read at 512 px or more, under twice that", max(bitmap.width, bitmap.height) in 512 until 1024)
-            val picture = PictureMaker.prepare(bitmap, PictureSize.MEDIUM, grey = false, sketchOnly = false)
+            val picture = PictureMaker.prepare(bitmap, PictureSize.MEDIUM, grey = false)
             assertTrue("${picture.bytes.size} B q${picture.quality} ${picture.width}x${picture.height} webp0=${PictureMaker.webp(bitmap, 0).size} webp50=${PictureMaker.webp(bitmap, 50).size}", picture.bytes.size <= PictureSize.MEDIUM.budget)
         } finally {
             file.delete()

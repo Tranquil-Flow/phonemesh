@@ -593,7 +593,7 @@ class ConversationActivity : ScreenActivity() {
         later.visibility = if (core.draft(chatId) != null && !editing && !regionAsks && core.draftFit(chatId) == DraftFit.FITS) View.VISIBLE else View.GONE
         val answering = core.replyTarget(chatId)
         replyBar.visibility = if (answering != null) View.VISIBLE else View.GONE
-        replyQuote.text = answering?.text.orEmpty()
+        replyQuote.text = answering?.let { if (it.kind == MessageKind.PICTURE) getString(R.string.picture_label) else it.text }.orEmpty()
         val recordingHere = core.recordState == AppCore.RecordState.RECORDING && core.recordingChatId == chatId
         // A finger on the microphone does not survive a rotation: the recording carries on, locked.
         if (recordingHere && !pressing) core.recordLocked = true
@@ -776,7 +776,12 @@ class ConversationActivity : ScreenActivity() {
         ).joinToString(", ")
         if (message.replyTo != null) {
             val quoted = core.quoted(message)
-            box.addView(Ui.content(Ui.text(this, quoted?.text ?: getString(R.string.quote_missing), palette.muted).apply {
+            val quotedWords = when {
+                quoted == null -> getString(R.string.quote_missing)
+                quoted.kind == MessageKind.PICTURE -> getString(R.string.picture_label)
+                else -> quoted.text
+            }
+            box.addView(Ui.content(Ui.text(this, quotedWords, palette.muted).apply {
                 tag = "quote:${message.id}"
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
@@ -788,9 +793,20 @@ class ConversationActivity : ScreenActivity() {
         if (picture != null) {
             box.addView(pictureView(message, picture))
             pictureCaption(message, picture).takeIf { it.isNotEmpty() }?.let { caption ->
-                box.addView(Ui.text(this, caption, if (picture.lost) palette.bad else palette.muted, bold = picture.lost).apply {
+                val bad = picture.lost || (message.direction == Direction.OUT && message.status == DeliveryStatus.FAILED)
+                box.addView(Ui.text(this, caption, if (bad) palette.bad else palette.muted, bold = bad).apply {
                     tag = "picture_caption:${message.id}"
                 })
+            }
+            // One picture on its way: a bar fills as its pieces go or arrive (the pieces themselves are never counted aloud).
+            pictureShare(message, picture)?.let { percent ->
+                box.addView(android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    tag = "picture_progress:${message.id}"
+                    max = 100
+                    progress = percent
+                    progressTintList = android.content.res.ColorStateList.valueOf(palette.good)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 8)).apply { topMargin = pad() / 4 })
             }
         } else {
             box.addView(Ui.content(Ui.text(this, message.text, palette.text).apply {
@@ -877,12 +893,25 @@ class ConversationActivity : ScreenActivity() {
      * "Picture arriving: 2 of 4", "Sending picture: 1 of 3", "The picture did not arrive", or
      * nothing once it is whole.
      */
-    private fun pictureCaption(message: Message, picture: PictureRow): String = when {
-        picture.lost -> getString(R.string.picture_lost)
-        message.direction == Direction.IN && picture.file == null -> getString(R.string.picture_arriving, picture.have, picture.total)
-        message.direction == Direction.OUT && message.status == DeliveryStatus.WAITING ->
-            getString(R.string.picture_sending, picture.have, picture.total)
-        else -> ""
+    private fun pictureCaption(message: Message, picture: PictureRow): String {
+        val percent = pictureShare(message, picture)
+        return when {
+            picture.lost -> getString(R.string.picture_lost)
+            // Only the other radio's silence ends a picture as failed (our own radio away makes it wait instead).
+            message.direction == Direction.OUT && message.status == DeliveryStatus.FAILED -> getString(R.string.picture_no_answer)
+            percent != null && message.direction == Direction.IN -> getString(R.string.picture_arriving, percent)
+            percent != null -> getString(R.string.picture_sending, percent)
+            else -> ""
+        }
+    }
+
+    /** How much of one picture on its way has gone or arrived, 0-100; null when it is not on its way. */
+    private fun pictureShare(message: Message, picture: PictureRow): Int? {
+        val moving = !picture.lost && when (message.direction) {
+            Direction.IN -> picture.file == null
+            Direction.OUT -> message.status == DeliveryStatus.WAITING && !core.pictureWaitsForRadio(message.id)
+        }
+        return if (moving) (picture.have * 100 / picture.total.coerceAtLeast(1)).coerceIn(0, 100) else null
     }
 
     /** The picture, enlarged smoothly to the bubble's width; its blurred sketch until every piece has arrived. */
@@ -892,9 +921,12 @@ class ConversationActivity : ScreenActivity() {
         return ImageView(this).apply {
             tag = "picture:${message.id}"
             scaleType = ImageView.ScaleType.FIT_XY
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            core.pictureBitmap(message.id)?.let { setImageDrawable(android.graphics.drawable.BitmapDrawable(resources, it).apply { isFilterBitmap = true }) }
+            core.pictureShown(message.id)?.let { setImageDrawable(android.graphics.drawable.BitmapDrawable(resources, it).apply { isFilterBitmap = true }) }
             layoutParams = LinearLayout.LayoutParams(width, (width * ratio).toInt().coerceAtLeast(1))
+            // A tap opens it large, with the ways to show it bigger; a long press is the message's own menu.
+            contentDescription = getString(R.string.picture_open)
+            setOnClickListener { startActivity(PictureViewActivity.intent(this@ConversationActivity, message.id)) }
+            setOnLongClickListener { showActions(message); true }
         }
     }
 
@@ -928,14 +960,31 @@ class ConversationActivity : ScreenActivity() {
         if (tip == Tip.HOLD) endTip(learned = true) else core.settings.tipsShown = core.settings.tipsShown + Tip.HOLD.key
         tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
         val others = core.chatRows().filter { it.chat.id != chatId }
+        val picture = message.kind == MessageKind.PICTURE
+        val privateOthers = others.filter { core.canSendPictures(it.chat.id) }
         // Only a message that went over the radio has an id the other phones know, so only it can be answered.
         val overRadio = message.packetId != null
         show(Actions.menu(this, palette, listOfNotNull(
             if (overRadio) Actions.Item("action_reply", R.string.reply, R.drawable.ic_reply) { core.setReplyTarget(chatId, message.id) } else null,
             if (overRadio) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,
+            if (picture) Actions.Item("action_open", R.string.picture_open, R.drawable.ic_picture) {
+                startActivity(PictureViewActivity.intent(this, message.id))
+            } else null,
             if (message.kind != MessageKind.TEXT) null else Actions.Item("action_copy", R.string.copy, R.drawable.ic_copy) { copy(message.text) },
-            if (message.kind != MessageKind.TEXT) null else Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) },
-            if (others.isEmpty() || message.kind != MessageKind.TEXT) null else Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) },
+            if (picture && PictureExport.canSave) Actions.Item("action_save", R.string.picture_save, R.drawable.ic_download) { savePicture(message.id) } else null,
+            when {
+                message.kind == MessageKind.TEXT -> Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { share(message.text) }
+                picture -> Actions.Item("action_share", R.string.share_text, R.drawable.ic_send) { sharePicture(message.id) }
+                else -> null
+            },
+            when {
+                message.kind == MessageKind.TEXT && others.isNotEmpty() ->
+                    Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, others) }
+                // A whole picture goes to another private chat: its screen opens with the same picture, ready to send.
+                picture && core.canForwardPicture(message.id) && privateOthers.isNotEmpty() ->
+                    Actions.Item("action_forward", R.string.forward, R.drawable.ic_forward) { askWhereToForward(message.id, privateOthers) }
+                else -> null
+            },
             Actions.Item("action_delete", R.string.delete, R.drawable.ic_delete) {
                 show(Actions.confirm(this, R.string.delete_title, R.string.delete_only_here, R.string.delete) { core.deleteMessage(message.id) })
             },
@@ -1021,6 +1070,23 @@ class ConversationActivity : ScreenActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) core.note(UiText(R.string.copied))
     }
 
+    /** The picture as the bubble shows it: the view saved before, or the received one four times larger, smoothed. */
+    private fun pictureForExport(messageId: Long): android.graphics.Bitmap? =
+        if (core.chosenLook(messageId) != null) core.pictureShown(messageId)
+        else core.pictureBitmap(messageId)?.let {
+            android.graphics.Bitmap.createScaledBitmap(it, it.width * PictureLooks.SCALE, it.height * PictureLooks.SCALE, true)
+        }
+
+    private fun savePicture(messageId: Long) {
+        val bitmap = pictureForExport(messageId) ?: return
+        core.note(UiText(if (PictureExport.save(this, bitmap) != null) R.string.picture_saved else R.string.picture_save_failed))
+    }
+
+    private fun sharePicture(messageId: Long) {
+        val bitmap = pictureForExport(messageId) ?: return
+        if (!PictureExport.share(this, bitmap)) core.note(UiText(R.string.picture_save_failed))
+    }
+
     private fun share(text: String) {
         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
     }
@@ -1052,7 +1118,9 @@ class ConversationActivity : ScreenActivity() {
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 setOnClickListener {
                     choose.dismiss()
-                    if (core.forward(messageId, row.chat.id)) startActivity(intent(this@ConversationActivity, row.chat.id))
+                    if (core.history.message(messageId)?.kind == MessageKind.PICTURE) {
+                        startActivity(PictureActivity.forwarding(this@ConversationActivity, row.chat.id, messageId))
+                    } else if (core.forward(messageId, row.chat.id)) startActivity(intent(this@ConversationActivity, row.chat.id))
                 }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }

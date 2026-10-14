@@ -417,3 +417,28 @@ Emulator `Phonemesh_API_35`, fake radio, 2026-10-13/14. Picture work from `~/Des
 - The six picture tests that had never run (`PictureCoreTest`) pass, plus one for a picture waiting for a radio.
 - New screenshots (light and dark): `05-picture-choose`, `05-picture-ready`, `05-picture-bubbles`. On pictures, the status words go under the picture so they are never cut; the size and look buttons have no tick, so French words are not split.
 - Not checked on phones yet: camera and gallery on the Pixel and Fairphone, real radio delivery times per size, the owner's reports.
+
+## Picture viewer, upscaling and use in the chat
+
+Tap a picture to open it large. It has seven views: exact pixels, smoothed, sharper (no AI), and four AI upscalers.
+The AI views run on the phone's CPU through the ONNX Runtime that sherpa-onnx already ships, via a 7 KB JNI bridge
+(`app/src/main/cpp/upscale_jni.c`). The models are not in the APK; they are listed in `docs/dependencies.md` and copied
+onto test phones into `files/upscalers/` (the app's private storage; on Android 11 and later the app cannot read files
+`adb push` puts in its shared folder). Large models work in tiles; a progress bar shows the tiles, or moves without end
+while a model loads.
+
+The view on screen can be saved to Photos (JPEG in Pictures/Phonemesh, dated now) and shared. Saving does not change the
+chat. "Utiliser dans la discussion" makes that view the chat's picture on this phone only: the app keeps a JPEG at the
+bubble's width (60% of the screen) and remakes the full size when the picture is opened. "Revenir à l'original" undoes
+it. Deleting the message deletes the kept view. A long press on a picture gives Open, Save, Share, Forward (private chats
+only; the same bytes go again, after Send), Reply and React (once the other radio has confirmed the picture, which both
+phones then name by its first piece's radio id), and Delete.
+
+Results (2026-10-14):
+- ONNX export parity with PyTorch: max abs diff 3.0e-6. Mac CPU timing: small models 12-128 ms, large 0.3-3.1 s.
+- On the emulator, `PictureLooksTest` (the bridge with a tiny model, whole and tiled paths, the views without a model),
+  `PictureCoreTest` (radio ids for replies, forwarding) and the viewer test in `ConversationActivityTest` (menu, forward,
+  views, progress bar, save, use in chat, back to the original, cleanup) all pass.
+- Full suite: 429 tests. Batch 10 hit the harness timeout under host load after 33 passing tests; the remaining 11 passed
+  as `Class#method` (receipt `use-rest`).
+- Phone speeds of the AI views are not yet measured; the viewer shows the time each view took.

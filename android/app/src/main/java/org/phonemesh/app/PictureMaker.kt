@@ -19,8 +19,16 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** The test bench's picture choices: longest side and the byte budget it aims for. */
-enum class PictureSize(val side: Int, val budget: Int) { SMALL(64, 300), MEDIUM(96, 500), LARGE(128, 1000) }
+/**
+ * Picture sizes: longest side and the byte budget it aims for. About 8, 14, 27 and 40 seconds on the radio at LongFast
+ * (owner's choice, 2026-10-14); the largest fills most of a picture's 16 pieces.
+ */
+enum class PictureSize(val side: Int, val budget: Int, val label: Int) {
+    MEDIUM(96, 500, R.string.picture_medium),
+    LARGE(128, 1000, R.string.picture_large),
+    VERY_LARGE(192, 2000, R.string.picture_very_large),
+    MAXIMUM(256, 3000, R.string.picture_maximum),
+}
 
 /** What the other phone will get: [bytes] (empty for a sketch only), [sketch], and [preview], the same pixels decoded here. */
 class PreparedPicture(
@@ -64,17 +72,13 @@ object PictureMaker {
 
     /**
      * The picture to send from [source]: shrunk to [size], grey when [grey], WebP at the best quality that fits the
-     * size's budget (smaller still when even the lowest quality does not fit), or only the sketch when [sketchOnly].
+     * size's budget (smaller still when even the lowest quality does not fit).
      */
-    fun prepare(source: Bitmap, size: PictureSize, grey: Boolean, sketchOnly: Boolean): PreparedPicture {
+    fun prepare(source: Bitmap, size: PictureSize, grey: Boolean): PreparedPicture {
         var side = size.side
         while (true) {
             val small = shrink(source, side, grey)
             val sketch = sketchOf(small)
-            if (sketchOnly) {
-                val image = checkNotNull(ThumbHash.decode(sketch))
-                return PreparedPicture(PictureCodec.SKETCH, small.width, small.height, ByteArray(0), sketch, bitmapOf(image), 0)
-            }
             val fitted = bestUnder(small, size.budget)
             if (fitted != null || side <= MIN_SIDE) {
                 val (bytes, quality) = fitted ?: (webp(small, 0) to 0)

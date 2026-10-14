@@ -203,11 +203,37 @@ class ChatsActivity : ScreenActivity() {
         emptyHint.visibility = if (data.all { it.last == null }) View.VISIBLE else View.GONE
     }
 
+    /** A "Connecting to…" card was shown; when the radio answers, a green "Connected" card shows for a moment. */
+    private var reconnectShown = false
+    private var linkedUntil = 0L
+
+    /** The radio's state as one card: the round mark and its sentence. Tapping it opens the Radio screen. */
+    private fun radioLinkCard(link: RadioLink): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        tag = "radio_link_card:${link.name.lowercase()}"
+        val inner = Ui.dp(this@ChatsActivity, 12)
+        setPadding(inner, inner, inner, inner)
+        background = Ui.outline(this@ChatsActivity, palette.surface, if (link == RadioLink.CONNECTED) palette.good else palette.outline)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = Ui.dp(this@ChatsActivity, 8)
+        }
+        addView(RadioBadge.view(this@ChatsActivity, palette, link, 48), LinearLayout.LayoutParams(Ui.dp(this@ChatsActivity, 48), Ui.dp(this@ChatsActivity, 48)))
+        val words = if (link == RadioLink.CONNECTED) getString(R.string.radio_connected_to, RadioBadge.name(core))
+        else getString(R.string.radio_connecting_to, RadioBadge.name(core))
+        addView(Ui.text(this@ChatsActivity, words, palette.text, 18f, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = inner })
+        contentDescription = words
+        isClickable = true
+        setOnClickListener { openRadio() }
+    }
+
     /** Three numbered steps, then two seconds of green; afterwards only lost-voice/radio cards. True while the steps show. */
     private fun renderCards(): Boolean {
         cards.removeAllViews()
         cards.removeCallbacks(rerender)
         val now = SystemClock.uptimeMillis()
+        var connectingShown = false
         val missing = core.missingVoicePacks()
         val voiceReady = missing.isEmpty() && core.readiness() is Readiness.Ready
         if (voiceReady) friendGuide = false
@@ -238,6 +264,10 @@ class ChatsActivity : ScreenActivity() {
                 if (step == SetupStep.RADIO && region != null) {
                     regionShown = true
                     cards.addView(StepCard.problem(this, palette, step, stepTitle(step), regionPicture, region))
+                } else if (step == SetupStep.RADIO && RadioBadge.linkOf(core) == RadioLink.CONNECTING) {
+                    // The app is still reconnecting the remembered radio by itself: say so, not "find the radio".
+                    connectingShown = true
+                    cards.addView(radioLinkCard(RadioLink.CONNECTING))
                 } else if (step == SetupStep.VOICE && friendGuide) {
                     cards.addView(StepCard.problem(this, palette, step, stepTitle(step), friendGuideView(numbered = false), friendGuideActions()))
                 } else {
@@ -253,6 +283,15 @@ class ChatsActivity : ScreenActivity() {
             askedCountryFor != core.readyReports) {
             askedCountryFor = core.readyReports
             startActivity(RegionActivity.countries(this))
+        }
+        when {
+            connectingShown -> reconnectShown = true
+            reconnectShown && core.connected -> { reconnectShown = false; linkedUntil = now + LINKED_MS }
+            !core.connected -> { reconnectShown = false; linkedUntil = 0L }
+        }
+        if (now < linkedUntil) {
+            cards.addView(radioLinkCard(RadioLink.CONNECTED), 0)
+            cards.postDelayed(rerender, linkedUntil - now)
         }
         if (now < doneUntil) {
             cards.addView(doneCard())
@@ -604,5 +643,7 @@ class ChatsActivity : ScreenActivity() {
         const val STATE_FRIEND_GUIDE = "friend_guide"
         const val REQUEST_FILE = 101
         const val DONE_MS = 2_000L
+        /** How long the green "Connected" card shows after a reconnection the screen was waiting for. */
+        const val LINKED_MS = 3_000L
     }
 }

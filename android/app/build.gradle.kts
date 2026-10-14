@@ -38,7 +38,11 @@ android {
         buildConfigField("boolean", "PICTURES", picturesBuild.toString())
         buildConfigField("String", "FAKE_COUNTRY", "\"\"")
         buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
+        // The picture upscaling bridge (src/main/cpp) is built for the two phone ABIs the APKs carry.
+        externalNativeBuild { cmake { abiFilters("arm64-v8a", "armeabi-v7a") } }
     }
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
     buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

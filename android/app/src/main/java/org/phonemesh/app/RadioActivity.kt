@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
@@ -23,6 +24,9 @@ import org.phonemesh.core.SignalBars
 /** Nearby radios as large rows with signal bars; tap to connect. Android's pairing prompt may appear. */
 class RadioActivity : ScreenActivity() {
     private lateinit var state: TextView
+    private lateinit var badgeBox: FrameLayout
+    private var shownLink: RadioLink? = null
+    private lateinit var backToChats: Button
     private lateinit var disconnect: Button
     private lateinit var searching: LinearLayout
     private lateinit var searchAgain: Button
@@ -40,8 +44,24 @@ class RadioActivity : ScreenActivity() {
         }
         root.addView(backBar(getString(R.string.radio_title)))
         root.addView(noteLine())
-        state = Ui.text(this, "", palette.text, bold = true).apply { tag = "radio_state" }
-        root.addView(state)
+        // A large mark and sentence: green tick when connected, turning ring while connecting, red cross when not.
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, pad() / 2, 0, pad() / 2)
+        }
+        badgeBox = FrameLayout(this)
+        head.addView(badgeBox, LinearLayout.LayoutParams(Ui.dp(this, BADGE_DP), Ui.dp(this, BADGE_DP)))
+        state = Ui.text(this, "", palette.text, 20f, bold = true).apply { tag = "radio_state" }
+        head.addView(state, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
+        root.addView(head)
+        backToChats = Ui.button(this, palette, getString(R.string.radio_back_chats), R.drawable.ic_check, filled = true).apply {
+            tag = "radio_back_chats"
+            setOnClickListener { backToChats() }
+        }
+        root.addView(backToChats, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = pad() / 2
+        })
         disconnect = Ui.button(this, palette, getString(R.string.disconnect), R.drawable.ic_close).apply {
             tag = "radio_disconnect"
             setOnClickListener { core.disconnect() }
@@ -127,10 +147,27 @@ class RadioActivity : ScreenActivity() {
         render()
     }
 
+    /** To the main screen, wherever this one was opened from. */
+    private fun backToChats() {
+        startActivity(Intent(this, ChatsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
+    }
+
     override fun render() {
         val connected = core.connected
-        state.text = if (connected) getString(R.string.radio_connected_to, core.ownRadioLabel(core.settings.radioName, core.settings.radioAddress))
-        else getString(R.string.radio_not_connected)
+        val link = RadioBadge.linkOf(core)
+        if (link != shownLink) {
+            shownLink = link
+            badgeBox.removeAllViews()
+            badgeBox.addView(RadioBadge.view(this, palette, link, BADGE_DP),
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        state.text = when (link) {
+            RadioLink.CONNECTED -> getString(R.string.radio_connected_to, RadioBadge.name(core))
+            RadioLink.CONNECTING -> getString(R.string.radio_connecting_to, RadioBadge.name(core))
+            RadioLink.OFF -> getString(R.string.radio_not_connected)
+        }
+        backToChats.visibility = if (connected) View.VISIBLE else View.GONE
         disconnect.visibility = if (connected) View.VISIBLE else View.GONE
         searching.visibility = if (core.scanning) View.VISIBLE else View.GONE
         searchAgain.visibility = if (core.scanning) View.GONE else View.VISIBLE
@@ -185,6 +222,7 @@ class RadioActivity : ScreenActivity() {
     private companion object {
         const val REQUEST_PERMISSIONS = 1
         const val REQUEST_BLUETOOTH = 2
+        const val BADGE_DP = 64
     }
 }
 

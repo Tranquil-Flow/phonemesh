@@ -5,3 +5,4 @@ libs/*.aar
 model-packs/
 *.jks
 .kotlin/
+.cxx/

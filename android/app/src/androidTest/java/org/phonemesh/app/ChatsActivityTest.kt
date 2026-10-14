@@ -275,6 +275,32 @@ class ChatsActivityTest {
         assertNull(Views.tagged(reopened, "setup_done"))
     }
 
+    /** Owner report: on opening, the app said "find the radio" while it was still reconnecting by itself. */
+    @Test fun whileTheRememberedRadioReconnectsTheCardSaysSoThenTurnsGreen() {
+        TestCore.install(connected = false)
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        TestCore.onMain { core.connect("AA:BB:CC:DD:EE:01", "Meshtastic 8d88") }
+        val chats = start()
+        assertNotNull("connecting, with its turning mark", Views.tagged(chats, "radio_link_card:connecting"))
+        assertNotNull(Views.tagged(chats, "radio_badge:connecting"))
+        assertNotNull(Views.withText(chats, "Connexion à Meshtastic 8d88…"))
+        assertNull("not the find-the-radio card while it reconnects", Views.tagged(chats, "radio_search"))
+        assertEquals(emptyList<String>(), A11yCheck.problems(chats))
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertNotNull("a green tick when it answers", Views.tagged(chats, "radio_link_card:connected"))
+        assertNotNull(Views.tagged(chats, "radio_badge:connected"))
+        assertNotNull(Views.withText(chats, "Connectée : Meshtastic 8d88"))
+        Views.waitUntil(6_000) { Views.descendants(chats.window.decorView).none { it.tag == "radio_link_card:connected" } }
+    }
+
+    @Test fun aReconnectionThatGivesUpShowsTheFindTheRadioCard() {
+        TestCore.install(connected = false)
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        assertNotNull("nothing is being tried: find the radio", Views.tagged(chats, "radio_search"))
+        assertNull(Views.tagged(chats, "radio_link_card:connecting"))
+    }
+
     @Test fun afterSetupALostRadioShowsOneCardWithoutNumbers() {
         TestCore.install()
         TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }

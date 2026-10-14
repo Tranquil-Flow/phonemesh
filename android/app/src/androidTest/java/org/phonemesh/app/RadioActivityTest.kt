@@ -123,9 +123,37 @@ class RadioActivityTest {
         TestCore.onMain { TestCore.core.settings.radioAddress = "AA:BB:CC:DD:EE:01"; TestCore.core.settings.radioName = "Kofi" }
         activity = Views.start(RadioActivity::class.java)
         assertEquals("Connectée : Kofi", Views.textOf(Views.tagged(activity!!, "radio_state")!!))
+        assertNotNull("a green tick", Views.tagged(activity!!, "radio_badge:connected"))
+        assertNotNull("a way back to the chats", Views.tagged(activity!!, "radio_back_chats"))
         Views.tap(activity!!, "radio_disconnect")
         assertEquals(1, TestCore.radio.disconnects)
         assertNull(TestCore.core.settings.radioAddress)
+        TestCore.onMain { TestCore.radio.connected(false) } // what the real radio then reports
+        assertNotNull("a red cross once let go", Views.tagged(activity!!, "radio_badge:off"))
+        assertEquals("Radio non connectée", Views.textOf(Views.tagged(activity!!, "radio_state")!!))
+        assertNull(Views.tagged(activity!!, "radio_back_chats"))
+    }
+
+    @Test fun connectedTheScreenOffersTheWayBackToTheChats() {
+        TestCore.install(connected = true)
+        TestCore.onMain { TestCore.core.settings.radioAddress = "AA:BB:CC:DD:EE:01"; TestCore.core.settings.radioName = "Meshtastic 8d88" }
+        val monitor = inst.addMonitor(ChatsActivity::class.java.name, null, false)
+        activity = Views.start(RadioActivity::class.java)
+        assertEquals(emptyList<String>(), A11yCheck.problems(activity!!))
+        Views.tap(activity!!, "radio_back_chats")
+        val chats = inst.waitForMonitorWithTimeout(monitor, 5_000)
+        inst.removeMonitor(monitor)
+        assertNotNull("the chats screen opens", chats)
+        Views.finish(chats)
+    }
+
+    @Test fun whileReconnectingTheScreenShowsATurningMark() {
+        TestCore.install(connected = false)
+        TestCore.onMain { TestCore.core.connect("AA:BB:CC:DD:EE:01", "Meshtastic 8d88") }
+        activity = Views.start(RadioActivity::class.java)
+        assertNotNull(Views.tagged(activity!!, "radio_badge:connecting"))
+        assertEquals("Connexion à Meshtastic 8d88…", Views.textOf(Views.tagged(activity!!, "radio_state")!!))
+        assertNull(Views.tagged(activity!!, "radio_back_chats"))
     }
 
     @Test fun tappingAnotherRadioWhileConnectedWaitsForTheNewConnection() {

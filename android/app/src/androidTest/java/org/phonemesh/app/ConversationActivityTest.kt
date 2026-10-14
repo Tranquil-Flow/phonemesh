@@ -1621,8 +1621,107 @@ class ConversationActivityTest {
         assertNotNull(Views.tagged(a, "picture_take"))
         assertNotNull(Views.tagged(a, "picture_choose"))
         assertNull("nothing to send before a photo", Views.tagged(a, "picture_send"))
+        val tags = TestCore.onMain { Views.descendants(a.window.decorView).mapNotNull { it.tag as? String } }
+        assertFalse("no blur-only look", "look:SKETCH" in tags)
+        assertEquals("four sizes", listOf("size:MEDIUM", "size:LARGE", "size:VERY_LARGE", "size:MAXIMUM"), tags.filter { it.startsWith("size:") })
         assertEquals(words.getString(R.string.picture_start), Views.textOf(Views.tagged(a, "picture_time")!!))
         assertEquals(emptyList<String>(), A11yCheck.problems(a))
+    }
+
+    @Test fun aPictureHasAMessageMenuAndOpensLargeWithItsViews() {
+        TestCore.install()
+        val chat = TestCore.onMain { core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
+        val other = TestCore.onMain { core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000bbbb", "Ama")) }
+        val photo = android.graphics.Bitmap.createBitmap(120, 90, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(90, 140, 200)) }
+        TestCore.onMain { core.sendPicture(chat, PictureMaker.prepare(photo, PictureSize.MEDIUM, grey = false)) }
+        val message = checkNotNull(core.history.lastMessage(chat))
+        val a = open(chat)
+        val menu = longPress(a, message.id)
+        assertEquals("not yet confirmed by the other radio: no reply or reaction yet",
+            listOf("action_open", "action_save", "action_share", "action_forward", "action_delete"), dialogTags(menu))
+        tapInDialog(menu, "action_forward")
+        val choose = checkNotNull(a.dialogForTest)
+        val targets = TestCore.onMain { Views.descendants(choose.window!!.decorView).mapNotNull { (it.tag as? String)?.takeIf { t -> t.startsWith("forward_to:") } } }
+        assertEquals("pictures go to private chats only", listOf("forward_to:$other"), targets)
+        val monitor = inst.addMonitor(PictureActivity::class.java.name, null, false)
+        TestCore.onMain { Views.descendants(choose.window!!.decorView).first { it.tag == "forward_to:$other" }.performClick() }
+        val forwarding = inst.waitForMonitorWithTimeout(monitor, 5_000) as PictureActivity
+        inst.removeMonitor(monitor)
+        Views.waitUntil { Views.descendants(forwarding.window.decorView).any { it.tag == "picture_send" && it.isShown && it.isEnabled } }
+        assertNull("the same picture: no size or look to choose", Views.tagged(forwarding, "size:MEDIUM"))
+        assertNull(Views.tagged(forwarding, "picture_take"))
+        assertTrue("nothing sent before Send", core.history.messages(other).isEmpty())
+        Views.tap(forwarding, "picture_send")
+        assertEquals(MessageKind.PICTURE, core.history.lastMessage(other)!!.kind)
+
+        val viewMonitor = inst.addMonitor(PictureViewActivity::class.java.name, null, false)
+        TestCore.onMain { checkNotNull(Views.descendants(a.window.decorView).first { it.tag == "picture:${message.id}" }).performClick() }
+        val view = inst.waitForMonitorWithTimeout(viewMonitor, 5_000) as PictureViewActivity
+        inst.removeMonitor(viewMonitor)
+        try {
+            Views.waitUntil { (Views.descendants(view.window.decorView).first { it.tag == "view_info" } as android.widget.TextView).text.contains("×") }
+            assertEquals(listOf("look:exact", "look:smooth", "look:sharper", "look:ai_quick", "look:ai_gentle", "look:ai_large", "look:ai_bsrgan"),
+                TestCore.onMain { Views.descendants(view.window.decorView).mapNotNull { (it.tag as? String)?.takeIf { t -> t.startsWith("look:") } } })
+            assertFalse("no model on this phone: the AI views wait", TestCore.onMain { Views.descendants(view.window.decorView).first { it.tag == "look:ai_quick" }.isEnabled })
+            assertNotNull(Views.tagged(view, "view_missing"))
+            assertNull("no AI, no warning", Views.tagged(view, "view_ai_note"))
+            Views.tap(view, "look:sharper")
+            Views.waitUntil { (Views.descendants(view.window.decorView).first { it.tag == "view_info" } as android.widget.TextView).text.startsWith("${photo.width.coerceAtMost(96) * 4} ×") }
+            assertNotNull(Views.tagged(view, "view_save"))
+            assertFalse("the bar goes once the view is made", TestCore.onMain { Views.descendants(view.window.decorView).first { it.tag == "view_progress" }.isShown })
+            assertNull(core.chosenLook(message.id))
+            val shown = { tag: String -> TestCore.onMain { Views.descendants(view.window.decorView).first { it.tag == tag }.isShown } }
+            Views.tap(view, "view_save")
+            val savedLine = TestCore.onMain { Views.descendants(view.window.decorView).first { it.tag == "view_saved" } as android.widget.TextView }
+            assertEquals(view.getString(R.string.picture_saved), TestCore.onMain { savedLine.text.toString() })
+            assertTrue("a way to see it in Photos", shown("view_see"))
+            assertNull("saving leaves the chat as it was", core.chosenLook(message.id))
+            assertFalse("the chat already shows it as it came", shown("view_original"))
+            assertTrue(shown("view_use"))
+            Views.tap(view, "view_use")
+            assertEquals("the chat now shows this view", "sharper", core.chosenLook(message.id))
+            val inChat = checkNotNull(core.pictureShown(message.id))
+            assertTrue("kept no wider than the bubble", inChat.width <= (view.resources.displayMetrics.widthPixels * 0.6f).toInt())
+            assertTrue("larger than as it came", inChat.width > core.pictureBitmap(message.id)!!.width)
+            assertFalse("in use: nothing to use", shown("view_use"))
+            assertTrue(shown("view_original"))
+            assertEquals(view.getString(R.string.picture_in_chat, view.getString(R.string.look_sharper)),
+                TestCore.onMain { (Views.descendants(view.window.decorView).first { it.tag == "view_in_chat" } as android.widget.TextView).text.toString() })
+            Views.tap(view, "view_original")
+            assertNull("back to the original", core.chosenLook(message.id))
+            assertFalse(shown("view_original"))
+            Views.tap(view, "view_use")
+            assertEquals("sharper", core.chosenLook(message.id))
+            assertEquals(emptyList<String>(), A11yCheck.problems(view))
+        } finally {
+            Views.finish(view)
+            // What the test put in the emulator's Photos goes again.
+            TestCore.onMain {
+                a.contentResolver.delete(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    "${android.provider.MediaStore.Images.Media.DISPLAY_NAME} LIKE 'phonemesh-%'", null)
+            }
+        }
+        val reopened = TestCore.onMain { a.contentResolver.query(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, null,
+            "${android.provider.MediaStore.Images.Media.DISPLAY_NAME} LIKE 'phonemesh-%'", null, null)?.use { it.count } }
+        assertEquals("cleaned", 0, reopened)
+        assertTrue(TestCore.onMain { core.deleteMessage(message.id) })
+        assertNull("deleting the picture lets its saved view go", core.chosenLook(message.id))
+    }
+
+    @Test fun aPictureTheOtherRadioNeverAnsweredSaysSo() {
+        TestCore.install()
+        val chat = TestCore.onMain { TestCore.core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
+        val photo = android.graphics.Bitmap.createBitmap(120, 90, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(90, 140, 200)) }
+        TestCore.onMain { TestCore.core.sendPicture(chat, PictureMaker.prepare(photo, PictureSize.MEDIUM, grey = false)) }
+        val message = checkNotNull(TestCore.core.history.lastMessage(chat))
+        val a = open(chat)
+        assertEquals("one picture, as a share of it", "Envoi de la photo : 0 %", Views.textOf(Views.tagged(a, "picture_caption:${message.id}")!!))
+        assertNotNull(Views.tagged(a, "picture_progress:${message.id}"))
+        repeat(3) { TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sentData.last().packetId, org.phonemesh.ble.DeliveryState.UNCONFIRMED) } }
+        Views.waitUntil { TestCore.core.history.message(message.id)!!.status == org.phonemesh.core.DeliveryStatus.FAILED }
+        Views.waitUntil { Views.descendants(a.window.decorView).any { it.tag == "picture_caption:${message.id}" && (it as android.widget.TextView).text.toString() == "Leur radio n'a pas répondu." } }
+        assertNull(Views.tagged(a, "picture_progress:${message.id}"))
+        assertNotNull("it can be sent again", Views.tagged(a, "resend:${message.id}"))
     }
 
     @Test fun aReactionWithoutARadioSaysItWaitsUnderItsMessage() {

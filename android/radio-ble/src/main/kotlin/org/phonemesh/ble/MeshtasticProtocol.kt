@@ -226,7 +226,10 @@ internal object MeshtasticProtocol {
     private fun dataEvent(packet: MeshProtos.MeshPacket, decoded: MeshProtos.Data): RadioEvent? {
         val payload = decoded.payload.toByteArray()
         if (payload.isEmpty() || payload.size > MAX_DATA_BYTES) return null
-        return RadioEvent.Data(nodeId(packet.`from`.toLong()), decoded.portnumValue, payload, packet.channel, packet.to.toLong() and BROADCAST_NUM)
+        return RadioEvent.Data(
+            nodeId(packet.`from`.toLong()), decoded.portnumValue, payload, packet.channel, packet.to.toLong() and BROADCAST_NUM,
+            packet.id.toLong() and BROADCAST_NUM,
+        )
     }
 
     /**
@@ -306,7 +309,8 @@ internal sealed class RadioEvent {
         val sender: String, val text: String, val channel: Int, val to: Long,
         val packetId: Long = 0, val replyTo: Long = 0, val reaction: Boolean = false,
     ) : RadioEvent()
-    class Data(val sender: String, val port: Int, val payload: ByteArray, val channel: Int, val to: Long) : RadioEvent()
+    /** [packetId]: the mesh packet's own id, what a reply or reaction to it names. */
+    class Data(val sender: String, val port: Int, val payload: ByteArray, val channel: Int, val to: Long, val packetId: Long = 0) : RadioEvent()
     data class QueueStatus(val res: Int, val free: Int, val maxlen: Int, val meshPacketId: Int) : RadioEvent()
     data class Routing(
         val from: Long,

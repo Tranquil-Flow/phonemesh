@@ -1,0 +1,89 @@
+package org.phonemesh.app
+
+import android.graphics.Bitmap
+import android.graphics.Color
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.After
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.File
+
+/**
+ * The ways to show a picture larger, on the device: the ONNX Runtime bridge with a tiny model (the real ones are copied
+ * onto test phones by hand), the AI path whole and in tiles, and the views that need no model.
+ */
+@RunWith(AndroidJUnit4::class)
+class PictureLooksTest {
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val testContext = InstrumentationRegistry.getInstrumentation().context
+    private val placed = mutableListOf<File>()
+
+    @After fun tearDown() {
+        PictureLooks.release()
+        placed.forEach { it.delete() }
+    }
+
+    /** The tiny test model under [name], in the app's private model folder. */
+    private fun place(name: String): File {
+        val file = File(PictureLooks.folders(context).last(), name)
+        file.parentFile!!.mkdirs()
+        testContext.assets.open("tiny-test.onnx").use { input -> file.outputStream().use { input.copyTo(it) } }
+        placed += file
+        return file
+    }
+
+    private fun photo(w: Int, h: Int) = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+        for (x in 0 until w) for (y in 0 until h) setPixel(x, y, Color.rgb((x * 9) % 256, (y * 7) % 256, (x + y) % 256))
+    }
+
+    @Test fun theBridgeRunsAModelThroughTheAppsOwnOnnxRuntime() {
+        assertTrue("sherpa-onnx's runtime and the bridge load", NativeUpscale.loaded)
+        val file = place("bridge-test.onnx")
+        val handle = NativeUpscale.open(file.path, 2)
+        assertNotEquals(NativeUpscale.lastError(), 0L, handle)
+        try {
+            val input = FloatArray(3 * 6 * 8) { (it % 17) / 17f }
+            val out = checkNotNull(NativeUpscale.run(handle, input, 6, 8)) { NativeUpscale.lastError() }
+            assertEquals("four times larger each way", 3 * 24 * 32, out.size)
+            assertTrue(out.all { it.isFinite() })
+            assertNull("a wrong size is refused, not a crash", NativeUpscale.run(handle, FloatArray(5), 6, 8))
+            assertTrue(NativeUpscale.lastError().isNotEmpty())
+        } finally {
+            NativeUpscale.close(handle)
+        }
+        assertEquals("a missing model says so", 0L, NativeUpscale.open(File(context.cacheDir, "none.onnx").path, 1))
+    }
+
+    @Test fun anAiLookIsMadeWholeOrInTilesAtFourTimesTheSize() {
+        assertFalse("no model, no AI look", PictureLooks.available(context, PictureLook.AI_QUICK))
+        place(PictureLook.AI_QUICK.model!!)
+        place(PictureLook.AI_LARGE.model!!)
+        assertTrue(PictureLooks.available(context, PictureLook.AI_QUICK))
+        val source = photo(100, 70)
+        val steps = mutableListOf<Int>()
+        val whole = PictureLooks.make(context, PictureLook.AI_QUICK, source) { steps += it }
+        assertEquals(400, whole.bitmap.width)
+        assertEquals(280, whole.bitmap.height)
+        assertEquals(100, steps.last())
+        val tiled = PictureLooks.make(context, PictureLook.AI_LARGE, source)
+        assertEquals("tiles join into the whole picture", 400 to 280, tiled.bitmap.width to tiled.bitmap.height)
+        assertTrue(PictureScaleTiles.count(100, 70, PictureLook.AI_LARGE.tile) > 1)
+    }
+
+    @Test fun theViewsWithoutAModelAreFourTimesLarger() {
+        val source = photo(24, 18)
+        for (look in listOf(PictureLook.EXACT, PictureLook.SMOOTH, PictureLook.SHARPER)) {
+            assertTrue(PictureLooks.available(context, look))
+            val made = PictureLooks.make(context, look, source)
+            assertEquals(look.name, 96 to 72, made.bitmap.width to made.bitmap.height)
+        }
+        assertEquals("exact keeps each pixel", source.getPixel(3, 2), PictureLooks.make(context, PictureLook.EXACT, source).bitmap.getPixel(13, 9))
+    }
+}
+
+/** How many tiles a look's model works through. */
+private object PictureScaleTiles {
+    fun count(w: Int, h: Int, tile: Int) = org.phonemesh.core.PictureScale.tiles(w, h, tile, 8).size
+}

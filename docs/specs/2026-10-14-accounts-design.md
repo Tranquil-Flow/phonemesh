@@ -197,13 +197,16 @@ The body begins with one byte for the kind, then:
 A message's reference is the first 4 bytes of a hash of its recipient code. Both sides know it, so replies and
 reactions no longer depend on radio packet ids.
 
-**Cost per packet:** 25 bytes normally, 60 when the ratchet key rides along. Meshtastic's data limit is 233 bytes,
+**Cost per packet:** 25 bytes normally, 60 when the ratchet key rides along. Meshtastic's data limit on air is 233
+bytes, but a phone hands each packet to its radio in one Bluetooth write, and the radios grant 255-byte writes (252
+of data). Wrapped for the radio, a packet carries at most **228 bytes** (T1, 2026-10-14: 233 refused, 228 sent on both
+phones). A hub on USB has no such limit, but packets must fit any sender, so wire v2 packets are at most 228 bytes,
 against 200 for today's text port. So:
 
 | | Today | Wire v2 |
 |---|---|---|
-| Longest text | 200 bytes | 200 bytes normally; 172 when the ratchet key rides along, in which case the key moves to the next packet instead |
-| Picture part | 200 bytes of picture | 200 bytes of picture (25 + 6 + 200 = 231) |
+| Longest text | 200 bytes | 200 bytes normally (25 + 1 + 200 = 226); 167 when the ratchet key rides along, in which case the key moves to the next packet instead |
+| Picture part | 200 bytes of picture | 197 bytes of picture (25 + 6 + 197 = 228); a picture needs about 1.5 % more parts |
 | Radio time, full packet (LongFast) | about 1.95 s | about 1.95 to 2.0 s |
 
 ### Shared chat with names
@@ -270,9 +273,13 @@ Every account packet goes to the broadcast address on the shared chat's channel,
 - **Use:** this works for "we are both here now", and as the fallback when no hub is in reach.
 - **Firmware question.** The current app ignores broadcasts on private ports.
   - **Desk check (2026-10-14, firmware 2.7.26):** stock firmware does pass private-port broadcasts to the connected
-    phone (`.local/accounts-t1.md`, finding F1). The hardware test T1 still confirms it.
-  - **Queue limit (F2):** the radio's to-phone queue holds 32 packets. When it is full, new text-port packets push out
-    the oldest, but packets on our ports are dropped. A radio with no phone connected therefore keeps the first 32 of
+    phone (`.local/accounts-t1.md`, finding F1).
+  - **Hardware T1 (2026-10-14, both phones, both radios):** confirmed. 15 of 15 full-size broadcasts on port 301
+    arrived intact in both directions; a radio with no phone kept packets and handed them over on reconnect at about
+    5 a second.
+  - **Queue limit (F2, confirmed on hardware):** the radio's to-phone queue holds 32 packets. When it is full, new
+    text-port packets push out the oldest, but packets on our ports are dropped. On T1, a phone-less radio kept 31 of
+    ours and dropped the next 11 in a row. A radio with no phone connected therefore keeps the first 32 of
     ours and loses the rest. Stage 1 relies on the sender's retries; the hub, always connected over USB, does not hit
     this.
 

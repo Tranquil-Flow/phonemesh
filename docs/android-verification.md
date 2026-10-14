@@ -525,3 +525,22 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   - JVM tests: `SetupRetryTest`, `SafeGattQueueTest`; 687 JVM tests pass.
   - Emulator: `AppBoundaryTest` and `AppCoreTest`, 44 OK (receipt `ble-retry`). Those are the only androidTest
     classes that reach `BleMeshTransport` (grep).
+
+### Accounts crypto, step 2: primitives (2026-10-14)
+
+- `core/.../crypto/`:
+  - `P256`: compressed points, with every outside point checked (on the curve, x < p, no identity); ECDH; ECDSA
+    with raw r‖s and strict DER at the JCA boundary.
+  - `Hkdf`: RFC 5869, SHA-256.
+  - `Aead`: AES-256-GCM, the nonce never sent, with a test hook that sees every key and nonce pair.
+  - `Bytes`: constant-time equality and fixed-width integers.
+  - Platform crypto only, no new library.
+- Tests (JVM, 15; core 261 pass):
+  - NIST CAVP P-256 ECDH (25), public-key validation (12) and SigVer with SHA-256 (15), from the official zips.
+  - RFC 5869 A.1-A.3, parsed from the RFC text.
+  - 160 cases cross-checked against pyca/cryptography 44.0.2: `.local/crypto-vectors/crosscheck.py`, seed
+    20261014, output in `core/src/test/resources/crypto/crosscheck-primitives.txt`. ECDSA is checked by
+    verification, since its nonces are random.
+  - Bad points, out-of-range and non-strict signatures, and every tampered GCM byte are refused.
+- Still to confirm on Android (step 9): the same JCA names (`AlgorithmParameters EC`, `ECDH`, `SHA256withECDSA`,
+  `AES/GCM/NoPadding`) on Android 10 and 15, and Keystore keys with `KeyAgreement` on Android 12+.

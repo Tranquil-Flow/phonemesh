@@ -171,6 +171,7 @@ class AppCore private constructor(
 
     init {
         t1?.start()
+        if (BuildConfig.T2_PROBE) T2ProbeRun(app).start()
         history.expireWaiting()
         history.loseUnfinishedPictures()
         history.groupChat(PRIMARY_CHANNEL)

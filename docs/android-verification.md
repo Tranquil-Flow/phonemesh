@@ -486,3 +486,10 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   (once): N %" with a bar, one step per engine. `PictureLooksTest` covers the steps (0, 25, 50, 75, 100), no second
   trial, and no trial without an ncnn copy, using a tiny ncnn test model in `androidTest/assets` (receipt `prep-a`;
   10 tests with the viewer test).
+- **Crash on the second picture (Pixel 8 Pro, 2026-10-14):** SIGABRT in `libncnn.so` (`__kmp_debug_assert` →
+  `__kmp_fatal` → `abort`, ncnn's OpenMP runtime), each time on a fresh `Thread-N`: the viewer started a new thread
+  per request. Fix: every AI view (and `release`) now runs on one long-lived worker, `PictureLooks.worker`, and
+  `KMP_AFFINITY=disabled` is set before ncnn loads. Test `ncnnViewsWorkFromSeveralThreadsAndFromTheWorker`.
+- **Setup once per model family:** the quick and gentle models share one design, as do the two large ones. After the
+  first full trial in a family, its sibling only checks that the kept engine gives its picture too (one run per
+  engine), then uses it. Test `theSecondModelOfAFamilyOnlyChecksTheChosenEngine`; receipt `omp-b`, 12 tests.

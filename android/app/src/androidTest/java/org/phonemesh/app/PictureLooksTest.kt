@@ -172,6 +172,43 @@ class PictureLooksTest {
         assertTrue(PictureLooks.tileFor(context, PictureLook.AI_LARGE) in setOf(PictureLook.AI_LARGE.tile, 96, 256))
     }
 
+    @Test fun theSecondModelOfAFamilyOnlyChecksTheChosenEngine() {
+        val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        placeWithNcnn(PictureLook.AI_QUICK.model!!)
+        placeWithNcnn(PictureLook.AI_GENTLE.model!!)
+        val first = mutableListOf<Int>()
+        PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30), preparing = { first += it })
+        assertEquals(listOf(0, 25, 50, 75, 100), first)
+        assertTrue("the gentle model is new to this phone", PictureLooks.needsTrial(context, PictureLook.AI_GENTLE))
+        val second = mutableListOf<Int>()
+        assertEquals(160, PictureLooks.make(context, PictureLook.AI_GENTLE, photo(40, 30), preparing = { second += it }).bitmap.width)
+        assertTrue("a short check, not a whole trial: $second", second.size <= 3 && second.last() == 100)
+        assertEquals("the same engine as its sibling",
+            prefs.all.entries.single { it.key.startsWith("engine3:${PictureLook.AI_QUICK.model}") }.value,
+            prefs.all.entries.single { it.key.startsWith("engine3:${PictureLook.AI_GENTLE.model}") }.value)
+    }
+
+    @Test fun ncnnViewsWorkFromSeveralThreadsAndFromTheWorker() {
+        val prefs = context.getSharedPreferences("picture_looks", android.content.Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val onnx = placeWithNcnn(PictureLook.AI_QUICK.model!!)
+        // ncnn on the processor, without a trial: the path that aborted the app on the Pixel from a second thread.
+        prefs.edit().putInt(PictureLooks.trialKey(onnx), PictureLooks.ENGINE_NCNN_CPU).commit()
+        repeat(3) {
+            var width = 0
+            val thread = Thread { width = PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30)).bitmap.width }
+            thread.start()
+            thread.join(30_000)
+            assertEquals(160, width)
+            PictureLooks.release()
+        }
+        repeat(2) {
+            val made = PictureLooks.worker.submit<Int> { PictureLooks.make(context, PictureLook.AI_QUICK, photo(40, 30)).bitmap.width }
+            assertEquals(160, made.get(30, java.util.concurrent.TimeUnit.SECONDS))
+        }
+    }
+
     @Test fun theViewsWithoutAModelAreFourTimesLarger() {
         val source = photo(24, 18)
         for (look in listOf(PictureLook.EXACT, PictureLook.SMOOTH, PictureLook.SHARPER)) {

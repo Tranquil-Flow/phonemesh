@@ -179,7 +179,7 @@ class PictureViewActivity : ScreenActivity() {
         // Until the view before it has stopped (at most one piece of the picture), say so rather than sit at 0 %.
         if (previous != null) showWaiting() else showProgress(0)
         val context: Context = applicationContext
-        Thread {
+        PictureLooks.worker.execute {
             val result = runCatching {
                 // An AI view made before for this picture opens at once; a new one is kept for next time.
                 PictureLooks.cached(context, messageId, next) ?: PictureLooks.make(context, next, from, request, started = {
@@ -199,7 +199,7 @@ class PictureViewActivity : ScreenActivity() {
                 val done = result.getOrNull()
                 if (done != null) display(done) else info.text = getString(R.string.look_failed)
             }
-        }.start()
+        }
     }
 
     /** The first use of a model on this phone tries each engine once; it can take a while, so it says so. */
@@ -286,7 +286,7 @@ class PictureViewActivity : ScreenActivity() {
         // Leaving stops the view being made (at the end of its current piece), then lets the model go.
         if (isFinishing) {
             running?.cancelled = true
-            Thread { PictureLooks.release() }.start()
+            PictureLooks.worker.execute { PictureLooks.release() }
         }
         super.onDestroy()
     }

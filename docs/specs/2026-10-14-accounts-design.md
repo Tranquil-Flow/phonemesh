@@ -70,8 +70,9 @@ Limits:
     Android 12.
   - Android 10 and 11 (the Fairphone): a software key, stored encrypted under a Keystore AES key.
   - Backup is already off (`allowBackup="false"`); keys never leave the phone.
-- **Safety picture:** each pair of contacts sees the same four icons, derived from both identity keys. Comparing them
-  side by side replaces Signal's 60-digit safety number for people who do not read.
+- **Safety picture:** each pair of contacts sees the same six icons out of 64, derived from both identity keys with a
+  slow hash (PBKDF2-HMAC-SHA256, 65,536 rounds). Comparing them side by side replaces Signal's 60-digit safety number
+  for people who do not read. Faking a match takes about 2^52 hashes (owner pick after review F4).
 - **Lost phone:** the first build has no recovery. A new phone makes a new account, and contacts add it again.
   Recovery is a required feature of a later build (decision 12).
 
@@ -444,4 +445,5 @@ Rules for the screens and outbox (steps 9 and later):
 - **F17:** a hub ack only stops resending to the hub; it never shows "Reçu".
 - **F19:** receipts wait 15-60 s at random, and ride on a reply when there is one.
 - **F25:** the phone-to-hub link uses TLS pinned to the hub key from the hub QR (before step 15).
-- **F4, open:** the 4-icon safety picture is 16 bits; a link attacker can find a match in seconds. Owner decision.
+- **F4, decided (owner, 2026-10-14):** six icons out of 64 over a slow hash, replacing four out of 16. The screens
+  need 64 icons people can tell apart and name aloud.

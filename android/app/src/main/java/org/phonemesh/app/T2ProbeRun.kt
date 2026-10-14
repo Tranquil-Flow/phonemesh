@@ -100,9 +100,23 @@ internal class T2ProbeRun(private val app: Context) {
     private fun check(network: Network) {
         val gateway = connectivity.getLinkProperties(network)?.routes?.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway
         note("gateway ${gateway?.hostAddress}")
-        if (gateway != null) note("hub ping: ${fetch(network, "http://${gateway.hostAddress}:$PORT/ping")}")
+        if (gateway != null) note("hub ping: ${ping(network, gateway)}")
         note("default network now: ${describe(connectivity.activeNetwork)}")
         note("internet on the default network: ${fetch(null, "https://connectivitycheck.gstatic.com/generate_204")}")
+    }
+
+    /** A plain socket on [network]: the debug network security config refuses cleartext HTTP to any address but 10.0.2.2. */
+    private fun ping(network: Network, hub: java.net.InetAddress): String {
+        val start = SystemClock.elapsedRealtime()
+        return runCatching {
+            network.socketFactory.createSocket().use { socket ->
+                socket.connect(java.net.InetSocketAddress(hub, PORT), 8000)
+                socket.soTimeout = 8000
+                socket.getOutputStream().write("GET /ping HTTP/1.0\r\n\r\n".toByteArray())
+                val reply = socket.getInputStream().bufferedReader().readText().substringAfter("\r\n\r\n").trim()
+                "'${reply.take(40)}' in ${SystemClock.elapsedRealtime() - start} ms"
+            }
+        }.getOrElse { "failed in ${SystemClock.elapsedRealtime() - start} ms: ${it.javaClass.simpleName} ${it.message}" }
     }
 
     private fun fetch(network: Network?, address: String): String {

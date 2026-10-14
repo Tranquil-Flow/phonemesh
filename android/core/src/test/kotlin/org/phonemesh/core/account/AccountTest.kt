@@ -95,9 +95,23 @@ class AccountTest {
             val b = SoftKeys.generate().identity
             val icons = SafetyPicture.icons(a, b)
             assertArrayEquals(icons, SafetyPicture.icons(b, a))
-            assertEquals(4, icons.size)
-            assertTrue(icons.all { it in 0 until 16 })
+            assertEquals(6, icons.size)
+            assertTrue(icons.all { it in 0 until 64 })
         }
+    }
+
+    /** Checked against Python's hashlib.pbkdf2_hmac (OpenSSL), an independent implementation. */
+    @Test fun theSafetyPictureMatchesTheStandardSlowHash() {
+        fun hex(s: String) = org.phonemesh.core.crypto.Vectors.hex(s)
+        val salt = "salt".toByteArray()
+        assertEquals("120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b",
+            org.phonemesh.core.crypto.Vectors.hex(SafetyPicture.pbkdf2("password".toByteArray(), salt, 1)))
+        assertEquals("c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a",
+            org.phonemesh.core.crypto.Vectors.hex(SafetyPicture.pbkdf2("password".toByteArray(), salt, 4096)))
+        val a = hex("02" + "11".repeat(32)); val b = hex("03" + "22".repeat(32))
+        val started = System.nanoTime()
+        assertArrayEquals(intArrayOf(3, 13, 38, 44, 6, 7), SafetyPicture.icons(b, a))
+        println("safety picture in ${(System.nanoTime() - started) / 1_000_000} ms")
     }
 
     @Test fun accountIdsOrderUnsigned() {

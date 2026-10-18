@@ -462,7 +462,7 @@ Rules for the screens and outbox (steps 9 and later):
   each; the hub acknowledges what it hears on port 302, 25 codes at once or after 30 s. Hellos and shared-chat posts
   are kept but not acknowledged (they carry no code).
 
-## Safety picture icons (owner approved 2026-10-18)
+## Safety picture icons (owner approved 2026-10-18; drop and onion replaced the same day)
 
 `SafetyPicture.icons` returns six numbers from 0 to 63; this table says which icon each is. The order is fixed once
 the app ships, since every pair's picture depends on it. Drawings: `docs/specs/2026-10-18-safety-icons.py` (24-unit, the app's
@@ -494,7 +494,7 @@ pork and alcohol, religious symbols, French homophones (ancre/encre), and a cres
 | 20 | mushroom | champignon |
 | 21 | mountain | montagne |
 | 22 | cloud | nuage |
-| 23 | drop | goutte |
+| 23 | heart | cœur |
 | 24 | star | étoile |
 | 25 | fire | feu |
 | 26 | rainbow | arc-en-ciel |
@@ -510,7 +510,7 @@ pork and alcohol, religious symbols, French homophones (ancre/encre), and a cres
 | 36 | watermelon | pastèque |
 | 37 | peanut | arachide |
 | 38 | coconut | coco |
-| 39 | onion | oignon |
+| 39 | teapot | théière |
 | 40 | house | maison |
 | 41 | key | clé |
 | 42 | bell | cloche |

@@ -100,9 +100,9 @@ interface MeshRadio : AutoCloseable {
 
     companion object {
         /** The private Meshtastic port pictures travel on (core PictureWire.PORT must match). */
-        const val PICTURE_PORT = 300
+        const val PICTURE_PORT = MeshtasticProtocol.PICTURE_PORT
 
         /** The private port accounts' packets travel on, as broadcasts (wire v2). */
-        const val ACCOUNT_PORT = 301
+        const val ACCOUNT_PORT = MeshtasticProtocol.ACCOUNT_PORT
     }
 }

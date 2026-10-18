@@ -12,14 +12,12 @@ import org.meshtastic.proto.ConfigProtos
 import org.meshtastic.proto.MeshProtos
 import org.meshtastic.proto.Portnums
 
-internal const val MESHTASTIC_SERVICE_UUID = "6ba1b218-15a8-461f-9fa8-5dcae273eafd"
-internal const val TORADIO_UUID = "f75c76d2-129e-4dad-a1dd-7866124401e7"
-internal const val FROMRADIO_UUID = "2c55e69e-4993-11ed-b878-0242ac120002"
-internal const val FROMNUM_UUID = "ed9da18c-a800-4f66-a670-aa7547e34453"
-internal const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-/** Pure Meshtastic protobuf helpers; deliberately has no Android dependency. */
-internal object MeshtasticProtocol {
+/**
+ * Pure Meshtastic protobuf helpers; deliberately has no Android dependency. Shared by the app's Bluetooth transport
+ * (`radio-ble`) and the hub (`hub`, over USB serial), so both speak to radios the same way.
+ */
+object MeshtasticProtocol {
     const val MAX_TEXT_BYTES = 200
 
     /** Meshtastic's Data payload limit (mesh.proto DATA_PAYLOAD_LEN); PKI direct messages fit less on air. */
@@ -27,11 +25,15 @@ internal object MeshtasticProtocol {
 
     /**
      * Private ports this app sends and listens on: 300 = pictures (core PictureWire.PORT), 301 = accounts (wire v2,
-     * docs/specs/2026-10-14-accounts-design.md), which travel as broadcasts.
+     * docs/specs/2026-10-14-accounts-design.md), which travel as broadcasts. 302 (hub acknowledgements) and 303
+     * (shared chat with names) are broadcast too; the hub uses them now, the app from build step 13.
      */
-    const val PICTURE_PORT = MeshRadio.PICTURE_PORT
-    const val ACCOUNT_PORT = MeshRadio.ACCOUNT_PORT
+    const val PICTURE_PORT = 300
+    const val ACCOUNT_PORT = 301
+    const val HUB_ACK_PORT = 302
+    const val SHARED_CHAT_PORT = 303
     val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT, ACCOUNT_PORT)
+    val BROADCAST_PORTS = setOf(ACCOUNT_PORT, HUB_ACK_PORT, SHARED_CHAT_PORT)
     const val BROADCAST_NUM: Long = 0xffffffffL
     const val FIRST_HEARTBEAT_NONCE = 2
 
@@ -129,10 +131,10 @@ internal object MeshtasticProtocol {
 
     /**
      * One accounts-port packet for every radio on [channel]: no destination and no want_ack (Meshtastic acknowledges no
-     * broadcast), so delivery is confirmed by the app itself. Only the accounts port is broadcast.
+     * broadcast), so delivery is confirmed by the app itself. Only [BROADCAST_PORTS] are broadcast.
      */
     fun buildBroadcastDataToRadio(port: Int, payload: ByteArray, channel: Int, packetId: Int = newPacketId(), hopLimit: Int = 3): ByteArray {
-        require(port == ACCOUNT_PORT) { "only the accounts port $ACCOUNT_PORT is broadcast, not $port" }
+        require(port in BROADCAST_PORTS) { "only ports $BROADCAST_PORTS are broadcast, not $port" }
         require(channel in 0..7) { "channel must be in 0..7" }
         require(hopLimit in 0..7) { "hop limit must be in 0..7" }
         require(payload.size in 1..MAX_DATA_BYTES) { "payload is ${payload.size} bytes; must be 1..$MAX_DATA_BYTES" }
@@ -181,13 +183,14 @@ internal object MeshtasticProtocol {
     }
 
     /** Total function: a truncated or corrupt BLE read yields null instead of throwing into the radio loop. */
-    fun parseFromRadio(bytes: ByteArray): RadioEvent? = try {
-        parseFromRadio(MeshProtos.FromRadio.parseFrom(bytes))
+    fun parseFromRadio(bytes: ByteArray, dataPorts: Set<Int> = PRIVATE_DATA_PORTS): RadioEvent? = try {
+        parseFromRadio(MeshProtos.FromRadio.parseFrom(bytes), dataPorts)
     } catch (_: Exception) {
         null
     }
 
-    fun parseFromRadio(fromRadio: MeshProtos.FromRadio): RadioEvent? {
+    /** [dataPorts]: the private ports passed up as [RadioEvent.Data]; the app takes its own, the hub 301-303. */
+    fun parseFromRadio(fromRadio: MeshProtos.FromRadio, dataPorts: Set<Int> = PRIVATE_DATA_PORTS): RadioEvent? {
         return when (fromRadio.payloadVariantCase) {
             MeshProtos.FromRadio.PayloadVariantCase.CONFIG_COMPLETE_ID -> RadioEvent.ConfigComplete(fromRadio.configCompleteId)
             MeshProtos.FromRadio.PayloadVariantCase.MY_INFO -> RadioEvent.MyInfo(fromRadio.myInfo.myNodeNum)
@@ -202,7 +205,7 @@ internal object MeshtasticProtocol {
                 fromRadio.queueStatus.maxlen,
                 fromRadio.queueStatus.meshPacketId,
             )
-            MeshProtos.FromRadio.PayloadVariantCase.PACKET -> packetEvent(fromRadio.packet)
+            MeshProtos.FromRadio.PayloadVariantCase.PACKET -> packetEvent(fromRadio.packet, dataPorts)
             else -> null
         }
     }
@@ -231,12 +234,12 @@ internal object MeshtasticProtocol {
 
     private val presetName = Regex("(very)?(long|medium|short)(fast|slow|moderate|turbo)", RegexOption.IGNORE_CASE)
 
-    private fun packetEvent(packet: MeshProtos.MeshPacket): RadioEvent? {
+    private fun packetEvent(packet: MeshProtos.MeshPacket, dataPorts: Set<Int>): RadioEvent? {
         if (!packet.hasDecoded()) return null
         val decoded = packet.decoded
         if (decoded.portnum == Portnums.PortNum.ROUTING_APP) return routingEvent(packet, decoded)
         if (decoded.portnum == Portnums.PortNum.ADMIN_APP) return adminEvent(packet, decoded)
-        if (decoded.portnumValue in PRIVATE_DATA_PORTS) return dataEvent(packet, decoded)
+        if (decoded.portnumValue in dataPorts) return dataEvent(packet, decoded)
         if (decoded.portnum != Portnums.PortNum.TEXT_MESSAGE_APP) return null
         val payload = decoded.payload.toByteArray()
         if (payload.isEmpty() || payload.size > MAX_TEXT_BYTES) return null
@@ -329,7 +332,7 @@ internal object MeshtasticProtocol {
         .toString()
 }
 
-internal sealed class RadioEvent {
+sealed class RadioEvent {
     data class ConfigComplete(val id: Int) : RadioEvent()
     data class MyInfo(val nodeNum: Int) : RadioEvent()
     data class LoraSettings(val lora: ConfigProtos.Config.LoRaConfig) : RadioEvent()

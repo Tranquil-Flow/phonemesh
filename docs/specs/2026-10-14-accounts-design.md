@@ -447,3 +447,17 @@ Rules for the screens and outbox (steps 9 and later):
 - **F25:** the phone-to-hub link uses TLS pinned to the hub key from the hub QR (before step 15).
 - **F4, decided (owner, 2026-10-14):** six icons out of 64 over a slow hash, replacing four out of 16. The screens
   need 64 icons people can tell apart and name aloud.
+
+## Hub prototype as built (step 15)
+
+- **Modules:** `mesh-protocol` (Meshtastic protobufs and `MeshtasticProtocol`, plain JVM) is shared by `radio-ble` and
+  the new `hub` module. The app's classes are unchanged apart from one file name.
+- **Serial:** Meshtastic's stream framing (`0x94 0xC3`, 2-byte length) through `stty` and the device file; no
+  serial library. Not yet run against the radio.
+- **Mailbox:** ports 301 (messages and hellos) and 303 (shared chat), one append-only file per UTC day, duplicates
+  (a relay's copy) stored once, expiry by whole days.
+- **API:** HTTPS with the hub's own P-256 key; phones pin SHA-256 of it from the hub QR (review F25). Mail is asked
+  for with `POST /mail` and the codes in the body, so code lists never sit in a URL or a log.
+- **Radio:** phones' packets go in turn, one sender after another, within the duty cycle, with half a second after
+  each; the hub acknowledges what it hears on port 302, 25 codes at once or after 30 s. Hellos and shared-chat posts
+  are kept but not acknowledged (they carry no code).

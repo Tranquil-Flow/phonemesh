@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "Phonemesh"
-include(":app", ":radio-ble", ":core", ":speech-smoke")
+include(":app", ":radio-ble", ":mesh-protocol", ":core", ":hub", ":speech-smoke")

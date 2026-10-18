@@ -80,3 +80,10 @@ chip only if its picture matches the processor's on a trial piece, and only if i
 These are generative models: they can invent detail, and the app labels their views so. They were trained on DIV2K and
 similar sets, whose "academic research only" terms may or may not reach model weights; record this before shipping
 any of them. Non-commercial models (4x-UltraSharp, Remacri, CodeFormer) are left out: they conflict with AGPL-3.0.
+
+## Hub prototype (`android/hub`, not in the app)
+
+No libraries beyond the app's own modules (`core`, `mesh-protocol` with protobuf-javalite). The serial port is driven
+through macOS `stty` and the device file, HTTPS through the JDK's `HttpsServer`, and the hub's TLS key is made once
+with the JDK's `keytool`. jSerialComm (LGPL-3.0 / Apache-2.0) stays the fallback if `stty` proves unreliable on the
+radio.

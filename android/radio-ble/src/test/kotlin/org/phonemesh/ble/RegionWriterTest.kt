@@ -34,7 +34,7 @@ class RegionWriterTest {
 
     /** Guards the fixture: a field added to the bundled proto but not to [full] fails here, not silently. */
     @Test fun theFixtureSetsEveryLoraFieldOfTheBundledProto() {
-        val proto = File("src/main/proto/meshtastic/config.proto").readText()
+        val proto = File("../mesh-protocol/src/main/proto/meshtastic/config.proto").readText()
         val block = proto.substringAfter("message LoRaConfig {").substringBefore("message BluetoothConfig {")
         val declared = Regex("""(?m)^    (?:repeated |optional )?[A-Za-z0-9_.]+ [a-z_0-9]+ = (\d+)""")
             .findAll(block).map { it.groupValues[1].toInt() }.toSortedSet()

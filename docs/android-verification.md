@@ -584,3 +584,16 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   sends, receipts and the hello byte for byte), the 10,000-run random delivery test, the key-and-nonce reuse watch
   over QR and link sessions, and one attack test per fixed finding.
 - `:radio-ble:test :app:testDebugUnitTest :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin`: OK.
+
+## Hub prototype, step 15 (JVM)
+
+- `mesh-protocol` split out of `radio-ble`; `radio-ble` 224 and app 217 JVM tests pass, androidTest compiles. The debug
+  APK's classes match the previous demo build's for `org.meshtastic.*` (906) and `org.phonemesh.ble.*` (113); the only
+  change is `MeshtasticProtocolKt` becoming `BleUuidsKt` (`.local/receipts/hub-step15b.log`).
+- `hub` 23 tests (`.local/receipts/hub-step15.log`): framing with any split and log text between frames, airtime
+  against the Semtech formula (436, 682, 1911, 2116 ms for 1, 36, 202, 228 bytes on LongFast), mailbox by code,
+  hellos and shared posts, duplicates, malformed packets, restart, a crash-cut record, expiry, long poll; turns between
+  phones, the duty cycle over an hour, the queue cap, acknowledgement batching, the rebroadcast-mode warning; the
+  serial radio against a fake radio; HTTPS with a pinned key (a wrong key is refused) and a real sealed message from
+  one phone's session through the hub to the other's.
+- Not yet checked: the radio on the Mac's USB port (needs the owner's radio).

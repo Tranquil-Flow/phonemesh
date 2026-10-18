@@ -9,7 +9,7 @@ class CountryRegionsTest {
 
     /** Region names in the bundled Meshtastic proto (radio-ble), so a typo in the file fails here. */
     private val protoRegions: Set<String> by lazy {
-        val proto = File("../radio-ble/src/main/proto/meshtastic/config.proto").readText()
+        val proto = File("../mesh-protocol/src/main/proto/meshtastic/config.proto").readText()
         val body = proto.substringAfter("enum RegionCode {").substringBefore("\n    }")
         Regex("""^\s+([A-Z][A-Z0-9_]*) = \d+""", RegexOption.MULTILINE).findAll(body).map { it.groupValues[1] }.toSet()
     }

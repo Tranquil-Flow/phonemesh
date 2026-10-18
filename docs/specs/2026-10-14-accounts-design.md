@@ -461,3 +461,77 @@ Rules for the screens and outbox (steps 9 and later):
 - **Radio:** phones' packets go in turn, one sender after another, within the duty cycle, with half a second after
   each; the hub acknowledges what it hears on port 302, 25 codes at once or after 30 s. Hellos and shared-chat posts
   are kept but not acknowledged (they carry no code).
+
+## Safety picture icons (owner approved 2026-10-18)
+
+`SafetyPicture.icons` returns six numbers from 0 to 63; this table says which icon each is. The order is fixed once
+the app ships, since every pair's picture depends on it. Drawings: `docs/specs/2026-10-18-safety-icons.py` (24-unit, the app's
+icon style), ported to drawables with the contact screens. Left out on purpose: lookalikes of app buttons, weapons,
+pork and alcohol, religious symbols, French homophones (ancre/encre), and a crescent moon (looks like the banana).
+
+| # | English | Français |
+|---|---|---|
+| 0 | fish | poisson |
+| 1 | bird | oiseau |
+| 2 | chicken | poule |
+| 3 | cow | vache |
+| 4 | goat | chèvre |
+| 5 | elephant | éléphant |
+| 6 | turtle | tortue |
+| 7 | snail | escargot |
+| 8 | butterfly | papillon |
+| 9 | bee | abeille |
+| 10 | snake | serpent |
+| 11 | frog | grenouille |
+| 12 | cat | chat |
+| 13 | dog | chien |
+| 14 | horse | cheval |
+| 15 | rabbit | lapin |
+| 16 | tree | arbre |
+| 17 | palm tree | palmier |
+| 18 | leaf | feuille |
+| 19 | flower | fleur |
+| 20 | mushroom | champignon |
+| 21 | mountain | montagne |
+| 22 | cloud | nuage |
+| 23 | drop | goutte |
+| 24 | star | étoile |
+| 25 | fire | feu |
+| 26 | rainbow | arc-en-ciel |
+| 27 | giraffe | girafe |
+| 28 | tomato | tomate |
+| 29 | banana | banane |
+| 30 | pineapple | ananas |
+| 31 | carrot | carotte |
+| 32 | corn | maïs |
+| 33 | egg | œuf |
+| 34 | bread | pain |
+| 35 | chilli | piment |
+| 36 | watermelon | pastèque |
+| 37 | peanut | arachide |
+| 38 | coconut | coco |
+| 39 | onion | oignon |
+| 40 | house | maison |
+| 41 | key | clé |
+| 42 | bell | cloche |
+| 43 | drum | tambour |
+| 44 | guitar | guitare |
+| 45 | hat | chapeau |
+| 46 | shoe | chaussure |
+| 47 | umbrella | parapluie |
+| 48 | cup | tasse |
+| 49 | cooking pot | marmite |
+| 50 | ball | ballon |
+| 51 | boat | bateau |
+| 52 | bicycle | vélo |
+| 53 | car | voiture |
+| 54 | plane | avion |
+| 55 | scissors | ciseaux |
+| 56 | hammer | marteau |
+| 57 | broom | balai |
+| 58 | candle | bougie |
+| 59 | glasses | lunettes |
+| 60 | crown | couronne |
+| 61 | chair | chaise |
+| 62 | sun | soleil |
+| 63 | basket | panier |

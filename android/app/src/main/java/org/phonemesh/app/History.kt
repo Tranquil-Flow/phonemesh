@@ -8,7 +8,8 @@ import android.database.sqlite.SQLiteOpenHelper
 import org.phonemesh.core.DeliveryRules
 import org.phonemesh.core.DeliveryStatus
 
-enum class ChatKind { GROUP, DIRECT }
+/** GROUP: the shared channel. DIRECT: an old chat with one radio (read only once accounts arrive). PERSON: a contact's account. */
+enum class ChatKind { GROUP, DIRECT, PERSON }
 
 enum class Direction { IN, OUT }
 
@@ -97,7 +98,156 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
                     "have INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL, lost INTEGER NOT NULL DEFAULT 0)",
             )
         }
+        // Accounts (docs/specs/2026-10-14-accounts-design.md, plan step 9). Secrets are sealed by AccountStore's Vault;
+        // skipped message keys live inside each sealed session state, and recipient codes are derived from it.
+        if (oldVersion < 6) {
+            db.execSQL(
+                "CREATE TABLE account (id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity BLOB NOT NULL, " +
+                    "sealed BLOB, name TEXT NOT NULL DEFAULT '', colour INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)",
+            )
+            db.execSQL("CREATE TABLE prekeys (public BLOB PRIMARY KEY, sealed BLOB NOT NULL, created INTEGER NOT NULL, retired INTEGER)")
+            db.execSQL(
+                "CREATE TABLE contacts (account_id TEXT PRIMARY KEY, card BLOB NOT NULL, name TEXT NOT NULL, colour INTEGER NOT NULL, " +
+                    "met INTEGER NOT NULL DEFAULT 0, voice TEXT, added INTEGER NOT NULL)",
+            )
+            db.execSQL(
+                "CREATE TABLE sessions (account_id TEXT PRIMARY KEY REFERENCES contacts(account_id), serial INTEGER NOT NULL, " +
+                    "state BLOB NOT NULL, updated INTEGER NOT NULL)",
+            )
+            db.execSQL(
+                "CREATE TABLE outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL, message_id INTEGER, " +
+                    "port INTEGER NOT NULL, packet BLOB NOT NULL, chain_tag BLOB, counter INTEGER, created INTEGER NOT NULL, " +
+                    "tries INTEGER NOT NULL DEFAULT 0, next_try INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'WAITING')",
+            )
+            db.execSQL("CREATE INDEX outbox_by_contact ON outbox (account_id, id)")
+            db.execSQL("CREATE TABLE hellos_seen (id BLOB PRIMARY KEY, at INTEGER NOT NULL)")
+        }
     }
+
+    // ---- Accounts: raw rows; AccountStore seals and opens what they hold.
+
+    class AccountRow(val store: String, val identity: ByteArray, val sealed: ByteArray?, val name: String, val colour: Int, val created: Long)
+    class PrekeyRow(val public: ByteArray, val sealed: ByteArray, val created: Long, val retired: Long?)
+    class ContactRow(val accountId: String, val card: ByteArray, val name: String, val colour: Int, val met: Boolean, val voice: String?, val added: Long)
+    class OutboxRow(
+        val id: Long, val accountId: String, val messageId: Long?, val port: Int, val packet: ByteArray,
+        val chainTag: ByteArray?, val counter: Long?, val created: Long, val tries: Int, val nextTry: Long, val state: String,
+    )
+
+    fun accountRow(): AccountRow? = readableDatabase.query("account", null, "id = 1", null, null, null, null).use { c ->
+        if (!c.moveToFirst()) null else AccountRow(
+            c.getString(c.getColumnIndexOrThrow("store")), c.getBlob(c.getColumnIndexOrThrow("identity")),
+            c.getColumnIndexOrThrow("sealed").let { if (c.isNull(it)) null else c.getBlob(it) },
+            c.getString(c.getColumnIndexOrThrow("name")), c.getInt(c.getColumnIndexOrThrow("colour")), c.getLong(c.getColumnIndexOrThrow("created")),
+        )
+    }
+
+    /** The account is made once; a second call keeps the first (false). */
+    fun createAccount(store: String, identity: ByteArray, sealed: ByteArray?, created: Long): Boolean =
+        writableDatabase.insertWithOnConflict("account", null, ContentValues().apply {
+            put("id", 1); put("store", store); put("identity", identity); put("sealed", sealed); put("created", created)
+        }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+
+    fun setAccountName(name: String, colour: Int) {
+        writableDatabase.update("account", ContentValues().apply { put("name", name); put("colour", colour) }, "id = 1", null)
+    }
+
+    /** Prekeys not yet dropped, newest first. */
+    fun prekeyRows(): List<PrekeyRow> = readableDatabase.query("prekeys", null, null, null, null, null, "created DESC").use { c ->
+        buildList {
+            while (c.moveToNext()) add(PrekeyRow(
+                c.getBlob(0), c.getBlob(1), c.getLong(2), if (c.isNull(3)) null else c.getLong(3),
+            ))
+        }
+    }
+
+    /** Adds [public] as the current prekey: the one before is retired at [now]; any retired before [dropBefore] go. */
+    fun rotatePrekey(public: ByteArray, sealed: ByteArray, now: Long, dropBefore: Long) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.update("prekeys", ContentValues().apply { put("retired", now) }, "retired IS NULL", null)
+            db.insertOrThrow("prekeys", null, ContentValues().apply { put("public", public); put("sealed", sealed); put("created", now) })
+            db.delete("prekeys", "retired IS NOT NULL AND retired < ?", arrayOf(dropBefore.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun dropPrekeysRetiredBefore(time: Long): Int = writableDatabase.delete("prekeys", "retired IS NOT NULL AND retired < ?", arrayOf(time.toString()))
+
+    fun putContact(row: ContactRow) {
+        writableDatabase.insertWithOnConflict("contacts", null, ContentValues().apply {
+            put("account_id", row.accountId); put("card", row.card); put("name", row.name); put("colour", row.colour)
+            put("met", if (row.met) 1 else 0); put("voice", row.voice); put("added", row.added)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun contactRow(accountId: String): ContactRow? =
+        readableDatabase.query("contacts", null, "account_id = ?", arrayOf(accountId), null, null, null).use { c -> if (c.moveToFirst()) c.contact() else null }
+
+    fun contactRows(): List<ContactRow> =
+        readableDatabase.query("contacts", null, null, null, null, null, "added").use { c -> buildList { while (c.moveToNext()) add(c.contact()) } }
+
+    private fun Cursor.contact() = ContactRow(
+        getString(getColumnIndexOrThrow("account_id")), getBlob(getColumnIndexOrThrow("card")), getString(getColumnIndexOrThrow("name")),
+        getInt(getColumnIndexOrThrow("colour")), getInt(getColumnIndexOrThrow("met")) != 0,
+        getColumnIndexOrThrow("voice").let { if (isNull(it)) null else getString(it) }, getLong(getColumnIndexOrThrow("added")),
+    )
+
+    /** The sealed session and its serial, or null. */
+    fun sessionRow(accountId: String): Pair<Long, ByteArray>? =
+        readableDatabase.query("sessions", arrayOf("serial", "state"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { c -> if (c.moveToFirst()) c.getLong(0) to c.getBlob(1) else null }
+
+    /**
+     * Stores a session state and, in the same transaction, the packet sealed with it (review F3): either both are kept
+     * or neither. Refuses a state whose [serial] is not above the stored one (review F6): false, nothing written.
+     */
+    fun storeSession(accountId: String, serial: Long, sealed: ByteArray, now: Long, outgoing: OutboxRow? = null): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val stored = db.query("sessions", arrayOf("serial"), "account_id = ?", arrayOf(accountId), null, null, null)
+                .use { if (it.moveToFirst()) it.getLong(0) else null }
+            if (stored != null && serial <= stored) return false
+            db.insertWithOnConflict("sessions", null, ContentValues().apply {
+                put("account_id", accountId); put("serial", serial); put("state", sealed); put("updated", now)
+            }, SQLiteDatabase.CONFLICT_REPLACE)
+            if (outgoing != null) db.insertOrThrow("outbox", null, ContentValues().apply {
+                put("account_id", accountId); put("message_id", outgoing.messageId); put("port", outgoing.port)
+                put("packet", outgoing.packet); put("chain_tag", outgoing.chainTag); put("counter", outgoing.counter)
+                put("created", outgoing.created); put("next_try", outgoing.nextTry); put("state", outgoing.state)
+            })
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun outbox(accountId: String): List<OutboxRow> =
+        readableDatabase.query("outbox", null, "account_id = ?", arrayOf(accountId), null, null, "id").use { c ->
+            buildList {
+                while (c.moveToNext()) add(OutboxRow(
+                    c.getLong(c.getColumnIndexOrThrow("id")), c.getString(c.getColumnIndexOrThrow("account_id")),
+                    c.getColumnIndexOrThrow("message_id").let { if (c.isNull(it)) null else c.getLong(it) },
+                    c.getInt(c.getColumnIndexOrThrow("port")), c.getBlob(c.getColumnIndexOrThrow("packet")),
+                    c.getColumnIndexOrThrow("chain_tag").let { if (c.isNull(it)) null else c.getBlob(it) },
+                    c.getColumnIndexOrThrow("counter").let { if (c.isNull(it)) null else c.getLong(it) },
+                    c.getLong(c.getColumnIndexOrThrow("created")), c.getInt(c.getColumnIndexOrThrow("tries")),
+                    c.getLong(c.getColumnIndexOrThrow("next_try")), c.getString(c.getColumnIndexOrThrow("state")),
+                ))
+            }
+        }
+
+    /** True the first time a hello [id] is seen; false for a replay (review F2). */
+    fun firstHello(id: ByteArray, now: Long): Boolean =
+        writableDatabase.insertWithOnConflict("hellos_seen", null, ContentValues().apply { put("id", id); put("at", now) },
+            SQLiteDatabase.CONFLICT_IGNORE) != -1L
+
+    fun personChat(accountId: String, name: String): Chat = chatFor(ChatKind.PERSON, accountId, name)
 
     fun groupChat(channel: Int = 0): Chat = chatFor(ChatKind.GROUP, "channel:$channel", "")
 
@@ -444,6 +594,6 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 5
+        const val VERSION = 6
     }
 }

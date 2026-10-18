@@ -597,3 +597,22 @@ l'affichage précédent…" shows meanwhile; the time shown counts only the work
   serial radio against a fake radio; HTTPS with a pinned key (a wrong key is refused) and a real sealed message from
   one phone's session through the hub to the other's.
 - Not yet checked: the radio on the Mac's USB port (needs the owner's radio).
+
+## Accounts step 9: keys and storage on the phone
+
+- `AccountStore` (app): the identity key in the Android Keystore (P-256, sign and agree) on Android 12+, otherwise a
+  software key sealed by `Vault` (a Keystore AES-256-GCM key; every sealed value bound to its row's label). Signed
+  prekeys are sealed software keys, rotated every 30 days, the previous one kept 30 more. Sessions are stored sealed,
+  with their serial outside the sealed bytes; an older or equal serial is refused (review F6), and a packet is stored
+  in the same transaction as the state that sealed it (F3).
+- History v6: `account`, `prekeys`, `contacts`, `sessions`, `outbox`, `hellos_seen`; chat kind `PERSON`. Skipped
+  message keys stay inside each sealed session state and recipient codes are derived from it, so the plan's
+  `skipped_keys` and `codes` tables are not needed. Old radio chats become read-only with the step 12 screens.
+- Emulator (API 35), `.local/receipts/step9-a.txt`: `AccountStoreTest` 8, `HistoryTest` 13, `AppBoundaryTest` 3, OK (24).
+  Covers the Keystore and the forced Android 10/11 path each running a real QR start and messages both ways with the
+  core, keys and agreements surviving a restart, prekey rotation (a hello to the old card opens for 30 days, not 60),
+  sessions refusing an older state and a sealed state moved to another row, hello replays, no key in logcat, and a
+  version-5 history keeping chats, messages and pictures. `AppCoreTest` 41 rerun: `.local/receipts/step9-b.txt`.
+- `grep -ln History app/src/androidTest` lists only `AccountStoreTest` and `HistoryTest`, both run.
+- Still to check on the owner phones: the Keystore path on the Pixel (Android 15, hardware) and the sealed path and
+  JCA names on the Fairphone (Android 10).

@@ -20,12 +20,14 @@ import java.util.Locale
  * `adb shell am broadcast -p org.phonemesh.app -a org.phonemesh.app.T1_SEND --ei run 1 --ei count 5 --ei gapMs 6000`.
  * Every send and arrival goes to logcat (tag PhonemeshT1) and to files/t1-probe.log, which outlives the log's rollover.
  */
-internal class T1ProbeRun(private val app: Context, private val send: (ByteArray) -> Long) {
+// Probe builds only (src/probe, -Pphonemesh.t1probe=true).
+@android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
+class T1ProbeRun(private val app: Context, private val send: (ByteArray) -> Long) : RadioProbe {
     private val main = Handler(Looper.getMainLooper())
     private val file = File(app.filesDir, "t1-probe.log")
     private val clock = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT)
 
-    fun start() {
+    override fun start() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val run = intent.getIntExtra("run", 0)
@@ -46,7 +48,7 @@ internal class T1ProbeRun(private val app: Context, private val send: (ByteArray
         note("probe ready")
     }
 
-    fun got(sender: String, payload: ByteArray, channel: Int, packetId: Long, signal: String) {
+    override fun got(sender: String, payload: ByteArray, channel: Int, packetId: Long, signal: String) {
         val got = T1Probe.read(payload)
         note(if (got == null) "got damaged-or-foreign from=$sender size=${payload.size} channel=$channel id=$packetId $signal"
         else "got run=${got.run} seq=${got.seq} intact size=${payload.size} from=$sender channel=$channel id=$packetId $signal")

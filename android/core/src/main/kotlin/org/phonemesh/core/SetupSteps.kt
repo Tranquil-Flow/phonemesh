@@ -1,7 +1,8 @@
 package org.phonemesh.core
 
 /** The three numbered setup steps, in order. */
-enum class SetupStep { VOICE, RADIO, HELLO }
+/** NAME: the person's own name and colour (accounts spec, "First launch"); it needs the voice to hear the name. */
+enum class SetupStep { VOICE, NAME, RADIO, HELLO }
 
 /** What the chats screen shows above the chats. */
 sealed interface SetupView {
@@ -11,7 +12,7 @@ sealed interface SetupView {
     /** Every step is done: show the green state for two seconds and remember that setup is finished. */
     data object Complete : SetupView
 
-    /** After setup: one slim card per lost voice or radio, voice first, without step numbers. */
+    /** After setup: one slim card per lost voice or radio, or a missing name, voice first, without step numbers. */
     data class Problems(val lost: List<SetupStep>) : SetupView
 
     data object Hidden : SetupView
@@ -19,18 +20,23 @@ sealed interface SetupView {
 
 /** The setup guide's rule (spec "Chats: guided setup"). Once finished, the guide never returns; Hello never comes back. */
 object SetupSteps {
-    val ORDER = listOf(SetupStep.VOICE, SetupStep.RADIO, SetupStep.HELLO)
+    val ORDER = listOf(SetupStep.VOICE, SetupStep.NAME, SetupStep.RADIO, SetupStep.HELLO)
 
     fun number(step: SetupStep): Int = ORDER.indexOf(step) + 1
 
-    fun of(voiceReady: Boolean, radioConnected: Boolean, messageSent: Boolean, finished: Boolean): SetupView {
+    /**
+     * [named]: the person saved a name. A phone that finished setup before names existed shows the name as a slim card
+     * until one is saved.
+     */
+    fun of(voiceReady: Boolean, named: Boolean, radioConnected: Boolean, messageSent: Boolean, finished: Boolean): SetupView {
         val done = buildSet {
             if (voiceReady) add(SetupStep.VOICE)
+            if (named) add(SetupStep.NAME)
             if (radioConnected) add(SetupStep.RADIO)
             if (messageSent) add(SetupStep.HELLO)
         }
         if (finished) {
-            val lost = listOf(SetupStep.VOICE, SetupStep.RADIO).filter { it !in done }
+            val lost = listOf(SetupStep.VOICE, SetupStep.NAME, SetupStep.RADIO).filter { it !in done }
             return if (lost.isEmpty()) SetupView.Hidden else SetupView.Problems(lost)
         }
         val current = ORDER.firstOrNull { it !in done } ?: return SetupView.Complete

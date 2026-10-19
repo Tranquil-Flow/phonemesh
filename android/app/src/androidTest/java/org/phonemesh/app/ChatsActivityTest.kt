@@ -199,11 +199,11 @@ class ChatsActivityTest {
     }
 
     @Test fun setupIsANumberedGuideThatFoldsAwayWhenDone() {
-        TestCore.install(voices = emptyList(), connected = false)
+        TestCore.install(voices = emptyList(), connected = false, named = false)
         val chats = start()
         val voiceCard = Views.tagged(chats, "card_voice")!!
         assertNotNull("the current step is numbered", Views.tagged(chats, "step_of"))
-        assertEquals("ÉTAPE 1 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 1 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
         saveSetupPicture(chats, "step1")
         assertNotNull(Views.descendants(voiceCard).filterIsInstance<TextView>()
             .firstOrNull { Views.textOf(it) == "Voix française · 66 Mo · une seule fois" })
@@ -216,6 +216,7 @@ class ChatsActivityTest {
         assertNull(Views.tagged(chats, "card_radio"))
         assertNotNull(Views.tagged(chats, "step_row:2"))
         assertNotNull(Views.tagged(chats, "step_row:3"))
+        assertNotNull(Views.tagged(chats, "step_row:4"))
         assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
         assertEquals("step 1 shows only the steps", listOf(false, false, false), chatParts(chats))
 
@@ -224,9 +225,26 @@ class ChatsActivityTest {
             // This disk-only helper does not send AppCore's normal pack notification.
             chats.onCoreChange(AppCore.Change.PACKS)
         }
-        assertNotNull(Views.tagged(chats, "card_radio"))
-        assertEquals("ÉTAPE 2 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        // Step 2: the name, which needs the voice to hear it.
+        assertNotNull(Views.tagged(chats, "card_name"))
+        assertEquals("ÉTAPE 2 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
         assertNotNull(Views.tagged(chats, "step_done:1"))
+        assertNotNull(Views.withText(chats, "Dites votre nom"))
+        assertNotNull(Views.tagged(chats, "howto:hello"))
+        assertEquals("step 2 shows only the steps", listOf(false, false, false), chatParts(chats))
+        saveSetupPicture(chats, "step-name")
+        Views.tap(chats, "name_open")
+        Views.waitUntil { resumedNow() is NameActivity }
+        Views.finish(Views.resumed())
+        Views.waitUntil { resumedNow() === chats }
+        TestCore.onMain { core.saveAccount("Awa", 3) }
+        TestCore.onMain { chats.onCoreChange(AppCore.Change.MESSAGES) }
+
+        assertNotNull(Views.tagged(chats, "card_radio"))
+        assertEquals("ÉTAPE 3 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertNotNull(Views.tagged(chats, "step_done:1"))
+        assertNotNull(Views.tagged(chats, "step_done:2"))
+        assertNotNull("the done row shows the name", Views.withText(chats, "Awa"))
         // The pinned voice-only archive is 6 MB; the missing engine plus voice was 66 MB.
         assertNotNull(Views.withText(chats, "Voix française · 6 Mo"))
         assertNotNull(Views.withText(chats, "Connecter la radio"))
@@ -243,9 +261,10 @@ class ChatsActivityTest {
 
         TestCore.onMain { TestCore.radio.connected(true) }
         assertNotNull(Views.tagged(chats, "card_hello"))
-        assertEquals("ÉTAPE 3 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 4 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
         assertNotNull(Views.tagged(chats, "step_done:1"))
         assertNotNull(Views.tagged(chats, "step_done:2"))
+        assertNotNull(Views.tagged(chats, "step_done:3"))
         assertEquals("Radio connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
         assertNotNull(Views.tagged(chats, "howto:hello"))
         assertEquals("step 3 shows only the steps", listOf(false, false, false), chatParts(chats))
@@ -265,7 +284,7 @@ class ChatsActivityTest {
         assertTrue(core.settings.setupFinished)
         TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
         Views.waitUntil(4_000) { Views.descendants(chats.window.decorView).none { it.tag == "setup_done" && it.isShown } }
-        listOf("card_voice", "card_radio", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
+        listOf("card_voice", "card_name", "card_radio", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
         assertEquals(listOf(true, false, true), chatParts(chats))
         assertTrue(core.canTalk())
         Views.finish(chats)
@@ -273,6 +292,22 @@ class ChatsActivityTest {
         assertNull("setup never returns on reopening", Views.tagged(reopened, "step_of"))
         assertEquals(listOf(true, false, true), chatParts(reopened))
         assertNull(Views.tagged(reopened, "setup_done"))
+    }
+
+    /** A phone that finished setup before names existed: one slim card asks for the name; the chats stay. */
+    @Test fun aPhoneSetUpBeforeNamesGetsASlimNameCard() {
+        TestCore.install(named = false)
+        TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
+        val chats = start()
+        assertNotNull(Views.tagged(chats, "card_name"))
+        assertNull("no step numbers", Views.tagged(chats, "step_of"))
+        assertEquals("the chats, their empty hint and the plus stay", listOf(true, true, true), chatParts(chats))
+        Views.tap(chats, "name_open")
+        Views.waitUntil { resumedNow() is NameActivity }
+        TestCore.onMain { core.saveAccount("Kofi", 1) }
+        Views.finish(Views.resumed())
+        Views.waitUntil { resumedNow() === chats }
+        Views.waitUntil { Views.descendants(chats.window.decorView).none { it.tag == "card_name" } }
     }
 
     /** Owner report: on opening, the app said "find the radio" while it was still reconnecting by itself. */
@@ -694,7 +729,8 @@ class ChatsActivityTest {
     }
 
     /** Step 2 counts only once the radio has a region; connecting alone does not tick it, and nothing is written. */
-    @Test fun stepTwoWaitsForTheRadioRegion() {
+    /** The radio is step 3 (after the voice and the name). */
+    @Test fun theRadioStepWaitsForTheRadioRegion() {
         TestCore.install(connected = false)
         TestCore.access.country = "TG"
         TestCore.onMain {
@@ -705,11 +741,11 @@ class ChatsActivityTest {
         val chats = start()
         assertNotNull(Views.tagged(chats, "card_radio"))
         assertNotNull(Views.tagged(chats, "card_region"))
-        assertNull(Views.tagged(chats, "step_done:2"))
+        assertNull(Views.tagged(chats, "step_done:3"))
         assertNull(Views.tagged(chats, "card_hello"))
         TestCore.onMain { TestCore.radio.connected(false); TestCore.radio.region = "EU_868"; TestCore.radio.connected(true) }
         assertNotNull(Views.tagged(chats, "card_hello"))
-        assertNotNull(Views.tagged(chats, "step_done:2"))
+        assertNotNull(Views.tagged(chats, "step_done:3"))
         assertNull(Views.tagged(chats, "card_region"))
         assertTrue(TestCore.radio.regionWrites.isEmpty())
     }
@@ -771,7 +807,7 @@ class ChatsActivityTest {
             assertSame(chats, Views.resumed())
             val card = Views.tagged(chats, "card_voice")!!
             assertTrue("the guide sits in the step's card", TestCore.onMain { Views.descendants(card).any { it === guide } })
-            assertEquals("ÉTAPE 1 SUR 3", Views.textOf(Views.tagged(chats, "step_of")!!))
+            assertEquals("ÉTAPE 1 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
             assertNotNull(Views.withText(chats, "2 · D'un ami"))
             val shown = TestCore.onMain { Views.descendants(guide).filter { it.isShown } }
             assertEquals(listOf("howto:friend", "howto:allow"), shown.filterIsInstance<HowToView>().map { it.tag })

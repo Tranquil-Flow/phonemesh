@@ -323,4 +323,25 @@
     <string name="reaction_waiting">Your reaction goes when a radio is ready.</string>
     <string name="picture_label">Picture</string>
     <string name="picture_working">Making the picture…</string>
+    <!-- Accounts: the person's own name and colour (plan step 10). -->
+    <string name="step_name">Say your name</string>
+    <string name="step_name_button">Say my name</string>
+    <string name="name_title">Your name</string>
+    <string name="name_say">Hold the microphone and say your name.</string>
+    <string name="name_no_voice">No voice yet. Type your name.</string>
+    <string name="name_check">Is it right? You can change it.</string>
+    <string name="name_colour">Pick your colour</string>
+    <string name="name_save">Save</string>
+    <string name="name_too_long">Too long. Use a shorter name.</string>
+    <string name="name_invalid">This name cannot be used.</string>
+    <string name="settings_my_name">My name</string>
+    <string name="name_unset">Not chosen yet</string>
+    <string name="colour_red">Red</string>
+    <string name="colour_orange">Orange</string>
+    <string name="colour_yellow">Yellow</string>
+    <string name="colour_green">Green</string>
+    <string name="colour_blue">Blue</string>
+    <string name="colour_purple">Purple</string>
+    <string name="colour_pink">Pink</string>
+    <string name="colour_brown">Brown</string>
 </resources>

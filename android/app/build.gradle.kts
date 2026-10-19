@@ -18,8 +18,9 @@ require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phon
 val picturesBuild = project.findProperty("phonemesh.pictures") != "false"
 // Hardware test T1 of the accounts spec: -Pphonemesh.t1probe=true adds a probe that adb starts (T1ProbeRun). Debug only.
 val t1Probe = project.findProperty("phonemesh.t1probe") == "true"
-// Hardware test T2 (joining a hub's Wi-Fi with no internet): -Pphonemesh.t2probe=true adds T2ProbeRun and, through
-// src/probe/AndroidManifest.xml, the Wi-Fi permissions it needs. Debug only; never in a normal build.
+// Hardware test T2 (joining a hub's Wi-Fi with no internet): -Pphonemesh.t2probe=true adds src/probe/java (T2ProbeRun)
+// and, through src/probe/AndroidManifest.xml, the Wi-Fi permissions it needs. Debug only; its code is not even compiled
+// into a normal build.
 val t2Probe = project.findProperty("phonemesh.t2probe") == "true"
 val publishedPackBaseUrl = "https://github.com/Tranquil-Flow/phonemesh-packs/releases/download/packs-1/"
 val emulatorPackBaseUrl = "http://10.0.2.2:8777/"
@@ -85,6 +86,7 @@ android {
             manifest.srcFile("src/debug/AndroidManifest.xml")
             res.srcDirs("src/debug/res")
         }
+        if (t1Probe || t2Probe) getByName("debug") { java.srcDir("src/probe/java") }
         if (t2Probe) getByName("debug") { manifest.srcFile("src/probe/AndroidManifest.xml") }
     }
     packaging {

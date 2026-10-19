@@ -319,4 +319,25 @@
     <string name="reaction_waiting">Votre réaction partira dès qu\'une radio sera prête.</string>
     <string name="picture_label">Photo</string>
     <string name="picture_working">Préparation de la photo…</string>
+    <!-- Accounts: the person's own name and colour (plan step 10). -->
+    <string name="step_name">Dites votre nom</string>
+    <string name="step_name_button">Dire mon nom</string>
+    <string name="name_title">Votre nom</string>
+    <string name="name_say">Tenez le micro et dites votre nom.</string>
+    <string name="name_no_voice">Pas encore de voix. Écrivez votre nom.</string>
+    <string name="name_check">C\'est juste ? Vous pouvez le changer.</string>
+    <string name="name_colour">Choisissez votre couleur</string>
+    <string name="name_save">Enregistrer</string>
+    <string name="name_too_long">Trop long. Prenez un nom plus court.</string>
+    <string name="name_invalid">Ce nom ne peut pas servir.</string>
+    <string name="settings_my_name">Mon nom</string>
+    <string name="name_unset">Pas encore choisi</string>
+    <string name="colour_red">Rouge</string>
+    <string name="colour_orange">Orange</string>
+    <string name="colour_yellow">Jaune</string>
+    <string name="colour_green">Vert</string>
+    <string name="colour_blue">Bleu</string>
+    <string name="colour_purple">Violet</string>
+    <string name="colour_pink">Rose</string>
+    <string name="colour_brown">Marron</string>
 </resources>

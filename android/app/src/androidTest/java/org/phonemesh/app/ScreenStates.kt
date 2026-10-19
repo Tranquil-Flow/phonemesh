@@ -66,6 +66,28 @@ object ScreenStates {
     }
 
     /** Step 1 on a phone whose download could not reach the internet: the friend is the filled button. */
+    /** Step 2: say your name (the voice is ready, no name yet). */
+    fun chatsStepName(): Activity {
+        TestCore.install(connected = false, named = false)
+        val screen = Views.start(ChatsActivity::class.java)
+        expect(Views.tagged(screen, "card_name") != null && Views.tagged(screen, "name_open") != null, "the name step and its button")
+        return screen
+    }
+
+    /** The name screen: empty, or with a heard name and a colour picked. */
+    fun nameScreen(filled: Boolean): Activity {
+        TestCore.install(named = false)
+        val screen = Views.start(NameActivity::class.java)
+        if (filled) {
+            val field = Views.tagged(screen, "name_field") as android.widget.EditText
+            TestCore.onMain { field.setText("Aminata") }
+            Views.tap(screen, "colour_4")
+            val save = Views.tagged(screen, "name_save")!!
+            expect(TestCore.onMain { save.isEnabled }, "Save is on")
+        }
+        return screen
+    }
+
     fun chatsStepOneOffline(): Activity {
         TestCore.install(voices = emptyList(), connected = false)
         TestCore.access.offline = true
@@ -676,6 +698,7 @@ object ScreenStates {
         "02-chats-step1" to { chatsStep(1) },
         "02-chats-step1-offline" to { chatsStepOneOffline() },
         "02-chats-friend-guide" to { chatsFriendGuide() },
+        "02-chats-step-name" to { chatsStepName() },
         "02-chats-step2" to { chatsStep(2) },
         "02-chats-step3" to { chatsStep(3) },
         "02-chats-radio-lost" to { chatsRadioLost() },
@@ -702,6 +725,8 @@ object ScreenStates {
         "07-writing" to { writing() },
         "08-radio" to { radio() },
         "09-settings" to { settings() },
+        "09-name" to { nameScreen(filled = false) },
+        "09-name-filled" to { nameScreen(filled = true) },
         "10-help" to { help() },
         "10-help-more" to { help(group = 2) },
         "11-note-picture" to { noteWithPicture() },

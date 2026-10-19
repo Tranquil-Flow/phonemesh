@@ -21,6 +21,25 @@ object Names {
         return name.isNotBlank()
     }
 
+    /** The longest name the app takes: it fits a contact card (40 bytes) and a shared-chat post (24). */
+    const val MAX_BYTES = 24
+
+    /** [name] cut to at most [maxBytes] UTF-8 bytes, never inside a character, then trimmed. */
+    fun fit(name: String, maxBytes: Int = MAX_BYTES): String {
+        var bytes = 0
+        val out = StringBuilder()
+        var i = 0
+        while (i < name.length) {
+            val point = name.codePointAt(i)
+            val size = String(Character.toChars(point)).toByteArray(Charsets.UTF_8).size
+            if (bytes + size > maxBytes) break
+            out.appendCodePoint(point)
+            bytes += size
+            i += Character.charCount(point)
+        }
+        return out.toString().trim()
+    }
+
     /** What a person typed or said, made valid where it can be: NFC, controls removed, trimmed. */
     fun clean(name: String): String =
         Normalizer.normalize(name, Normalizer.Form.NFC).filter { !Character.isISOControl(it) && Character.getType(it) != Character.FORMAT.toInt() }.trim()

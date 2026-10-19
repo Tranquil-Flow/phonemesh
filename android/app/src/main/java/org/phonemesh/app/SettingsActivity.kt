@@ -17,6 +17,8 @@ import org.phonemesh.core.SetupPlan
 /** Settings: language, appearance, the Fast/Accurate speech cards, voice packs, share the app, licences, For helpers. */
 class SettingsActivity : ScreenActivity() {
     private lateinit var languageValue: TextView
+    private lateinit var nameValue: TextView
+    private lateinit var nameDot: View
     private lateinit var packList: LinearLayout
     private lateinit var themes: LinearLayout
     private lateinit var engineList: LinearLayout
@@ -31,6 +33,7 @@ class SettingsActivity : ScreenActivity() {
         }
         column.addView(backBar(getString(R.string.settings)))
         column.addView(noteLine())
+        column.addView(nameRow())
         column.addView(languageRow())
         column.addView(section(R.string.settings_appearance))
         themes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -75,6 +78,26 @@ class SettingsActivity : ScreenActivity() {
         show(ScrollView(this).apply { addView(column) })
     }
 
+    /** The person's own name and colour; tapping opens the name screen. */
+    private fun nameRow(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = Ui.dp(this@SettingsActivity, 64)
+            isClickable = true
+            tag = "settings_name"
+            contentDescription = getString(R.string.settings_my_name)
+            setOnClickListener { NameActivity.open(this@SettingsActivity) }
+        }
+        nameDot = View(this)
+        row.addView(nameDot, LinearLayout.LayoutParams(Ui.dp(this, 32), Ui.dp(this, 32)))
+        row.addView(Ui.text(this, getString(R.string.settings_my_name), palette.text, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
+        nameValue = Ui.content(Ui.text(this, "", palette.muted).apply { tag = "name_value" })
+        row.addView(nameValue)
+        return row
+    }
+
     private fun languageRow(): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -102,6 +125,9 @@ class SettingsActivity : ScreenActivity() {
 
     override fun render() {
         languageValue.text = core.currentLanguage().endonym
+        val account = core.account()
+        nameValue.text = account?.first ?: getString(R.string.name_unset)
+        nameDot.background = if (account != null) Ui.circle(AccountColours.argb(account.second)) else Ui.outline(this, palette.background, palette.outline, radiusDp = 16)
         helpers.visibility = if (core.connected) View.VISIBLE else View.GONE
         renderThemes()
         val downloads = core.downloads()

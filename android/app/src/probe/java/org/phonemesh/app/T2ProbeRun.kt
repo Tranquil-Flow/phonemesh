@@ -32,16 +32,16 @@ import kotlin.concurrent.thread
  *   then `... -a org.phonemesh.app.T2_LEAVE`.
  * Everything goes to logcat (tag PhonemeshT2) and files/t2-probe.log.
  */
-// Its permissions exist only in probe builds (src/probe/AndroidManifest.xml); it never runs otherwise.
-@SuppressLint("MissingPermission")
-internal class T2ProbeRun(private val app: Context) {
+// Probe builds only: this file and its permissions (src/probe) are added by -Pphonemesh.t2probe=true; Android 10+.
+@SuppressLint("MissingPermission", "NewApi")
+class T2ProbeRun(private val app: Context) : RadioProbe {
     private val file = File(app.filesDir, "t2-probe.log")
     private val clock = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT)
     private val connectivity = app.getSystemService(ConnectivityManager::class.java)
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var server: ServerSocket? = null
 
-    fun start() {
+    override fun start() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {

@@ -241,7 +241,7 @@ class ChatsActivity : ScreenActivity() {
         // The radio step is done only once the radio has its region; until then the region card takes the step's place.
         val region = RegionCards.body(this, palette, core, regionPicture)
         var regionShown = false
-        val view = SetupSteps.of(voiceReady, core.radioReady(), settings.firstMessageSent, settings.setupFinished)
+        val view = SetupSteps.of(voiceReady, core.account() != null, core.radioReady(), settings.firstMessageSent, settings.setupFinished)
         when (view) {
             is SetupView.Guide -> {
                 regionShown = view.current == SetupStep.RADIO && region != null
@@ -306,6 +306,7 @@ class ChatsActivity : ScreenActivity() {
 
     private fun stepTitle(step: SetupStep) = getString(when (step) {
         SetupStep.VOICE -> R.string.step_voice
+        SetupStep.NAME -> R.string.step_name
         SetupStep.RADIO -> R.string.setup_radio_title
         SetupStep.HELLO -> R.string.step_hello
     })
@@ -319,6 +320,7 @@ class ChatsActivity : ScreenActivity() {
 
     private fun stepHint(step: SetupStep, missing: List<CatalogEntry>) = when (step) {
         SetupStep.VOICE -> stepDetail(step, missing) ?: getString(R.string.setup_voice_title)
+        SetupStep.NAME -> getString(R.string.name_say)
         SetupStep.RADIO -> getString(R.string.setup_radio_hint)
         SetupStep.HELLO -> getString(R.string.step_hello_hint)
     }
@@ -327,12 +329,17 @@ class ChatsActivity : ScreenActivity() {
         SetupStep.VOICE -> GeneratedPackCatalog.entries.firstOrNull { it.id == core.currentLanguage().voicePackId }
             ?.let { getString(R.string.step_voice_done, getString(R.string.setup_voice_title), SetupPlan.megabytes(listOf(it))) }
             ?: getString(R.string.setup_voice_title)
+        SetupStep.NAME -> core.account()?.first.orEmpty()
         SetupStep.RADIO -> getString(R.string.radio_connected)
         SetupStep.HELLO -> getString(R.string.step_hello_done)
     }
 
     private fun stepActions(step: SetupStep, missing: List<CatalogEntry>, numbered: Boolean): View = when (step) {
         SetupStep.VOICE -> voiceActions(missing, numbered)
+        SetupStep.NAME -> Ui.button(this, palette, getString(R.string.step_name_button), R.drawable.ic_mic, filled = true).apply {
+            tag = "name_open"
+            setOnClickListener { NameActivity.open(this@ChatsActivity) }
+        }.let { padded(it) }
         SetupStep.RADIO -> Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search, filled = true).apply {
             tag = "radio_search"
             setOnClickListener { openRadio() }

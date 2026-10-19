@@ -55,6 +55,7 @@ class AppCore private constructor(
     val settings: Settings,
     val access: DeviceAccess,
     private val planAlarm: PlanAlarm,
+    private val accountKeys: String = "phonemesh",
 ) : MeshRadio.Listener {
     enum class Change { RADIO, SCAN, MESSAGES, DELIVERY, PEERS, PACKS, RECORDING, PLAYBACK, NOTE, REGION }
     enum class RecordState { IDLE, RECORDING, TRANSCRIBING }
@@ -167,11 +168,11 @@ class AppCore private constructor(
     }
     private val random = SecureRandom()
     val picturesDir: File get() = File(app.filesDir, "pictures").apply { mkdirs() }
-    private val t1 = if (BuildConfig.T1_PROBE) T1ProbeRun(app) { radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, it, PRIMARY_CHANNEL) } else null
+    private val t1 = if (BuildConfig.T1_PROBE) RadioProbe.load("T1ProbeRun", app) { radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, it, PRIMARY_CHANNEL) } else null
 
     init {
         t1?.start()
-        if (BuildConfig.T2_PROBE) T2ProbeRun(app).start()
+        if (BuildConfig.T2_PROBE) RadioProbe.load("T2ProbeRun", app)?.start()
         history.expireWaiting()
         history.loseUnfinishedPictures()
         history.groupChat(PRIMARY_CHANNEL)
@@ -1061,6 +1062,20 @@ class AppCore private constructor(
         settings.firstMessageSent = false
     }
 
+    // ---- Account (accounts plan step 10)
+
+    /** This phone's account keys; made on first use (the first time a name is saved). */
+    val accounts: AccountStore by lazy { AccountStore(history, keyPrefix = accountKeys) }
+
+    /** The chosen name and colour, or null before a name is saved. Reads only: no keys are made. */
+    fun account(): Pair<String, Int>? = history.accountRow()?.takeIf { it.name.isNotEmpty() }?.let { it.name to it.colour }
+
+    /** Saves the name and colour, making the account's keys the first time. */
+    fun saveAccount(name: String, colour: Int) {
+        accounts.setName(name, colour)
+        changed(Change.MESSAGES)
+    }
+
     // ---- Playback
 
     /** Plays a message; tapping the one playing stops it. One at a time. */
@@ -1279,6 +1294,8 @@ class AppCore private constructor(
         const val DRAFT_PLAYBACK = -1L
         const val HOWTO_PLAYBACK = -2L
         const val LINE_PLAYBACK = -3L
+        /** The name screen records into this draft. */
+        const val NAME_DRAFT = -4L
         const val BROADCAST = "^all"
         const val BACKGROUND_GRACE_MS = 60_000L
         const val CONNECT_WAIT_MS = 35_000L
@@ -1322,6 +1339,8 @@ class AppCore private constructor(
             Settings(app, prefsName),
             access ?: PhoneAccess(app),
             planAlarm ?: SystemPlanAlarm(app),
+            // Tests use their own Keystore names, so they never replace a real account's key.
+            if (historyName == HISTORY_DB) "phonemesh" else "test-core",
         )
 
         /** "Radio 4a2f": the last four hex digits of a radio id with no name yet. */

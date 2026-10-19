@@ -535,3 +535,19 @@ pork and alcohol, religious symbols, French homophones (ancre/encre), and a cres
 | 61 | chair | chaise |
 | 62 | sun | soleil |
 | 63 | basket | panier |
+
+## Name and colour as built (step 10)
+
+- **Setup guide, four steps:** voice, then **name**, then radio, then hello. The name needs the voice to hear it, and
+  every message in the shared chat will carry it. A phone that finished setup before names existed shows one slim
+  "Dites votre nom" card, without a number, until a name is saved.
+- **Name screen:** hold the microphone (or tap, then tap again) and say the name; it is written in a large field to
+  correct by hand and read back with the app's voice. Without a voice yet, the name is typed. At most 24 UTF-8 bytes,
+  so the same name fits a card (40) and a shared-chat post (24); hidden and control characters are refused.
+- **Colours:** eight, picked as large circles with a tick: red, orange, yellow, green, blue, purple, pink, brown. The
+  card carries the number 0-7; an unknown number from another phone shows grey.
+- **Settings:** a "Mon nom" row with the colour dot opens the same screen. Saving the first time makes the account's
+  keys; changing the name later keeps them.
+- **Moved to step 11, where the QR code exists:** "Montrer mon code" in Settings and the guide's "add someone" step.
+- **Picture:** the name step reuses the hello picture (hold the microphone and speak); its own picture goes to the
+  how-to review (gate G4).

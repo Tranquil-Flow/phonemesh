@@ -17,6 +17,7 @@ object StepCard {
 
     fun tag(step: SetupStep) = when (step) {
         SetupStep.VOICE -> "card_voice"
+        SetupStep.NAME -> "card_name"
         SetupStep.RADIO -> "card_radio"
         SetupStep.HELLO -> "card_hello"
     }
@@ -24,11 +25,17 @@ object StepCard {
     /** The step's how-to scenes in order; pairing stays off pending real-radio evidence. */
     fun scenes(step: SetupStep): List<String> = when (step) {
         SetupStep.VOICE -> listOf("download", "friend")
+        // Holding the microphone and speaking, as for hello; a picture of its own waits for the how-to review (G4).
+        SetupStep.NAME -> listOf("hello")
         SetupStep.RADIO -> listOf("power", "close", "search")
         SetupStep.HELLO -> listOf("hello")
     }
 
-    fun problemScene(step: SetupStep): String = if (step == SetupStep.RADIO) "lost" else "download"
+    fun problemScene(step: SetupStep): String = when (step) {
+        SetupStep.RADIO -> "lost"
+        SetupStep.NAME -> "hello"
+        else -> "download"
+    }
 
     fun current(context: Context, palette: Palette, step: SetupStep, done: Int, title: String, picture: View, detail: String?, actions: View): View =
         LinearLayout(context).apply {

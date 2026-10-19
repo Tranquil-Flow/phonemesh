@@ -52,6 +52,9 @@ class AccountTest {
         }
         assertTrue(Names.valid("Amélie") && Names.valid("Moussa 2") && Names.valid("আমিনা"))
         assertEquals("Amélie", Names.clean(" Ame\u0301lie\u200B "))
+        assertEquals("a name is cut between characters", "é".repeat(12), Names.fit("é".repeat(20)))
+        assertEquals("Awa", Names.fit("Awa  ", 4))
+        assertTrue(Names.fit("😀".repeat(10)).toByteArray().size <= Names.MAX_BYTES)
     }
 
     /** Review F23: the identity key signs a labelled message, not the bare prekey. */

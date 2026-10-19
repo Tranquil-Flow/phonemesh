@@ -41,6 +41,11 @@ From handover 3 and the owner on 2026-10-14:
     Built with step 16 (owner, 2026-10-19).
 20. The accounts feature is finished on Meshtastic as planned. Reticulum and RNode are looked at afterwards, not
     before (owner, 2026-10-19).
+21. Adding someone is one screen, "Ajouter quelqu'un": this phone's code on top, then "Scanner un code" and "Envoyer
+    mon lien". A person added by link can talk at once and is marked "Pas rencontré" (Not met) until the safety
+    pictures are compared. The safety picture screen has no button that reads the names aloud (owner, 2026-10-19).
+22. Accept, Ignore and "Ce sont les mêmes" carry a large tick or cross as well as the word, and the how-to pictures
+    for them work without reading (owner, 2026-10-19).
 
 ## What an outsider can and cannot learn
 

@@ -37,6 +37,10 @@ From handover 3 and the owner on 2026-10-14:
     names (unique, searchable) come later, once designed (owner, 2026-10-14).
 18. The owner has two radios: T1 and the field test use both. The GitHub Pages link site may be published when the
     app needs it (owner, 2026-10-14).
+19. Phones also reach the hub over Bluetooth, so a village needs no Wi-Fi at all; Wi-Fi stays as the faster path.
+    Built with step 16 (owner, 2026-10-19).
+20. The accounts feature is finished on Meshtastic as planned. Reticulum and RNode are looked at afterwards, not
+    before (owner, 2026-10-19).
 
 ## What an outsider can and cannot learn
 

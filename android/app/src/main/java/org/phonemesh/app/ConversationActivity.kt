@@ -732,7 +732,8 @@ class ConversationActivity : ScreenActivity() {
         }
         override fun getCount() = items.size
         override fun getItem(position: Int) = items[position]
-        override fun getItemId(position: Int) = items[position].id
+        // ListView can ask for a stale position during the layout right after a delete (seen under load); no crash.
+        override fun getItemId(position: Int) = items.getOrNull(position)?.id ?: android.widget.AdapterView.INVALID_ROW_ID
         override fun hasStableIds() = true
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
             bubble(items[position], chat?.kind == ChatKind.GROUP, items.getOrNull(position - 1)?.time)

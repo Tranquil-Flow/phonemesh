@@ -5,9 +5,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 uv run ruff check src tests scripts android/scripts
 uv run ruff format --check src tests scripts android/scripts
-uv run --group packs pytest -q
+uv run --extra radio --group packs pytest -q
+uv run python -I android/scripts/test_check_network_boundary_hub.py
 cd android
-JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home ./gradlew --no-daemon --console plain \
-  :core:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest :app:testReleaseUnitTest \
+: "${JAVA_HOME:?Set JAVA_HOME to a JDK 17 installation}"
+"$JAVA_HOME/bin/java" -version
+./gradlew --no-daemon --max-workers=1 --console plain \
+  :core:test :hub:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest :app:testReleaseUnitTest \
   :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest :app:checkApkSize :app:checkNetworkBoundary
 echo CHECK_OK

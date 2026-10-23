@@ -1,0 +1,80 @@
+{
+  "ncnn-LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/Tencent/ncnn/20260526/LICENSE.txt",
+    "bytes": 6427,
+    "sha256": "7c974bac98848df46be1af5bdaa3c3c9c01f6082a90f55caeb7f60c6208aa255"
+  },
+  "zxing-LICENSE": {
+    "url": "https://raw.githubusercontent.com/zxing/zxing/zxing-3.5.4/LICENSE",
+    "bytes": 13320,
+    "sha256": "3f62881f0566227a24b12e5a754cc79f39aaa94883038e95c94812e1f50af42f"
+  },
+  "zxing-NOTICE": {
+    "url": "https://raw.githubusercontent.com/zxing/zxing/zxing-3.5.4/NOTICE",
+    "bytes": 664,
+    "sha256": "4db4b60aace29ec6c5c4f13ca9cac1930d3c0c54bcc67dceead0c10771120e66"
+  },
+  "sherpa-LICENSE": {
+    "url": "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.8/LICENSE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  },
+  "onnx-LICENSE": {
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/LICENSE",
+    "bytes": 1073,
+    "sha256": "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c"
+  },
+  "protobuf-LICENSE": {
+    "url": "https://raw.githubusercontent.com/protocolbuffers/protobuf/v25.5/LICENSE",
+    "bytes": 1732,
+    "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+  },
+  "espeak-COPYING": {
+    "url": "https://raw.githubusercontent.com/espeak-ng/espeak-ng/1.52.0/COPYING",
+    "bytes": 35147,
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "version_binding": "license text reference; not evidence of exact embedded native revision"
+  },
+  "meshtastic-LICENSE": {
+    "url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "version_binding": "license and complete vendored .proto byte comparison at an observed matching revision; see meshtastic-source-matches.json; original checkout and binary reproducibility not established"
+  },
+  "thumbhash-LICENSE.md": {
+    "url": "https://raw.githubusercontent.com/evanw/thumbhash/main/LICENSE.md",
+    "bytes": 1056,
+    "sha256": "cb617674a539bd988a3008e0741c7050dc44cccc5ba57f1755e3598f821d801a",
+    "version_binding": "verbatim MIT text; source port preserves copyright; main is not a pinned implementation revision"
+  },
+  "espeak-piper-COPYING": {
+    "url": "https://raw.githubusercontent.com/csukuangfj/espeak-ng/ed530aa113046142eb5115cf2fc9157854d0ffe1/COPYING",
+    "bytes": 35147,
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "version_binding": "upstream sherpa-onnx v1.13.8 build-recipe pin; not an independent rebuild/inspection of embedded native revision"
+  },
+  "onnx-ThirdPartyNotices.txt": {
+    "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/ThirdPartyNotices.txt",
+    "bytes": 325054,
+    "sha256": "0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2",
+    "version_binding": "upstream source version notices; see native recipe evidence"
+  },
+  "nanopb-LICENSE.txt": {
+    "url": "https://raw.githubusercontent.com/nanopb/nanopb/160d4f09e5fabb2b66aa2dea32d4f38ace2c4b3f/LICENSE.txt",
+    "bytes": 898,
+    "sha256": "e2f2fc8fe3faa7dcb09dbe995db48c6ec5c1f72705db915101e4a83fed44f66d",
+    "version_binding": "Applicable zlib-style notice retained from an observed immutable source; license pin is not a unique original nanopb version claim."
+  },
+  "piper-phonemize-LICENSE.md": {
+    "url": "https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/LICENSE.md",
+    "bytes": 1071,
+    "sha256": "13746d509d74e55ea2265fbef204bb7cdbf84a8315b0207e988326cb54387028",
+    "version_binding": "sherpa-onnx v1.13.8 upstream Piper recipe pins csukuangfj/piper-phonemize f3ff95afc03640bc1399e113e83361192a2fafb4; license byte comparison, not an independent rebuild of the embedded native binary"
+  },
+  "uni-algo-LICENSE.md": {
+    "url": "https://raw.githubusercontent.com/csukuangfj/piper-phonemize/f3ff95afc03640bc1399e113e83361192a2fafb4/licenses/uni-algo/LICENSE.md",
+    "bytes": 2208,
+    "sha256": "c55648b02873556d6ab2de14938998101fda3a0f293337542af9196435def318",
+    "version_binding": "sherpa-onnx v1.13.8 upstream Piper recipe pins csukuangfj/piper-phonemize f3ff95afc03640bc1399e113e83361192a2fafb4; license byte comparison, not an independent rebuild of the embedded native binary"
+  }
+}

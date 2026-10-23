@@ -60,5 +60,5 @@ def test_missing_variant_or_rows_fail():
 
 def test_only_an_emulator_is_accepted():
     with pytest.raises(SystemExit):
-        cv.require_emulator("OWNER-PHONE-1")
+        cv.require_emulator("test-physical-phone")
     cv.require_emulator("emulator-5584")

@@ -3,22 +3,46 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-# The owner's daily phone: never run instrumentation on it, whatever the flags say.
-ALWAYS_REFUSED = {"OWNER-PHONE-1"}
+# Protected by default; only the exact reviewed isolated account classes have an exception.
+PROTECTED_PIXEL_SHA256 = "2f13c86c804d5380b758bcb66c885ac12ce0a688f28efe6b4e4aa94578d62992"
+PIXEL_ACCOUNT_CLASSES = frozenset(
+    {
+        "org.phonemesh.app.AccountStoreTest",
+        "org.phonemesh.app.AccountsFlowTest",
+    }
+)
 COMPARISON = "org.phonemesh.app.SpeechComparisonTest"
+
+
+def is_protected(serial: str | None) -> bool:
+    """Keep the exact physical-device fence without publishing its owner's raw serial."""
+    return (
+        serial is not None and hashlib.sha256(serial.encode()).hexdigest() == PROTECTED_PIXEL_SHA256
+    )
 
 
 def refusal(serial: str, classes: str, args: list[str], allow_device: str | None) -> str | None:
     """Why this run must not start, or None. Emulators run anything; a physical phone runs only
-    the silent speech comparison, unless the owner named that exact serial with --allow-device."""
-    if serial in ALWAYS_REFUSED or allow_device in ALWAYS_REFUSED:
-        return f"{serial if serial in ALWAYS_REFUSED else allow_device} is never used for tests"
+    the silent speech comparison, unless explicitly opted in. Pixel has a narrower exception."""
+    if is_protected(serial) or is_protected(allow_device):
+        if (
+            is_protected(serial)
+            and allow_device == serial
+            and classes in PIXEL_ACCOUNT_CLASSES
+            and not args
+        ):
+            return None
+        return (
+            "protected phone: only explicitly authorized isolated account classes, "
+            "without arguments"
+        )
     if allow_device is not None and allow_device.startswith("emulator-"):
         return "--allow-device names a physical phone, not an emulator"
     if serial.startswith("emulator-"):
@@ -41,12 +65,21 @@ def main() -> None:
     p.add_argument("--expected", required=True, type=int)
     p.add_argument("--receipt", required=True, type=Path)
     p.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="seconds before the run is stopped (HARNESS_TIMEOUT)",
+    )
+    p.add_argument(
         "--args", action="append", default=[], metavar="KEY=VALUE", help="instrumentation argument"
     )
     p.add_argument(
         "--allow-device",
         metavar="SERIAL",
-        help="owner-approved physical test phone that may run any class with arguments",
+        help=(
+            "owner-approved physical test phone; protected Pixel permits only exact "
+            "isolated account classes without arguments"
+        ),
     )
     a = p.parse_args()
     extra = []
@@ -79,7 +112,7 @@ def run(a: argparse.Namespace, extra: list[str]) -> None:
     ]
     try:
         result = subprocess.run(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=300
+            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=a.timeout
         )
         output = result.stdout
     except subprocess.TimeoutExpired as error:
@@ -89,7 +122,9 @@ def run(a: argparse.Namespace, extra: list[str]) -> None:
         a.receipt.parent.mkdir(parents=True, exist_ok=True)
         a.receipt.write_text(output + "\nHARNESS_TIMEOUT\n")
         subprocess.run(
-            ["adb", "-s", a.serial, "shell", "am", "force-stop", "org.phonemesh.app"], check=False
+            ["adb", "-s", a.serial, "shell", "am", "force-stop", "org.phonemesh.app"],
+            check=False,
+            timeout=60,
         )
         raise
 

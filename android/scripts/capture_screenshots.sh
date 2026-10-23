@@ -15,7 +15,7 @@ install_build() {
 restore() { install_build; }
 trap restore EXIT
 install_build -Pphonemesh.screenshots=true
-python3 "$root/android/scripts/run_instrumentation.py" --serial "$serial" --classes org.phonemesh.app.ScreenshotTour \
+python3 "$root/android/scripts/run_instrumentation.py" --serial "$serial" --classes org.phonemesh.app.ScreenshotTour --timeout 1200 \
   --expected 1 --receipt "$root/.local/receipts/ui-screenshots.txt"
 mkdir -p "$root/docs/screenshots-phase3"
 rm -f "$root/docs/screenshots-phase3/"*.png

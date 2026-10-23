@@ -13,3 +13,7 @@ recordings/
 docs/handover-*.md
 .superpowers/
 docs/superpowers/plans/
+# Local Swift products and private hub provisioning/mail; never publish them.
+hub-ble-bridge/.build/
+hub.conf
+hub-data/

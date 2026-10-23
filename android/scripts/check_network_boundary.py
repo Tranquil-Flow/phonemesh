@@ -25,7 +25,14 @@ API_PATTERNS = [
     "Landroid/webkit/WebView;",
     "Landroid/app/DownloadManager;.enqueue",
 ]
-ALLOWED_CALLERS = {"Lorg/phonemesh/app/PackDownloads;"}
+# Whole classes (and their nested classes): pack downloads and the pinned hub client,
+# plus the class that hands it the joined Wi-Fi's socket factory. No other network callers.
+ALLOWED_CALLERS = {
+    "Lorg/phonemesh/app/PackDownloads;",
+    "Lorg/phonemesh/core/hub/HubClient;",
+    "Lorg/phonemesh/core/hub/HubEngineTls;",
+    "Lorg/phonemesh/app/WifiHubLink;",
+}
 DESCRIPTOR_MARKER = "Class descriptor"
 
 

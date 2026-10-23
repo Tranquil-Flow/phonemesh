@@ -1,0 +1,272 @@
+{
+  "schema_version": 1,
+  "scope": "Observed exact upstream .proto set and byte matches; not original-checkout or unique-version recovery, nor complete repository/binary reproducibility",
+  "repository": "https://github.com/meshtastic/protobufs",
+  "observed_matching_commit": "8017acbb0828703e980323bee3dd605fb7366058",
+  "upstream_tree_sha1": "22b6b7edba6b482343624a8505fe92224f838940",
+  "complete_proto_set_matches": true,
+  "files": [
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/admin.proto",
+      "sha256": "8d7bf8a86ef262ae46326853b827fe7af04c797e85df2a1f651afc283a6334f9",
+      "bytes": 23916,
+      "upstream_path": "meshtastic/admin.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/admin.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "d0e4d7b7c05c83ae9725ee0544a63ec88022cee5"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/apponly.proto",
+      "sha256": "abc6c8765850b9e04a61408150184dcc2bf6b412e6390003ccdda10d8e683e72",
+      "bytes": 877,
+      "upstream_path": "meshtastic/apponly.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/apponly.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "2612ed6795b7ae695003c369e62a08ee00b748a5"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/atak.proto",
+      "sha256": "afcdd96c5e5082053cc6839e37c6cc9b2f4ef267546bc24f21c0e315e2ba6aa5",
+      "bytes": 62475,
+      "upstream_path": "meshtastic/atak.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/atak.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "49bf724295ffee31bfa89f540ec9e50cfff9bdfc"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/cannedmessages.proto",
+      "sha256": "1fc6b8e288be2c14d57b1a3aabdeea3cb233d1cfa76c6fb553a268f90aca35b4",
+      "bytes": 480,
+      "upstream_path": "meshtastic/cannedmessages.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/cannedmessages.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "59f3dcc9000d268b036422e3e3cb2e352b674d39"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/channel.proto",
+      "sha256": "3e0cc5f95a5852db30585302321e671318c453519945625dcebc1cac21b6187e",
+      "bytes": 6455,
+      "upstream_path": "meshtastic/channel.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/channel.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "d917daa193bf209e7c2c5d0a2790d994b25d6c28"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/clientonly.proto",
+      "sha256": "cbd7785bc9333a4aec0f88def6f193d033c821e984e078e97d84d375b8685fa8",
+      "bytes": 1355,
+      "upstream_path": "meshtastic/clientonly.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/clientonly.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "f6500005bee2fdcd7c8700f1e9c7d10b5245af68"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/config.proto",
+      "sha256": "7f3ee1fe7a2138abb19c952fdafe7ee5ee89cdd08f4f1a2c382958be94a29434",
+      "bytes": 60433,
+      "upstream_path": "meshtastic/config.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/config.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "44cbe08408adf9310043b4c8051649c7b432fefa"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/connection_status.proto",
+      "sha256": "623bde706f2db5722aa2c8dc08c9241b4e7d7f4d20bca61b819917a4ed91ea5c",
+      "bytes": 1999,
+      "upstream_path": "meshtastic/connection_status.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/connection_status.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "641e916bf30f92c3b34e8eb1ee057b196d37b907"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/device_ui.proto",
+      "sha256": "d434360fecdd12ae3ea6a1199b5ae330153456f5cb5771e1d93d2b7ef391e138",
+      "bytes": 5708,
+      "upstream_path": "meshtastic/device_ui.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/device_ui.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "ec886c867e472d4abf78508477e87b51f7d18658"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/deviceonly.proto",
+      "sha256": "0422a6ef8f220902825509d3c60065dc4867954bd41bf337e54d2dc603a6be30",
+      "bytes": 9618,
+      "upstream_path": "meshtastic/deviceonly.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/deviceonly.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "22b51eae1087c9532ac4cc7be427b3dfabede4af"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/deviceonly_legacy.proto",
+      "sha256": "19f55b359e63579cec3b06466e546b854054d35d030be9b9c9414f79367a6412",
+      "bytes": 1676,
+      "upstream_path": "meshtastic/deviceonly_legacy.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/deviceonly_legacy.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "a4bb02401445babaf2a20e66137265273a369a75"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/field_metadata.proto",
+      "sha256": "618171c0c80c5047ea5e867b19c32fb04e58da339e5d47e382e48894e081dc4e",
+      "bytes": 10654,
+      "upstream_path": "meshtastic/field_metadata.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/field_metadata.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "8119e8ae30da0e3ebc7782d5ff58aaceeec87de6"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/interdevice.proto",
+      "sha256": "e6bcd13032c31d25a703566ef12189601035c9d7bbedd64a332fd17f91a8b60a",
+      "bytes": 7573,
+      "upstream_path": "meshtastic/interdevice.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/interdevice.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "a0be6a7c3ecab6c54d883f5fbdab8697858c6494"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/localonly.proto",
+      "sha256": "95cbe4b0245c7870a3746b8497c714ae8d9064940c7cfbef4f31a0210be079ca",
+      "bytes": 3966,
+      "upstream_path": "meshtastic/localonly.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/localonly.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "4f846e538715998f94549321c1a41126dbae5701"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/lorawan_bridge.proto",
+      "sha256": "137c1c80a25f707374e4605ee711e424ab58e8372cc22778da3c8774a703ac1f",
+      "bytes": 5122,
+      "upstream_path": "meshtastic/lorawan_bridge.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/lorawan_bridge.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "aab5907004981fcf7e60d78b216f9c98e7256243"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/mesh.proto",
+      "sha256": "36a29e703a679a3b2841bf84e2e3220ca53f40611400be58a3a79abc3fe1cb59",
+      "bytes": 83312,
+      "upstream_path": "meshtastic/mesh.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/mesh.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "5db139b91f32162ce43e1243e34fee92717a6c23"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/mesh_beacon.proto",
+      "sha256": "0a913e9fb339df69237083d4f1c530fd6b12bcea5bcba4b7154b58b4f229af04",
+      "bytes": 1946,
+      "upstream_path": "meshtastic/mesh_beacon.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/mesh_beacon.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "0f307ca498b0900991f639a3f9ad245c1812dbdf"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/module_config.proto",
+      "sha256": "4a0680b88b8966f447dcecd6825c282379ca470c7edc3fcefde7f2a82c67f2e9",
+      "bytes": 46990,
+      "upstream_path": "meshtastic/module_config.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/module_config.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "2b864e21ee2e2e99907e9ac3312cea3d9c694064"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/mqtt.proto",
+      "sha256": "6adc981dab9c7c4c2f477be50584d09243b100563aefbc9926d668d1318993c2",
+      "bytes": 2741,
+      "upstream_path": "meshtastic/mqtt.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/mqtt.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "616780dffa331a350ebf9947bcd70c8ab1015a55"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/paxcount.proto",
+      "sha256": "53a4328265bee288b65f87c53e8eb933e289cb46455826ea476a94f36dbed9bf",
+      "bytes": 476,
+      "upstream_path": "meshtastic/paxcount.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/paxcount.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "5084f9dc79d7c6d68e01cc0d87097622a34c9e8d"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/portnums.proto",
+      "sha256": "0e765c6ae283ba866047c0579d3820e28b60b56187cc9f55c4d78bd15440440a",
+      "bytes": 9494,
+      "upstream_path": "meshtastic/portnums.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/portnums.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "8a076d32ffb6c28904d632614a51da307437990a"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/powermon.proto",
+      "sha256": "bd926cc9ec10b3ea5d84b13e411ffbbd5c0350828ed9c5532b9ba2650e711ae7",
+      "bytes": 3835,
+      "upstream_path": "meshtastic/powermon.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/powermon.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "f4304812d70df65a58fcd3269f913e59b630afa8"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/remote_hardware.proto",
+      "sha256": "073953d9204321b19e41f969686890e04541054a4d0fa03cad0f8c41188715c3",
+      "bytes": 2082,
+      "upstream_path": "meshtastic/remote_hardware.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/remote_hardware.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "d9192035e9133709b6883c9abd6320de0e8d8ef2"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/rtttl.proto",
+      "sha256": "c31b3413fa4cb6d4043e3d975d88963b884fa9c4abb570281a70ead81b5390a5",
+      "bytes": 424,
+      "upstream_path": "meshtastic/rtttl.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/rtttl.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "06d94fc3fcd46227176e008f020cdac8da80be40"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/serial_hal.proto",
+      "sha256": "44ef8c169e528ef5fa9dc40ee4af6fae860116d8d817eaa1d2fea96f7e2c5825",
+      "bytes": 1825,
+      "upstream_path": "meshtastic/serial_hal.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/serial_hal.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "3483a5f5b9244fe048a170c9678e4c05f945df2f"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/storeforward.proto",
+      "sha256": "6d050a20ffa6aa9eceafc6f0335d7ead4aeeed2861a831234bc23b29cd35ca15",
+      "bytes": 4212,
+      "upstream_path": "meshtastic/storeforward.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/storeforward.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "331dc230258b21a7c24f2c585532351dd8d1cea1"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/telemetry.proto",
+      "sha256": "981123786f03879daebaabe372d748919539ff1c7bd2fc7f92d27b6b94f06663",
+      "bytes": 22607,
+      "upstream_path": "meshtastic/telemetry.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/telemetry.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "d61bfcc6e5ab0f4ec6fe9e94a1fa8adb3c86d0e3"
+    },
+    {
+      "path": "android/mesh-protocol/src/main/proto/meshtastic/xmodem.proto",
+      "sha256": "202012d9ae7642b1599cf269d03d41c6d18f28602f6e65976f0c6e954e3b9ea0",
+      "bytes": 499,
+      "upstream_path": "meshtastic/xmodem.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/meshtastic/xmodem.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "2a049d18a4a4fb34d39defb27a283a0d147fee42"
+    },
+    {
+      "path": "android/mesh-protocol/src/proto-include/nanopb.proto",
+      "sha256": "4515e3a89f05ddd6c6db552cb555c632a95128629f6f0b3407fb7906a621954c",
+      "bytes": 6901,
+      "upstream_path": "nanopb.proto",
+      "raw_url": "https://raw.githubusercontent.com/meshtastic/protobufs/8017acbb0828703e980323bee3dd605fb7366058/nanopb.proto",
+      "raw_bytes_equal": true,
+      "git_blob_sha1": "1c107c16b148767dae526d62943b0255cd56a396"
+    }
+  ],
+  "nanopb_note": "Root nanopb.proto is relocated to src/proto-include. Meshtastic-modified formatting and go_package differ from canonical nanopb; original 0.4.6 vs 0.4.7 remains ambiguous. nanopb-LICENSE.txt retains the applicable notice."
+}

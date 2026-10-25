@@ -16,5 +16,7 @@ android {
 dependencies {
     // Meshtastic protobufs and MeshtasticProtocol, shared with the hub.
     api(project(":mesh-protocol"))
+    // The Bluetooth hub link speaks core's GattStreams/HubGatt framing (plain JVM, no Android types).
+    implementation(project(":core"))
     testImplementation("junit:junit:4.13.2")
 }

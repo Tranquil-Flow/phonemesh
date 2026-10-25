@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 39, "teapot" / "théière" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M18 10.5c2.5 0 3.7 1.6 3.7 3.5s-1.6 3.6-3.7 3.6" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M18 10.5c2.5 0 3.7 1.6 3.7 3.5s-1.6 3.6-3.7 3.6" android:fillColor="#00000000" android:strokeColor="#FF26A69A" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M6.6 15.5C4.2 14.6 3 12.2 1.8 9.3l1.5-.7c1.1 2.2 2.3 3.6 3.6 4.2z" android:fillColor="#FF26A69A" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M6 11.5c0-2.5 2.7-4 6-4s6 1.5 6 4v3.5c0 3-2.7 5-6 5s-6-2-6-5z" android:fillColor="#FF26A69A" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M8 7.8c0-1.6 1.8-2.6 4-2.6s4 1 4 2.6z" android:fillColor="#FFFFCA28" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M13.2,4A1.2,1.2 0 1,1 10.8,4A1.2,1.2 0 1,1 13.2,4Z" android:fillColor="#FFFFCA28" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M8.5 11.5c-.5 1-.6 2-.4 3" android:fillColor="#00000000" android:strokeColor="#FFB2DFDB" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M7 20.5h10" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

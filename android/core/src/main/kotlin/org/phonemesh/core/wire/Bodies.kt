@@ -64,11 +64,11 @@ sealed class Body {
                 byteArrayOf(REACTION.toByte()) + ref(body.ref) + emoji
             }
             is PictureHead -> {
-                require(PictureWire.decode(body.bytes) is PictureWire.Head) { "not a picture head" }
+                require(PictureWire.decodeV2(body.bytes) is PictureWire.Head) { "not a picture head" }
                 byteArrayOf(PICTURE_HEAD.toByte()) + body.bytes
             }
             is PicturePart -> {
-                require(PictureWire.decode(body.bytes) is PictureWire.Part) { "not a picture part" }
+                require(PictureWire.decodeV2(body.bytes) is PictureWire.Part) { "not a picture part" }
                 byteArrayOf(PICTURE_PART.toByte()) + body.bytes
             }
             is Receipt -> byteArrayOf(RECEIPT.toByte()) + body.ack.encode()
@@ -89,8 +89,8 @@ sealed class Body {
                     val emoji = take(bytes.size - 1 - REF)
                     if (emoji.size !in 1..MAX_EMOJI) null else Reaction(r, ContactCard.strictUtf8(emoji) ?: return@run null)
                 }
-                PICTURE_HEAD -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decode(it) is PictureWire.Head }?.let { PictureHead(it) }
-                PICTURE_PART -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decode(it) is PictureWire.Part }?.let { PicturePart(it) }
+                PICTURE_HEAD -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Head }?.let { PictureHead(it) }
+                PICTURE_PART -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Part }?.let { PicturePart(it) }
                 RECEIPT -> if (bytes.size != 1 + Ack.SIZE) null else Ack.decode(bytes.copyOfRange(1, bytes.size))?.let { Receipt(it) }
                 HELLO -> Reader(bytes).run {
                     val length = byte()

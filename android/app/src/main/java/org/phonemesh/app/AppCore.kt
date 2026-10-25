@@ -1,6 +1,21 @@
 package org.phonemesh.app
 
+import org.phonemesh.core.hub.HubCard
+import org.phonemesh.core.hub.HubClient
+import org.phonemesh.core.hub.HubDelivery
+import org.phonemesh.core.hub.HubRoutes
+import org.phonemesh.core.hub.HubWire
+import org.phonemesh.core.hub.MailPaths
+import org.phonemesh.core.mail.Postman
+import org.phonemesh.core.session.Ratchet
+import org.phonemesh.core.session.Start
+import org.phonemesh.core.wire.Body
+import org.phonemesh.core.wire.ClaimedSender
+import org.phonemesh.core.wire.SharedPost
+import org.phonemesh.core.account.AccountId
+import org.phonemesh.core.account.Names
 import android.content.Context
+import android.database.sqlite.SQLiteException
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -37,9 +52,11 @@ import org.phonemesh.core.SetupPlan
 import org.phonemesh.core.readiness
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -61,7 +78,10 @@ class AppCore private constructor(
     enum class RecordState { IDLE, RECORDING, TRANSCRIBING }
     fun interface Observer { fun onCoreChange(change: Change) }
     data class FoundRadio(val address: String, val name: String, val rssi: Int)
-    data class ChatRow(val chat: Chat, val title: String, val last: Message?, val peopleHeard: Int?)
+    /** [colour] and [met]: a person chat's contact (accounts); null for radio chats. [old]: a radio-addressed chat, read-only. */
+    data class ChatRow(val chat: Chat, val title: String, val last: Message?, val peopleHeard: Int?, val colour: Int? = null, val met: Boolean? = null) {
+        val old: Boolean get() = chat.kind == ChatKind.DIRECT
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val work = Executors.newSingleThreadExecutor()
@@ -120,7 +140,7 @@ class AppCore private constructor(
     internal var scanWaitMs = SCAN_WAIT_MS
     private val scanExpired = Runnable { stopScan() }
     private val connectExpired = Runnable { changed(Change.RADIO) }
-    private val backgroundStop = Runnable { if (started == 0) leaveRadio() }
+    private val backgroundStop = Runnable { if (started == 0) { if (!roamingActive) leaveRadio(); hubClosed() } }
     // True from the moment the radio is let go in the background until a screen opens again.
     private var radioLetGo = false
 
@@ -167,6 +187,8 @@ class AppCore private constructor(
         }
     }
     private val random = SecureRandom()
+    private val personPictures = PersonPictures(history)
+    private var pictureWorkAt: Long? = null
     val picturesDir: File get() = File(app.filesDir, "pictures").apply { mkdirs() }
     private val t1 = if (BuildConfig.T1_PROBE) RadioProbe.load("T1ProbeRun", app) { radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, it, PRIMARY_CHANNEL) } else null
 
@@ -175,9 +197,14 @@ class AppCore private constructor(
         if (BuildConfig.T2_PROBE) RadioProbe.load("T2ProbeRun", app)?.start()
         history.expireWaiting()
         history.loseUnfinishedPictures()
+        // Pictures received from people finish from their stored pieces, even before a radio is ready.
+        main.post { materializePictures() }
         history.groupChat(PRIMARY_CHANNEL)
         // A new process (or a phone that restarted) arms the next planned message again.
         armPlans()
+        // Recover local ciphertext immediately, even offline; waiting until expiry would lose it.
+        // Post after construction because the mail timers are declared below.
+        main.post { runPostman() }
         work.execute { runCatching { downloads().sweep() }.onFailure { Log.w(TAG, "download sweep failed", it) } }
     }
 
@@ -213,13 +240,16 @@ class AppCore private constructor(
         started++
         radioLetGo = false
         main.removeCallbacks(backgroundStop)
-        if (started == 1) autoReconnect()
+        if (started == 1) { autoReconnect(); hubOpen() }
     }
 
     /** No background service in 3a: the radio is let go a minute after the last screen closes. */
     fun activityStopped() {
         started = (started - 1).coerceAtLeast(0)
-        if (started == 0) main.postDelayed(backgroundStop, BACKGROUND_GRACE_MS)
+        if (started == 0) {
+            main.removeCallbacks(hubDiscoveryTick)
+            main.postDelayed(backgroundStop, BACKGROUND_GRACE_MS)
+        }
     }
 
     private fun leaveRadio() {
@@ -308,6 +338,9 @@ class AppCore private constructor(
     /** Connected, and the region check has nothing to ask and nothing running. */
     fun radioReady(): Boolean = connected && region.settled
 
+    /** Setup can use a communal radio through an authenticated hub; a linked socket is not enough. */
+    fun setupConnectionReady(): Boolean = radioReady() || hubRoute(rest = false, answeredOnly = true) != null
+
     /** The connected radio's region as its last handshake reported it; null while it is away. */
     fun radioRegionNow(): String? = if (connected) radio.region() else null
 
@@ -350,8 +383,14 @@ class AppCore private constructor(
         if (becameReady) readyAddress?.let { settings.setRadioChannelName(it, radio.channelName()) }
         // Only a real change of the link reaches the region check: ready means a new handshake has finished.
         if (becameReady) region.onReady()
+        if (becameReady) { mailBlocked = false; mailQueue.clear() }
+        if (was && !connected) {
+            mailFlight = null
+            mailQueue.clear()
+            main.removeCallbacks(mailStalled)
+        }
         if (becameReady) sendDue()
-        if (becameReady) sendQueued()
+        if (becameReady) { sendQueued(); if (account() != null) main.post { runPostman() } }
         if (was && !connected) region.onLost()
         // The radio went: what was on its way is its own message's business now; the next waits for a radio again.
         if (was && !connected) { draining = null; main.removeCallbacks(drainStalled) }
@@ -427,9 +466,11 @@ class AppCore private constructor(
     }
 
     override fun onDelivery(packetId: Long, state: DeliveryState, detail: String) {
+        if (onMailDelivery(packetId, state)) return
         onDrainReport(packetId, state)
         if (picturePackets.containsKey(packetId)) { onPicturePacket(packetId, state); return }
-        val message = history.byPacket(packetId) ?: return
+        if (packetId >= REF_FLOOR) return // Shared/account references are never radio acceptance IDs.
+        val message = sharedFlight(packetId) ?: history.byPacket(packetId) ?: return
         val chat = history.chat(message.chatId) ?: return
         val current = message.status ?: return
         val next = DeliveryRules.next(current, RadioReport.valueOf(state.name), chat.kind == ChatKind.GROUP)
@@ -448,12 +489,18 @@ class AppCore private constructor(
         else -> text(unnamedRadio(chat.address))
     }
 
+    /** Group and person chats first; old radio-addressed chats (read-only, plan step 12) after them. */
     fun chatRows(): List<ChatRow> = history.chats().map { chat ->
+        val contact = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address) else null
         ChatRow(
-            chat, chatTitle(chat), history.lastMessage(chat.id),
-            if (chat.kind == ChatKind.GROUP) PeopleHeard.count(history.sendersHeard(chat.id), null) else null,
+            chat, contact?.name ?: chatTitle(chat), history.lastMessage(chat.id),
+            if (chat.kind == ChatKind.GROUP) peopleHeard(chat.id) else null,
+            contact?.colour, contact?.met,
         )
-    }
+    }.sortedBy { it.old }
+
+    /** The contact colour of a person chat, for avatars; null otherwise. */
+    fun chatColour(chat: Chat): Int? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.colour else null
 
     /** A radio's name for screens: "Radio EE01" when it has none (blank, missing, or just its address). */
     fun radioLabel(name: String?, address: String?): String =
@@ -463,7 +510,130 @@ class AppCore private constructor(
     fun ownRadioLabel(name: String?, address: String?): String =
         radioLabel(address?.let { settings.radioOwnName(it) } ?: name, address)
 
-    fun senderName(id: String): String = knownName(id) ?: text(unnamedRadio(id))
+    fun senderName(id: String): String = ClaimedSender.parse(id)?.name ?: knownName(id) ?: text(unnamedRadio(id))
+
+    /** People in a group: one per claimed account or old radio, however often a claimed name changes. */
+    fun peopleHeard(chatId: Long): Int = PeopleHeard.count(history.sendersHeard(chatId).map { ClaimedSender.person(it) }, null)
+
+    private fun ownAccountId(): AccountId? = history.accountRow()?.identity?.let { AccountId.of(it) }
+
+    /** This phone's account id and name when a shared post can carry them; null before a name is saved or if the saved one cannot be posted. */
+    private fun sharedIdentity(): Pair<AccountId, String>? = history.accountRow()
+        ?.takeIf { it.name.isNotEmpty() && Names.valid(it.name) && it.name.toByteArray(Charsets.UTF_8).size <= Names.MAX_BYTES }
+        ?.let { AccountId.of(it.identity) to it.name }
+
+    private fun canPost(): Boolean = sharedIdentity() != null
+
+    /** A shared message that cannot be built: shown as a refusal, never a reason to send other bytes or to wait for a radio. */
+    private class Unsendable(cause: Exception) : RuntimeException(cause)
+
+    /**
+     * Radio packet id of a shared post in flight -> its message. Delivery reports name the radio's id; replies and reactions
+     * name the post's reference, which is what the message keeps in History. In memory only: a report cannot outlive the
+     * radio session that made it.
+     */
+    private val sharedFlights = object : LinkedHashMap<Long, Long>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Long>?): Boolean = size > 64
+    }
+
+    private fun sharedFlight(packetId: Long): Message? = sharedFlights[packetId]?.let { history.message(it) }
+
+    /** The radio id a message was last handed to the radio under: kept in memory for shared posts, in History for old texts. */
+    private fun radioIdOf(messageId: Long): Long? =
+        sharedFlights.entries.lastOrNull { it.value == messageId }?.key ?: history.message(messageId)?.packetId
+
+    private fun sharedFrame(identity: Pair<AccountId, String>, kind: SharedPost.Kind, language: String, text: String, ref: ByteArray?, atMs: Long): ByteArray =
+        try {
+            SharedPost.encode(SharedPost.Post(
+                kind, identity.first, atMs / 1000, identity.second,
+                if (kind == SharedPost.Kind.REACTION) "" else MessageCodec.canonical(language), ref, text,
+            ))
+        } catch (e: IllegalArgumentException) { throw Unsendable(e) }
+
+    /**
+     * Hands one text to the radio. A group message is a shared post (port 303): plain, or a reply naming the post answered by
+     * its reference. The message keeps that reference as its packet id (from its own time, so a resend and a restart give
+     * the same one); the radio's id goes only to [sharedFlights]. An answer to an old message (no reference exists for it)
+     * and every non-group chat keep the old tagged text with the radio-id mark. A name or text the codec refuses is never
+     * replaced by other bytes: it throws [Unsendable].
+     */
+    private fun sendText(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?) {
+        val answersOld = replyTo != null && replyTo in 1 until REF_FLOOR
+        if (chat.kind != ChatKind.GROUP || answersOld) {
+            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destinationOf(chat), PRIMARY_CHANNEL, replyTo ?: 0L))
+            return
+        }
+        val identity = sharedIdentity() ?: throw Unsendable(IllegalStateException("no postable name"))
+        val message = history.message(messageId) ?: throw Unsendable(IllegalStateException("message is gone"))
+        val answers = replyTo?.takeIf { it >= REF_FLOOR }
+        val frame = sharedFrame(
+            identity, if (answers != null) SharedPost.Kind.REPLY else SharedPost.Kind.TEXT, language, text,
+            answers?.let { AppMailStore.refBytes(it) }, message.time,
+        )
+        val radioId = radio.sendBroadcastData(MeshRadio.SHARED_CHAT_PORT, frame, PRIMARY_CHANNEL)
+        sharedFlights.values.removeAll { it == messageId }
+        sharedFlights[radioId] = messageId
+        history.attachPacket(messageId, AppMailStore.refNumber(SharedPost.reference(identity.first, message.time / 1000, text)))
+    }
+
+    /** One reaction on the radio: a shared reaction for a post that has a reference, the old emoji mark for an old message. */
+    private fun sendReaction(chat: Chat, emoji: String, target: Long): Long {
+        if (chat.kind != ChatKind.GROUP || target < REF_FLOOR) return radio.send(emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = target, reaction = true)
+        val identity = sharedIdentity() ?: throw Unsendable(IllegalStateException("no postable name"))
+        val frame = sharedFrame(identity, SharedPost.Kind.REACTION, "", emoji, AppMailStore.refBytes(target), System.currentTimeMillis())
+        return radio.sendBroadcastData(MeshRadio.SHARED_CHAT_PORT, frame, PRIMARY_CHANNEL)
+    }
+
+    private fun receiveShared(payload: ByteArray, radioId: Long) {
+        when (val read = SharedPost.read(payload)) {
+            null -> return
+            is SharedPost.Read.V1 -> receiveOldPost(read.message, radioId)
+            is SharedPost.Read.V2 -> receivePost(read.post)
+        }
+    }
+
+    /**
+     * A shared post (port 303, version 2). The name is only claimed: it is kept as the post gave it and never matched to a
+     * saved contact, so no contact's name or colour can be borrowed (review F9). The message keeps the post's reference,
+     * computed from the sender's own id, time and text, so replies and reactions from every phone find it. A copy of a post
+     * already kept (a resend, a relay) and a copy of this phone's own post are dropped.
+     */
+    private fun receivePost(post: SharedPost.Post) {
+        if (post.sender == ownAccountId()) return
+        val chat = history.groupChat(PRIMARY_CHANNEL)
+        val key = ClaimedSender.key(post.sender, post.name)
+        if (post.kind == SharedPost.Kind.REACTION) {
+            history.addReaction(chat.id, ClaimedSender.person(key), post.text, AppMailStore.refNumber(post.ref!!), System.currentTimeMillis())
+            changed(Change.MESSAGES)
+            return
+        }
+        val number = AppMailStore.refNumber(post.reference())
+        val kept = history.byRadioId(chat.id, number)
+        if (kept != null && ClaimedSender.parse(kept.senderId.orEmpty())?.account == post.sender) return
+        keepHeard(history.addIncoming(
+            chat.id, key, post.text, post.language, System.currentTimeMillis(), countUnread = openChatId != chat.id,
+            packetId = number, replyTo = post.ref?.let { AppMailStore.refNumber(it) },
+        ))
+    }
+
+    /** A version-1 post: no time or kind, so no shared reference; it keeps the radio id it arrived with, like an old text. */
+    private fun receiveOldPost(post: org.phonemesh.core.wire.SharedChatWire.Message, radioId: Long) {
+        if (post.sender == ownAccountId()) return
+        try { MessageCodec.validateText(post.text) } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "shared post dropped", e)
+            return
+        }
+        val chat = history.groupChat(PRIMARY_CHANNEL)
+        keepHeard(history.addIncoming(
+            chat.id, ClaimedSender.key(post.sender, post.name), post.text, post.language, System.currentTimeMillis(),
+            countUnread = openChatId != chat.id, packetId = radioId.takeIf { it != 0L },
+        ))
+    }
+
+    private fun keepHeard(message: Message) {
+        changed(Change.MESSAGES)
+        if (settings.readAloud && observers.isNotEmpty() && recordState == RecordState.IDLE && playingId == null) play(message.id)
+    }
 
     fun groupChatId(): Long = history.groupChat(PRIMARY_CHANNEL).id
 
@@ -491,12 +661,38 @@ class AppCore private constructor(
         if (text.isNullOrEmpty()) drafts.remove(chatId) else drafts[chatId] = text
     }
 
-    fun draftFit(chatId: Long): DraftFit = DraftRules.fit(drafts[chatId].orEmpty(), currentLanguage().tag)
+    fun draftFit(chatId: Long): DraftFit = fitFor(chatId, drafts[chatId].orEmpty())
+
+    /**
+     * The text bytes a draft in [chatId] may use: for the group, what is left of one 228-byte shared post after its header,
+     * this phone's name, the language and (for a reply) the reference. Null for every other chat, and for an answer to an old
+     * message, which goes out as old tagged text and keeps the old limit. Before a name exists the longest name is assumed.
+     */
+    private fun sharedRoom(chatId: Long, language: String): Int? {
+        if (history.chat(chatId)?.kind != ChatKind.GROUP) return null
+        val target = replyTarget(chatId)
+        if (target != null && (target.packetId ?: 0L) < REF_FLOOR) return null
+        val nameBytes = history.accountRow()?.name?.toByteArray(Charsets.UTF_8)?.size?.takeIf { it > 0 } ?: Names.MAX_BYTES
+        return SharedPost.room(if (target != null) SharedPost.Kind.REPLY else SharedPost.Kind.TEXT, nameBytes, MessageCodec.canonical(language))
+    }
+
+    /** Whether [text] is a sendable draft in [chatId], by that chat's actual packet budget. */
+    fun fitFor(chatId: Long, text: String): DraftFit {
+        val tag = currentLanguage().tag
+        return sharedRoom(chatId, tag)?.let { DraftRules.fitWithin(text, it) } ?: DraftRules.fit(text, tag)
+    }
+
+    /** [text] cut to fit [chatId]'s budget, as [DraftRules.trimToFit] does for the old one. */
+    fun trimFor(chatId: Long, text: String): String {
+        val tag = currentLanguage().tag
+        return sharedRoom(chatId, tag)?.let { DraftRules.trimWithin(text, it) } ?: DraftRules.trimToFit(text, tag)
+    }
 
     fun readiness(): Readiness = store.readiness(settings.engine, currentLanguage().tag)
 
-    /** The microphone is usable: the voice is ready and the radio connected. */
-    fun canTalk(): Boolean = connected && readiness() is Readiness.Ready
+    /** Voice needs its packs and a usable route. A hub connection alone is not a pinned answer. */
+    fun canTalk(): Boolean = readiness() is Readiness.Ready &&
+        (connected || hubRoute(rest = true, answeredOnly = true) != null)
 
     fun startRecording(chatId: Long): Boolean {
         if (recordState != RecordState.IDLE || importing || collecting) return false
@@ -527,7 +723,7 @@ class AppCore private constructor(
                     note(UiText(R.string.transcribe_failed))
                 } else {
                     val heard = text.trim()
-                    val kept = DraftRules.trimToFit(heard, currentLanguage().tag)
+                    val kept = trimFor(chatId, heard)
                     setDraft(chatId, kept)
                     if (kept != heard) cutDrafts += chatId
                 }
@@ -574,8 +770,12 @@ class AppCore private constructor(
         // No region yet, or a region write is running: nothing goes out and the draft stays for the card to explain.
         if (region.blocksSending) { changed(Change.REGION); return false }
         val language = currentLanguage().tag
-        if (DraftRules.fit(text, language) != DraftFit.FITS) return false
+        if (fitFor(chatId, text) != DraftFit.FITS) return false
         val chat = history.chat(chatId) ?: return false
+        // A shared post carries the sender's name: without a postable one nothing goes out and the draft stays.
+        if (chat.kind == ChatKind.GROUP && !canPost()) { note(UiText(R.string.add_name_first)); return false }
+        // Old radio-addressed chats are read only: nothing goes out, whatever the draft says.
+        if (chat.kind == ChatKind.DIRECT) { note(UiText(R.string.old_chat_read_only)); return false }
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
         val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis(), replyTarget(chatId)?.packetId)
         drafts.remove(chatId)
@@ -583,19 +783,692 @@ class AppCore private constructor(
         replyTargets.remove(chatId)
         // Before any notification: observers read setup state from this flag while they render.
         settings.firstMessageSent = true
-        transmit(message.id, text, language, chat, message.replyTo)
+        if (chat.kind == ChatKind.PERSON) sendPerson(message.id, chat, text, language, message.replyTo)
+        else transmit(message.id, text, language, chat, message.replyTo)
         changed(Change.MESSAGES)
         return true
+    }
+
+    // ---- Person chats (accounts plan step 13): wire v2 through the Postman, broadcast on port 301
+
+    /** The messaging engine; only touched once a name (and so the account keys) exists. */
+    private val mailStore by lazy { AppMailStore(history, accounts) }
+    val postman: Postman by lazy { Postman(accounts, mailStore) }
+
+    private fun sendPerson(messageId: Long, chat: Chat, text: String, language: String, replyTo: Long?) {
+        val body = personBody(text, language, replyTo)
+        if (!mailOperation {
+            val out = postman.send(AppMailStore.idOf(chat.address), body, messageId, System.currentTimeMillis())
+            if (out != null) push(out)
+            schedulePostman()
+        }) runCatching { history.setStatus(messageId, DeliveryStatus.FAILED) }
+    }
+
+    private fun personBody(text: String, language: String, replyTo: Long?): Body =
+        if (replyTo != null && replyTo >= REF_FLOOR) Body.Reply(AppMailStore.refBytes(replyTo), language, text) else Body.Text(language, text)
+
+    /** Retry owns the existing bytes; only a bubble that never sealed can start a new packet. */
+    private fun retryPerson(message: Message, chat: Chat): Boolean =
+        if (message.kind == MessageKind.PICTURE) retryPersonPicture(message, chat) else retryPersonText(message, chat)
+
+    private fun retryPersonText(message: Message, chat: Chat): Boolean = mailOperation {
+        val now = System.currentTimeMillis()
+        val contact = AppMailStore.idOf(chat.address)
+        val out = history.transaction {
+            val stored = history.outbox(chat.address).lastOrNull { it.messageId == message.id }
+            history.setStatus(message.id, DeliveryStatus.WAITING)
+            when {
+                stored != null && stored.state != Postman.Status.SUPERSEDED.name -> {
+                    if (stored.state == Postman.Status.DELIVERED.name) throw org.phonemesh.core.mail.MailStore.Refused()
+                    history.updateOutbox(stored.id, stored.tries, now + Postman.RETRY_MS[0], Postman.Status.WAITING.name)
+                    Postman.Out(contact, stored.packet, stored.id, stored.isReceipt)
+                }
+                history.held(chat.address).any { it.messageId == message.id } -> null
+                else -> postman.send(contact, personBody(message.text, message.language ?: currentLanguage().tag, message.replyTo), message.id, now)
+            }
+        }
+        out?.let { push(it) }
+        schedulePostman()
+    }
+
+    /** Storage refusal is recoverable, never an invitation to publish uncommitted bytes or report delivery. */
+    private fun mailOperation(action: () -> Unit): Boolean {
+        try { action(); return true } catch (failure: Exception) {
+            if (failure is PersonPictures.IdLimit) {
+                note(UiText(R.string.picture_id_limit))
+                return false
+            }
+            if (failure !is SQLiteException && failure !is org.phonemesh.core.mail.MailStore.Refused &&
+                failure !is java.security.GeneralSecurityException && failure !is java.io.IOException) throw failure
+            main.removeCallbacks(postmanTick)
+            // A transient write refusal must not permanently cancel local recovery/expiry.
+            // Back off rather than spin; runPostman still honours the blocked-radio boundary.
+            main.postDelayed(postmanTick, 5_000L)
+            note(UiText(R.string.mail_save_failed))
+            return false
+        }
+    }
+
+    private data class MailFlight(val packetId: Long, val outboxId: Long)
+    private val mailQueue = LinkedHashSet<Long>()
+    private var mailFlight: MailFlight? = null
+    private var mailBlocked = false
+    private val mailStalled = Runnable { pauseMail() }
+
+    /** Queue durable row identities, never credit a synchronous send() return as radio acceptance. */
+    private fun push(out: Postman.Out) {
+        if (mailFlight?.outboxId == out.outboxId || out.outboxId in hubFlight) return
+        // A joined hub comes first; the stock radio only gets what the hub did not take (see hubOffered).
+        if (offerHub(out.outboxId)) return
+        mailQueue.add(out.outboxId)
+        pumpMail()
+    }
+
+    private fun pumpMail() {
+        if (!mayTransmit() || mailBlocked || mailFlight != null || draining != null) return
+        while (mailQueue.isNotEmpty()) {
+            val id = mailQueue.first()
+            mailQueue.remove(id)
+            val row = history.outboxRow(id) ?: continue
+            // A QR replacement or a peer receipt can retire queued work before its turn.
+            if (row.state !in setOf("WAITING", "SENT", "HUB")) continue
+            val packetId = try {
+                radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, row.packet, PRIMARY_CHANNEL)
+            } catch (_: RuntimeException) { pauseMail(); return }
+            mailFlight = MailFlight(packetId, id)
+            main.postDelayed(mailStalled, DRAIN_WAIT_MS)
+            return
+        }
+    }
+
+    /** Unknown/failed writes stay durable; a new ready connection may offer the same bytes again. */
+    private fun pauseMail() {
+        mailFlight = null
+        mailQueue.clear()
+        mailBlocked = true
+        main.removeCallbacks(mailStalled)
+        main.removeCallbacks(postmanTick)
+        note(UiText(R.string.mail_radio_retry))
+        changed(Change.DELIVERY)
+        // Transmission is blocked, not incoming ciphertext retention maintenance.
+        mailOperation { schedulePostman() }
+    }
+
+    private fun onMailDelivery(packetId: Long, state: DeliveryState): Boolean {
+        val flight = mailFlight?.takeIf { it.packetId == packetId } ?: return false
+        when (state) {
+            DeliveryState.QUEUED -> {
+                if (!mailOperation { postman.transmitted(flight.outboxId) }) {
+                    mailFlight = null; mailQueue.clear(); mailBlocked = true
+                    main.removeCallbacks(mailStalled)
+                    return true
+                }
+                mailFlight = null
+                main.removeCallbacks(mailStalled)
+                changed(Change.DELIVERY)
+                // A hello committed during the previous flight may not be in the in-memory queue yet.
+                main.post { if (mailOperation { pumpMail(); sendQueued() }) runPostman() }
+            }
+            DeliveryState.FAILED, DeliveryState.UNCONFIRMED -> pauseMail()
+            else -> Unit
+        }
+        return true
+    }
+
+    private val postmanTick = Runnable { runPostman() }
+
+    /** Receipts, held messages and resends that are due; then the next wake-up while the app runs. */
+    fun runPostman() {
+        if (account() == null) return
+        mailOperation {
+            if (postman.recoverIncoming(System.currentTimeMillis()).isNotEmpty()) changed(Change.MESSAGES)
+            materializePictures()
+            val hubUp = hubWire() != null
+            if (!hubUp && (!mayTransmit() || mailBlocked || mailFlight != null)) { schedulePostman(); return@mailOperation }
+            if (!hubUp && mailQueue.isNotEmpty()) { pumpMail(); return@mailOperation }
+            val due = postman.due(System.currentTimeMillis())
+            (due + postman.unsent()).distinctBy { it.outboxId }.forEach { push(it) }
+            changed(Change.DELIVERY)
+            schedulePostman()
+        }
+    }
+
+    private fun schedulePostman() {
+        main.removeCallbacks(postmanTick)
+        val mailNext = if (hubWire() == null && (!mayTransmit() || mailBlocked || mailFlight != null || mailQueue.isNotEmpty()))
+            postman.nextIncomingExpiry() else postman.nextDue()
+        val next = listOfNotNull(mailNext, pictureWorkAt).minOrNull() ?: return
+        main.postDelayed(postmanTick, (next - System.currentTimeMillis()).coerceIn(1_000L, 30 * 60_000L))
+    }
+
+    // ---- Hub paths (accounts plan step 16): a pinned hub on its Wi-Fi comes before the stock radio.
+    // Network work runs on two daemon threads and every result returns to the main thread. A packet goes as the exact
+    // durable bytes of its outbox row (its own port), never sealed again, and a hub only earns "reached the hub" (review F17).
+    // Everything in the one outbox takes this path, so a hello or a picture queued there needs no separate route.
+    // Order of ways: the hub over Wi-Fi, then the same hub over Bluetooth (GATT; TLS pinned inside the stream), then the stock radio.
+    // Background roaming is opt-in and real only while HubRoamingService runs for the current epoch ("Hub roaming" below);
+    // the setting alone is only the person's wish, and the Bluetooth hub link is not roaming by itself.
+
+    /** The way to a hub's Wi-Fi: [create] sets it on a phone, tests set a fake. Null means no hub path at all. */
+    internal var hub: HubLink? = null
+
+    /** The way to the same hub over Bluetooth: [create] sets it on a phone, tests may set a fake. Null means no Bluetooth hub path. */
+    internal var bluetoothHub: HubLink? = null
+    private val hubSendIo = Executors.newSingleThreadExecutor { Thread(it, "hub-send").apply { isDaemon = true } }
+    private val hubPollIo = Executors.newSingleThreadExecutor { Thread(it, "hub-poll").apply { isDaemon = true } }
+    private val hubCursor by lazy { HubCursor(history) }
+    private val hubFlight = HashSet<Long>()
+    @Volatile private var failedHubWire: HubWire? = null
+    private var hubLinkRevision = 0L
+    private var hubKnownCodes: Set<String> = emptySet()
+    private var hubScanCodes: Set<String>? = null
+    private var hubScanSince = 0L
+    private var hubEpoch = 0
+    private var hubPolling = false
+    private var hubBacklog = false
+    private var hubChecked = false
+    /** When each hub way last failed a send; a way rests [hubRestMs] after that and the next way in the order is used. */
+    private val hubFailedAt = HashMap<MailPaths.Path, Long>()
+    // A healthy mailbox poll must not erase the cooldown after a failed send.
+    private val hubPollFailedAt = HashMap<MailPaths.Path, Long>()
+    private val hubWaitSeconds = 25
+    private val hubPage = 200
+    private val hubRetryMs = 10_000L
+    private val hubIdleMs = 30_000L
+    private val hubEmptyMs = 1_000L
+    private val hubRestMs = 30_000L
+    /** Pending requests and the mailbox cursor commit together, including before the first contact exists. */
+    private val hubHellos = true
+    private val hubPollTick = Runnable { hubPollSoon() }
+    private val hubRetryTick = Runnable { runPostman() }
+    /** Retry silent/expired discovery while a screen stays open; never grants background roaming. */
+    private val hubDiscoveryTick = Runnable {
+        if (started > 0 && hubCard() != null) {
+            if (hub?.wire() == null && bluetoothHub?.wire() == null) hubOpen()
+            else armHubDiscovery()
+        }
+    }
+
+    private fun armHubDiscovery() {
+        main.removeCallbacks(hubDiscoveryTick)
+        if (started > 0 && hubCard() != null) main.postDelayed(hubDiscoveryTick, roamingRetryMs)
+    }
+    /** Hub ways that completed a request over the pinned key since the hub was joined; a bare connection is never in here. */
+    private val hubAnswered = HashMap<MailPaths.Path, HubWire>()
+    private var hubFailure: HubFailure? = null
+
+    /** The platform side of roaming: [create] sets it on a phone, tests set a fake. Null means roaming cannot start. */
+    internal var roamingHost: RoamingHost? = null
+    /** The foreground service runs for the current epoch: only then does hub work outlive the last screen. */
+    var roamingActive = false
+        private set
+    /** The service was asked for and has not reported yet; ends in [roamingAttach] or after [roamingStartWaitMs]. */
+    var roamingStarting = false
+        private set
+    /** Why roaming is off after a refusal or a failure, until the person tries again. */
+    var roamingBlock: RoamingBlock? = null
+        private set
+    private var roamingEpoch = 0
+    // Test hook: tests shorten the wait for a service that never reports.
+    internal var roamingStartWaitMs = ROAMING_START_WAIT_MS
+    private val roamingStartLate = Runnable { if (roamingStarting) stopRoaming(RoamingBlock.START_REFUSED) }
+    private val roamingRetryTick = Runnable { retryRoaming() }
+    private val roamingRetryMs = 60_000L
+
+    private fun retryRoaming() {
+        if (!roamingActive || hubCard() == null) return
+        // The links fence their own live attempts; this tick also recovers a scan that ended silently.
+        if (hub?.wire() == null && bluetoothHub?.wire() == null) hubOpen()
+        autoReconnect()
+        main.postDelayed(roamingRetryTick, roamingRetryMs)
+    }
+
+    /** The hub the order of ways puts first, if any: Wi-Fi joined, else Bluetooth connected, and the app open or roaming on. */
+    private fun hubAllowed(): HubWire? = hubRoute(rest = false)?.wire
+
+    /** [hubAllowed], minus the ways that failed a moment ago, so a dead way is not asked again every second and the next way is used. */
+    private fun hubWire(): HubWire? = hubRoute(rest = true)?.wire
+
+    private fun hubRoute(rest: Boolean, answeredOnly: Boolean = false, polling: Boolean = false): HubRoutes.Route? {
+        val now = SystemClock.elapsedRealtime()
+        val rested = if (rest) hubFailedAt.filterValues { now - it < hubRestMs }.keys +
+            (if (polling) hubPollFailedAt.filterValues { now - it < hubRestMs }.keys else emptySet()) else emptySet()
+        val wifi = hub?.wire()?.takeIf { !answeredOnly || hubAnswered[MailPaths.Path.WIFI_HUB] === it }
+        val bluetooth = bluetoothHub?.wire()?.takeIf { !answeredOnly || hubAnswered[MailPaths.Path.BLUETOOTH_HUB] === it }
+        return HubRoutes.pick(wifi, bluetooth, mayTransmit(), started > 0, roamingActive, rested)
+    }
+
+    private fun hubCard(): HubCard? = settings.hubCard?.let { HubCard.parse(it) }
+
+    /** Anything a poll or send started for an earlier hub, or before leaving, is thrown away when it comes back. */
+    private fun hubReset() {
+        hubEpoch++
+        hubChecked = false
+        hubBacklog = false
+        hubKnownCodes = emptySet()
+        hubScanCodes = null
+        hubScanSince = 0L
+        hubAnswered.clear()
+        hubPollFailedAt.clear()
+        hubFailure = null
+    }
+
+    /** Hands the row's exact bytes to the hub on its own thread. True when the hub path has taken over the row. */
+    private fun offerHub(id: Long): Boolean {
+        val route = hubRoute(rest = true) ?: return false
+        val pin = hubCard()?.pin ?: return false
+        val row = history.outboxRow(id) ?: return false
+        if (row.state !in setOf("WAITING", "SENT", "HUB")) return false
+        // Decision 24: a hub airs a packet once, so a private message's scheduled retry goes back to the same accepting
+        // hub as the same stored bytes; the hub decides whether to air it again. Other accepted rows are not reoffered.
+        if (HubCustody(history).has(id, pin) && (row.port != MeshRadio.ACCOUNT_PORT || row.isReceipt)) return false
+        val wire = route.wire
+        val epoch = hubEpoch
+        val port = row.port
+        val bytes = row.packet.copyOf()
+        if (hubFlight.isEmpty()) failedHubWire = null
+        hubFlight.add(id)
+        try {
+            hubSendIo.execute {
+                // Serial IO: one dead wire must not consume a full timeout for every queued picture part.
+                val result = if (failedHubWire === wire) HubDelivery.Result.NOT_REACHED else try {
+                    HubDelivery.offer(wire, port, bytes)
+                } catch (_: RuntimeException) { HubDelivery.Result.NOT_REACHED }
+                if (result != HubDelivery.Result.REACHED) failedHubWire = wire
+                main.post { hubOffered(id, route.path, wire, pin, epoch, result) }
+            }
+        } catch (_: RejectedExecutionException) {
+            hubFlight.remove(id)
+            return false
+        }
+        return true
+    }
+
+    private fun hubOffered(id: Long, path: MailPaths.Path, wire: HubWire, pin: String, epoch: Int, result: HubDelivery.Result) {
+        hubFlight.remove(id)
+        if (epoch != hubEpoch) {
+            // The hub was left or replaced while this was out: the answer is about another hub, so the row is offered again.
+            if (!offerHub(id)) { mailQueue.add(id); mailOperation { pumpMail() } }
+            return
+        }
+        val current = currentHubWire(path) === wire
+        if (!current && result != HubDelivery.Result.REACHED) {
+            // A dead previous connection says nothing about its same-pin replacement.
+            if (!offerHub(id)) { mailQueue.add(id); mailOperation { pumpMail() } }
+            return
+        }
+        if (result == HubDelivery.Result.REACHED) {
+            if (current) {
+                hubFailedAt.remove(path)
+                hubAnswered[path] = wire
+                if (hubFailure?.path == path) hubFailure = null
+                keepHubBluetooth()
+            }
+            markReachedHub(id, pin)
+            changed(Change.DELIVERY)
+            return
+        }
+        // Not reached: this way rests a little and the same stored bytes go on to the next way, the other hub, else the stock radio.
+        hubFailedAt[path] = SystemClock.elapsedRealtime()
+        hubAnswered.remove(path)
+        hubFailure = HubFailure(path, result)
+        keepHubBluetooth()
+        changed(Change.RADIO)
+        main.removeCallbacks(hubRetryTick)
+        main.postDelayed(hubRetryTick, hubRestMs)
+        if (offerHub(id)) return
+        mailQueue.add(id)
+        mailOperation { pumpMail() }
+    }
+
+    /** "Reached the hub" for this one row, by id (a hello has no code to acknowledge): never Delivered (review F17). */
+    private fun markReachedHub(id: Long, pin: String) {
+        mailOperation { mailStore.markHubReached(id, pin) }
+    }
+
+    private fun currentHubWire(path: MailPaths.Path): HubWire? = when (path) {
+        MailPaths.Path.WIFI_HUB -> hub?.wire()
+        MailPaths.Path.BLUETOOTH_HUB -> bluetoothHub?.wire()
+        else -> null
+    }
+
+    /** Long-polls the hub for mail to the codes this phone expects: one request at a time, on its own thread. */
+    private fun hubPollSoon() {
+        main.removeCallbacks(hubPollTick)
+        if (hubPolling || account() == null) return
+        val route = hubRoute(rest = true, polling = true) ?: run {
+            if (hubAllowed() != null) main.postDelayed(hubPollTick, hubRetryMs)
+            return
+        }
+        val wire = route.wire
+        val path = route.path
+        val card = hubCard() ?: return
+        val currentCodes = runCatching { postman.expectedCodes().toSet() }.getOrNull()
+        if (currentCodes == null) { main.postDelayed(hubPollTick, hubRetryMs); return }
+        val pin = card.pin
+        val durableSince = runCatching { hubCursor.get(pin) }.getOrNull()
+        if (durableSince == null) { main.postDelayed(hubPollTick, hubRetryMs); return }
+        // Codes can become requestable after the cursor passed their letters. Replay-safe catch-up uses a
+        // stable query across pages; newly gained codes trigger another pass only after this pass completes.
+        if (hubScanCodes == null && !hubKnownCodes.containsAll(currentCodes)) {
+            hubScanCodes = currentCodes
+            hubScanSince = 0L
+        }
+        val scanning = hubScanCodes != null
+        val codes = hubScanCodes ?: currentCodes
+        val since = if (scanning) hubScanSince else durableSince
+        val epoch = hubEpoch
+        val linkRevision = hubLinkRevision
+        val check = !hubChecked
+        val wait = if (hubBacklog || check || scanning) 0 else hubWaitSeconds
+        hubPolling = true
+        try {
+            hubPollIo.execute {
+                val outcome = try {
+                    val newest = if (check) wire.latest() else null
+                    newest to wire.mail(since, codes, wait, hubHellos)
+                } catch (_: IOException) {
+                    null
+                } catch (_: RuntimeException) {
+                    null
+                }
+                main.post {
+                    if (epoch == hubEpoch && (currentHubWire(path) !== wire || linkRevision != hubLinkRevision)) {
+                        hubPolling = false
+                        main.post { hubPollSoon() }
+                    } else {
+                        hubPollAnswered(path, epoch, outcome != null)
+                        hubPolled(epoch, pin, since, durableSince, scanning, codes, outcome)
+                    }
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            hubPolling = false
+        }
+    }
+
+    private fun hubPolled(epoch: Int, pin: String, since: Long, durableSince: Long, scanning: Boolean, codes: Set<String>, outcome: Pair<Long?, List<HubClient.Mail>>?) {
+        hubPolling = false
+        // The hub was left or replaced while this was out: nothing in it is acted on, and the cursor stays where it was.
+        if (epoch != hubEpoch) { main.post { hubPollSoon() }; return }
+        if (outcome == null) { main.postDelayed(hubPollTick, hubRetryMs); return }
+        val (newest, got) = outcome
+        if (newest != null) {
+            hubChecked = true
+            if (newest < durableSince) {
+                // The hub lost its mail: our position means nothing there any more.
+                mailOperation { hubCursor.reset(pin) }
+                hubBacklog = false
+                hubScanSince = 0L
+                main.postDelayed(hubPollTick, 0L)
+                return
+            }
+        }
+        var stored = true
+        for (item in got.sortedBy { it.seq }) {
+            if (!hubLetter(pin, item)) { stored = false; break }
+        }
+        if (stored) {
+            if (scanning) {
+                hubScanSince = got.maxOfOrNull { it.seq } ?: since
+                if (got.size < hubPage) { hubKnownCodes = codes; hubScanCodes = null }
+            } else hubKnownCodes = codes
+        }
+        hubBacklog = stored && got.size >= hubPage
+        main.postDelayed(hubPollTick, when { !stored -> hubRetryMs; got.isEmpty() -> hubEmptyMs; else -> 0L })
+    }
+
+    /**
+     * One letter from the hub. Opening it and moving the cursor past it are one History transaction: a letter that did
+     * not commit leaves the cursor where it was, so the next poll offers it again. Letters that are not for this phone
+     * (other ports, hellos nobody asked for) are definitively ignored and the cursor moves past them the same way.
+     */
+    private fun hubLetter(pin: String, item: HubClient.Mail): Boolean {
+        var shown = false
+        var request: Accounts.Request? = null
+        val committed = mailOperation {
+            history.transaction {
+                if (item.port == MeshRadio.ACCOUNT_PORT) {
+                    if (Start.isHello(item.packet)) request = accountsFlow.onPacket(item.packet)
+                    else shown = postman.receive(item.packet, System.currentTimeMillis()) != null
+                }
+                hubCursor.advance(pin, item.seq)
+            }
+            schedulePostman()
+        }
+        if (committed) {
+            request?.let { note(UiText(R.string.add_wants_to_talk, listOf(it.name))) }
+            changed(if (shown || request != null) Change.MESSAGES else Change.DELIVERY)
+        }
+        return committed
+    }
+
+    private fun hubChanged() {
+        hubLinkRevision++
+        changed(Change.DELIVERY)
+        hubChecked = false
+        keepHubBluetooth()
+        main.post { runPostman(); hubPollSoon() }
+    }
+
+    /** A merely linked Wi-Fi socket cannot displace the working pinned Bluetooth route. */
+    private fun keepHubBluetooth() {
+        val card = hubCard() ?: return
+        if (hubRoute(rest = true, answeredOnly = true)?.path == MailPaths.Path.WIFI_HUB) bluetoothHub?.leave()
+        else if (started > 0 || roamingActive) bluetoothHub?.join(card) { main.post { hubChanged() } }
+    }
+
+    /** A screen opened: join the saved hub's Wi-Fi (the system asks the person once to connect). */
+    private fun hubOpen() {
+        val card = hubCard() ?: return
+        hub?.join(card) { main.post { hubChanged() } }
+        // Both ways start together; Bluetooth is released only after Wi-Fi answers through its pinned key.
+        bluetoothHub?.join(card) { main.post { hubChanged() } }
+        armHubDiscovery()
+    }
+
+    /** The last screen has been closed for a while: leave the hub's Wi-Fi (closing its sockets) and stop polling, unless roaming is on. */
+    private fun hubClosed() {
+        // The setting alone keeps nothing: only a running roaming service does.
+        if (roamingActive) return
+        hubReset()
+        main.removeCallbacks(hubPollTick)
+        main.removeCallbacks(hubRetryTick)
+        main.removeCallbacks(hubDiscoveryTick)
+        hub?.leave()
+        bluetoothHub?.leave()
+    }
+
+    /** The hub QR was scanned in person (the only way a hub is trusted): keep it, forget the old hub, join now. */
+    fun useHub(card: HubCard) {
+        settings.hubCard = card.encode()
+        hubReset()
+        hubFailedAt.clear()
+        hub?.leave()
+        bluetoothHub?.leave()
+        if (started > 0) hubOpen()
+    }
+
+    /** Forgets the hub: roaming ends, both hub transports close and the saved card (with the Wi-Fi password) is erased. */
+    fun forgetHub() {
+        stopRoaming()
+        settings.hubCard = null
+        hubReset()
+        hubFailedAt.clear()
+        main.removeCallbacks(hubPollTick)
+        main.removeCallbacks(hubRetryTick)
+        main.removeCallbacks(hubDiscoveryTick)
+        hub?.leave()
+        bluetoothHub?.leave()
+        changed(Change.RADIO)
+        changed(Change.DELIVERY)
+        // What waited on the hub is offered to the radio now, from the same stored bytes.
+        main.post { runPostman() }
+    }
+
+    /** Tries the saved hub's ways again (after a permission was granted); nothing is joined while no screen is open and roaming is off. */
+    fun retryHub() {
+        hubFailedAt.clear()
+        if (started > 0 || roamingActive) hubOpen()
+    }
+
+    /** What the hub screen shows. A wire is a connection only; a way is [HubWay.ANSWERED] after a request over the pinned key. */
+    fun hubStatus(): HubStatus {
+        val saved = hubCard() != null
+        val wifiPossible = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+        return HubStatus(
+            saved,
+            if (wifiPossible) hubWay(hub, MailPaths.Path.WIFI_HUB) else HubWay.NONE,
+            hubWay(bluetoothHub, MailPaths.Path.BLUETOOTH_HUB),
+            if (saved) hubRoute(rest = true)?.path else null,
+            if (saved) hubFailure else null,
+        )
+    }
+
+    private fun hubWay(link: HubLink?, path: MailPaths.Path): HubWay = when {
+        hubCard() == null || link == null -> HubWay.NONE
+        link.wire() == null -> HubWay.SEARCHING
+        hubAnswered[path] === link.wire() -> HubWay.ANSWERED
+        else -> HubWay.LINKED
+    }
+
+    /** A poll finished: it answered over the pinned key, or it did not. Anything about an older hub is ignored. */
+    private fun hubPollAnswered(path: MailPaths.Path, epoch: Int, answered: Boolean) {
+        val wire = currentHubWire(path)
+        if (epoch != hubEpoch) return
+        if (answered) hubPollFailedAt.remove(path) else hubPollFailedAt[path] = SystemClock.elapsedRealtime()
+        if (answered == (wire != null && hubAnswered[path] === wire)) return
+        if (answered) {
+            if (wire != null) hubAnswered[path] = wire
+            if (hubFailure?.path == path) hubFailure = null
+        } else {
+            hubAnswered.remove(path)
+            hubFailure = HubFailure(path, HubDelivery.Result.NOT_REACHED)
+        }
+        keepHubBluetooth()
+        changed(Change.RADIO)
+    }
+
+    // ---- Hub roaming (accounts decision 9): opt-in, default off. Every start, stop and late callback carries an epoch;
+    // turning roaming off, forgetting the hub and every failure bump it, so a late callback cannot restore a stopped service.
+    // Roaming holds the hub work only. The stock radio is still let go after the grace, as without roaming.
+
+    /** Why roaming cannot start now, or null: a saved hub and the Bluetooth permissions the hub link needs. */
+    fun roamingPrerequisite(): RoamingBlock? = when {
+        hubCard() == null -> RoamingBlock.NO_HUB
+        access.radioPermissionsMissing().isNotEmpty() -> RoamingBlock.PERMISSION
+        else -> null
+    }
+
+    /**
+     * The person's choice. On: refused with a note (and a false) when a prerequisite is missing or Android will not start the
+     * service; nothing is kept on in that case. The setting turns on here but roaming is real only after [roamingAttach].
+     */
+    fun setHubRoaming(on: Boolean): Boolean {
+        if (!on) { stopRoaming(); return true }
+        if (roamingActive || roamingStarting) return true
+        roamingPrerequisite()?.let { stopRoaming(it); return false }
+        return startRoaming()
+    }
+
+    private fun startRoaming(): Boolean {
+        val host = roamingHost
+        if (host == null) { stopRoaming(RoamingBlock.START_REFUSED); return false }
+        val epoch = ++roamingEpoch
+        settings.hubRoaming = true
+        roamingBlock = null
+        roamingStarting = true
+        main.removeCallbacks(roamingStartLate)
+        main.postDelayed(roamingStartLate, roamingStartWaitMs)
+        if (!host.start(epoch)) { stopRoaming(RoamingBlock.START_REFUSED); return false }
+        changed(Change.RADIO)
+        return true
+    }
+
+    /**
+     * Roaming is off for good: the wish, the service and the hub work that only roaming kept. [block] says why when a refusal
+     * or a failure did it; the person gets that sentence as a note. The epoch moves first, so the service's own end is ignored.
+     */
+    private fun stopRoaming(block: RoamingBlock? = null) {
+        roamingEpoch++
+        main.removeCallbacks(roamingStartLate)
+        main.removeCallbacks(roamingRetryTick)
+        settings.hubRoaming = false
+        roamingActive = false
+        roamingStarting = false
+        roamingBlock = block
+        runCatching { roamingHost?.stop() }
+        if (block != null) note(UiText(block.words))
+        // Without a screen, the hub work only roaming kept ends now, not after the grace.
+        if (started == 0) { leaveRadio(); hubClosed() }
+        changed(Change.RADIO)
+    }
+
+    /** What a starting service learns before it goes to the foreground. */
+    fun roamingGate(epoch: Int): RoamingGate = when {
+        epoch != roamingEpoch || !settings.hubRoaming || !roamingStarting -> RoamingGate.STALE
+        roamingPrerequisite() != null -> RoamingGate.BLOCKED
+        else -> RoamingGate.RUN
+    }
+
+    /** The service is in the foreground for [epoch]. False means it must leave at once: that start was cancelled, replaced or is no longer allowed. */
+    fun roamingAttach(epoch: Int): Boolean {
+        when (roamingGate(epoch)) {
+            RoamingGate.STALE -> return false
+            RoamingGate.BLOCKED -> { stopRoaming(roamingPrerequisite() ?: RoamingBlock.START_REFUSED); return false }
+            RoamingGate.RUN -> Unit
+        }
+        main.removeCallbacks(roamingStartLate)
+        roamingStarting = false
+        roamingActive = true
+        roamingBlock = null
+        radioLetGo = false
+        autoReconnect()
+        main.removeCallbacks(roamingRetryTick)
+        main.postDelayed(roamingRetryTick, roamingRetryMs)
+        // Both hub ways start together, as when a screen opens; hubChanged lets Bluetooth go the moment Wi-Fi has a wire.
+        hubOpen()
+        changed(Change.RADIO)
+        return true
+    }
+
+    /** The service for [epoch] ended or could not start. An older epoch's end changes nothing. */
+    fun roamingServiceEnded(epoch: Int, block: RoamingBlock) {
+        if (epoch == roamingEpoch && (roamingActive || roamingStarting)) stopRoaming(block)
+    }
+
+    /** A real screen opened: a standing choice whose service died with the process starts again (a screen may start it). */
+    fun resumeRoaming() {
+        if (!settings.hubRoaming || roamingActive || roamingStarting) return
+        roamingPrerequisite()?.let { stopRoaming(it); return }
+        startRoaming()
+    }
+
+    private fun receivePerson(payload: ByteArray) {
+        mailOperation {
+            val got = postman.receive(payload, System.currentTimeMillis())
+            // The pieces are durable already; a picture whose last piece just arrived gets its file now.
+            materializePictures()
+            schedulePostman()
+            // Content and ack effects are durable before observers run; a receipt has no bubble of its own.
+            if (got == null) changed(Change.DELIVERY) else changed(Change.MESSAGES)
+        }
     }
 
     /** Same bubble, new packet. Never automatic. A private message may arrive twice; accepted by the spec. */
     fun resend(messageId: Long): Boolean {
         val message = history.message(messageId) ?: return false
         if (message.direction != Direction.OUT || message.status?.canResend != true) return false
+        if (history.chat(message.chatId)?.kind == ChatKind.DIRECT) return false
         if (message.kind == MessageKind.PICTURE) return resendPicture(message)
         val chat = history.chat(message.chatId) ?: return false
         // Like send: no region yet, or a region write is running. Nothing goes out and the message stays as it is.
         if (region.blocksSending) { changed(Change.REGION); return false }
+        if (chat.kind == ChatKind.PERSON) {
+            val retried = retryPerson(message, chat)
+            changed(Change.DELIVERY)
+            return retried
+        }
         history.setStatus(messageId, DeliveryStatus.WAITING)
         transmit(messageId, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)
         changed(Change.DELIVERY)
@@ -607,10 +1480,18 @@ class AppCore private constructor(
      * itself once one is (sendQueued). True when the radio took it.
      */
     private fun transmit(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?): Boolean {
+        // Last guard: no path may address a radio in an old chat.
+        if (chat.kind == ChatKind.DIRECT) { history.setStatus(messageId, DeliveryStatus.FAILED); return false }
         if (!mayTransmit()) { history.setStatus(messageId, DeliveryStatus.QUEUED); return false }
         return try {
-            history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destinationOf(chat), PRIMARY_CHANNEL, replyTo ?: 0L))
+            sendText(messageId, text, language, chat, replyTo)
             true
+        } catch (e: Unsendable) {
+            // A name or text the codec refuses is a visible failure with Renvoyer, not bytes of another kind and not a wait for a radio.
+            Log.w(TAG, "shared message refused", e)
+            history.setStatus(messageId, DeliveryStatus.FAILED)
+            if (sharedIdentity() == null) note(UiText(R.string.add_name_first))
+            false
         } catch (e: RuntimeException) {
             Log.w(TAG, "kept until a radio is ready", e)
             history.setStatus(messageId, DeliveryStatus.QUEUED)
@@ -627,8 +1508,10 @@ class AppCore private constructor(
     fun plan(chatId: Long, due: Long): Boolean {
         val text = drafts[chatId]?.trim().orEmpty()
         val language = currentLanguage().tag
-        if (DraftRules.fit(text, language) != DraftFit.FITS) return false
-        history.chat(chatId) ?: return false
+        if (fitFor(chatId, text) != DraftFit.FITS) return false
+        val chat = history.chat(chatId) ?: return false
+        if (chat.kind == ChatKind.GROUP && !canPost()) { note(UiText(R.string.add_name_first)); return false }
+        if (chat.kind == ChatKind.DIRECT) { note(UiText(R.string.old_chat_read_only)); return false }
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
         history.addPlanned(chatId, text, language, due, replyTarget(chatId)?.packetId)
         drafts.remove(chatId)
@@ -656,11 +1539,29 @@ class AppCore private constructor(
         val due = history.duePlanned(now)
         if (due.isNotEmpty() && connected && !region.blocksSending) {
             for (planned in due) {
-                history.deletePlanned(planned.id)
                 val chat = history.chat(planned.chatId) ?: continue
-                val message = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
-                settings.firstMessageSent = true
-                transmit(message.id, planned.text, planned.language, chat, planned.replyTo)
+                // Planned before the chat became read only: dropped with a word, never sent by radio address.
+                if (chat.kind == ChatKind.DIRECT) { history.deletePlanned(planned.id); note(UiText(R.string.old_chat_read_only)); continue }
+                val committed = mailOperation {
+                    if (chat.kind == ChatKind.PERSON) {
+                        val out = history.transaction {
+                            val message = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
+                            val packet = postman.send(AppMailStore.idOf(chat.address), personBody(planned.text, planned.language, planned.replyTo), message.id, now)
+                            if (!history.deletePlanned(planned.id)) throw org.phonemesh.core.mail.MailStore.Refused()
+                            packet
+                        }
+                        out?.let { push(it) }
+                        schedulePostman()
+                    } else {
+                        val message = history.transaction {
+                            val saved = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
+                            if (!history.deletePlanned(planned.id)) throw org.phonemesh.core.mail.MailStore.Refused()
+                            saved
+                        }
+                        transmit(message.id, planned.text, planned.language, chat, planned.replyTo)
+                    }
+                }
+                if (committed) settings.firstMessageSent = true
             }
             changed(Change.MESSAGES)
         }
@@ -697,9 +1598,26 @@ class AppCore private constructor(
         val message = history.message(messageId) ?: return false
         val target = message.packetId ?: return false
         val chat = history.chat(message.chatId) ?: return false
+        if (chat.kind == ChatKind.DIRECT) return false
         val now = System.currentTimeMillis()
+        if (chat.kind == ChatKind.PERSON) {
+            if (target < REF_FLOOR) return false
+            if (!mailOperation {
+                val out = history.transaction {
+                    val made = postman.send(AppMailStore.idOf(chat.address), Body.Reaction(AppMailStore.refBytes(target), emoji), null, now)
+                    history.addReaction(chat.id, null, emoji, target, now, waiting = false)
+                    made
+                }
+                out?.let { push(it) }
+                schedulePostman()
+            }) return false
+            changed(Change.MESSAGES)
+            return true
+        }
+        if (chat.kind == ChatKind.GROUP && !canPost()) { note(UiText(R.string.add_name_first)); return false }
+        if (chat.kind == ChatKind.GROUP && target >= REF_FLOOR && emoji.toByteArray(Charsets.UTF_8).size !in 1..SharedPost.MAX_EMOJI) return false
         val sent = mayTransmit() && try {
-            radio.send(emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = target, reaction = true)
+            sendReaction(chat, emoji, target)
             true
         } catch (e: RuntimeException) {
             Log.w(TAG, "reaction kept until a radio is ready", e)
@@ -718,21 +1636,32 @@ class AppCore private constructor(
     /** A radio is connected and may send now (it has a region and none is being written). */
     private fun mayTransmit(): Boolean = connected && !region.blocksSending
 
-    private fun destinationOf(chat: Chat): String = if (chat.kind == ChatKind.GROUP) BROADCAST else chat.address
+    private fun destinationOf(chat: Chat): String = when (chat.kind) {
+        ChatKind.GROUP -> BROADCAST
+        // Old radio-addressed chats are read only (accounts spec, decision 11): receive, never send.
+        ChatKind.DIRECT -> error("old chats are read only")
+        // An account id is no radio address: person chats send through wire v2 (step 13), never this path.
+        ChatKind.PERSON -> error("person chats do not use radio addresses")
+    }
 
     /**
      * Sends what waits for a radio once one is ready: messages and pictures in the order they were sent, then reactions.
      * Stops at the first the radio refuses; the rest keeps waiting.
      */
     fun sendQueued() {
-        if (!mayTransmit() || draining != null) return
+        if (!mayTransmit() || draining != null || mailFlight != null) return
         // One at a time: the radio's Bluetooth queue holds three, and a fourth write is dropped without a word.
         val message = history.queued().firstOrNull()
         if (message != null) {
             val chat = history.chat(message.chatId)
-            if (chat == null) {
+            if (chat == null || chat.kind == ChatKind.DIRECT) {
                 history.setStatus(message.id, DeliveryStatus.FAILED)
                 main.post { sendQueued() }
+                return
+            }
+            if (chat.kind == ChatKind.PERSON) {
+                if (retryPerson(message, chat)) main.post { sendQueued() }
+                changed(Change.MESSAGES)
                 return
             }
             if (message.kind == MessageKind.PICTURE) {
@@ -741,7 +1670,7 @@ class AppCore private constructor(
             } else {
                 history.setStatus(message.id, DeliveryStatus.WAITING)
                 if (transmit(message.id, message.text, message.language ?: currentLanguage().tag, chat, message.replyTo)) {
-                    history.message(message.id)?.packetId?.let { drainUntilTaken(Drain.Packet(it)) }
+                    radioIdOf(message.id)?.let { drainUntilTaken(Drain.Packet(it)) }
                 }
             }
             changed(Change.MESSAGES)
@@ -749,8 +1678,9 @@ class AppCore private constructor(
         }
         val queued = history.queuedReactions().firstOrNull() ?: return
         val chat = history.chat(queued.chatId) ?: return
+        if (chat.kind == ChatKind.DIRECT) { history.deleteMessage(queued.id); main.post { sendQueued() }; return }
         val packetId = try {
-            radio.send(queued.emoji, destinationOf(chat), PRIMARY_CHANNEL, replyTo = queued.target, reaction = true)
+            sendReaction(chat, queued.emoji, queued.target)
         } catch (e: RuntimeException) {
             Log.w(TAG, "queued reaction still waiting", e)
             return
@@ -780,7 +1710,7 @@ class AppCore private constructor(
         if (draining == null) return
         draining = null
         main.removeCallbacks(drainStalled)
-        main.post { sendQueued() }
+        main.post { mailOperation { pumpMail() }; sendQueued() }
     }
 
     /** Any report but "being written" means the radio has dealt with it: the next waiting item may go. */
@@ -815,8 +1745,9 @@ class AppCore private constructor(
     /** Puts a message's words in another chat's draft, to hear and send there. Nothing goes out until Send. */
     fun forward(messageId: Long, toChatId: Long): Boolean {
         val message = history.message(messageId)?.takeIf { it.kind == MessageKind.TEXT } ?: return false
-        history.chat(toChatId) ?: return false
-        val kept = DraftRules.trimToFit(message.text, currentLanguage().tag)
+        val target = history.chat(toChatId) ?: return false
+        if (target.kind == ChatKind.DIRECT) return false
+        val kept = trimFor(toChatId, message.text)
         setDraft(toChatId, kept)
         if (kept != message.text) cutDrafts += toChatId
         return true
@@ -824,51 +1755,144 @@ class AppCore private constructor(
 
     // ---- Pictures
 
-    /** Pictures go only in private chats, and only in builds that carry them. */
-    fun canSendPictures(chatId: Long): Boolean =
-        BuildConfig.PICTURES && history.chat(chatId)?.kind == ChatKind.DIRECT
+    /** Pictures go only to a person with a session (wire v2), and only in builds that carry them. Old radio chats never send. */
+    fun canSendPictures(chatId: Long): Boolean {
+        if (!BuildConfig.PICTURES) return false
+        val chat = history.chat(chatId) ?: return false
+        return chat.kind == ChatKind.PERSON && history.sessionRow(chat.address) != null
+    }
 
     /** The connected radio's modulation for time-on-air estimates; LongFast (the default) when unknown. */
     fun radioShape(): LoraShape = (if (connected) radio.modemPreset() else null)?.let { LoraAirtime.preset(it) } ?: LoraAirtime.DEFAULT
 
     /** Estimated seconds on air for [picture], one hop, every packet with its acknowledgement. */
     fun pictureSeconds(picture: PreparedPicture): Double {
-        val packets = PictureWire.split(0, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
-        return LoraAirtime.pictureSeconds(packets.map { PictureWire.encode(it).size }, radioShape())
+        val packets = PictureWire.splitV2(0, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+        // Each packet also carries wire v2's kind byte, header and tag.
+        val overhead = 1 + org.phonemesh.core.wire.WireV2.PLAIN_HEADER + org.phonemesh.core.crypto.Aead.TAG
+        return LoraAirtime.pictureSeconds(packets.map { PictureWire.encodeV2(it).size + overhead }, radioShape())
     }
 
-    /** Sends [picture] in the private chat [chatId]. Nothing is sent without this call (the Send button). */
+    /**
+     * Sends [picture] to a person: a head and parts, each sealed alone and kept before any is sent, so a restart or a
+     * lost packet never loses it. The packets go one radio write at a time (pumpMail), at most 20 past the last ack.
+     * Nothing is sent without this call (the Send button). False, with nothing kept, when it cannot be stored.
+     */
     fun sendPicture(chatId: Long, picture: PreparedPicture): Boolean {
         if (!canSendPictures(chatId)) return false
         val chat = history.chat(chatId) ?: return false
-        val pictureId = random.nextInt(0x10000)
-        val name = "out-${System.currentTimeMillis()}-$pictureId.pic"
-        File(picturesDir, name).writeBytes(picture.bytes)
-        val packets = PictureWire.split(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
-        val row = PictureRow(0, pictureId, picture.codec.wire, picture.width, picture.height, picture.sketch, name, 0, packets.size, false)
-        val message = history.addOutgoingPicture(chatId, row, System.currentTimeMillis())
-        settings.firstMessageSent = true
-        // No radio ready: the bubble says it waits, and it goes when one is (sendQueued).
-        if (mayTransmit()) startPicture(message.id, chat.address, packets) else history.setStatus(message.id, DeliveryStatus.QUEUED)
+        val name = "out-${java.util.UUID.randomUUID()}.pic"
+        val file = File(picturesDir, name)
+        val now = System.currentTimeMillis()
+        val kept = mailOperation {
+            // The id reservation, bubble, file row and sealed packets commit together, or none does.
+            val out = history.transaction {
+                val pictureId = personPictures.freshId(chatId) { random.nextInt(0x10000) }
+                val packets = PictureWire.splitV2(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+                file.writeBytes(picture.bytes)
+                val row = PictureRow(0, pictureId, picture.codec.wire, picture.width, picture.height, picture.sketch, name, 0, packets.size, false)
+                sealPicture(chat, history.addOutgoingPicture(chatId, row, now).id, packets, now)
+            }
+            settings.firstMessageSent = true
+            out.forEach { push(it) }
+            schedulePostman()
+        }
+        if (!kept) { file.delete(); return false }
         changed(Change.MESSAGES)
         return true
     }
 
-    /** Same picture, same id, from the start: the other phone keeps the pieces it already has for 10 minutes. */
+    private fun sealPicture(chat: Chat, messageId: Long, packets: List<PictureWire.Packet>, now: Long): List<Postman.Out> =
+        postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull()
+
+    /** Picture retry is for people only: the stored packets go again, byte for byte. Old radio chats never resend. */
     private fun resendPicture(message: Message): Boolean {
-        val chat = history.chat(message.chatId) ?: return false
+        val chat = history.chat(message.chatId)?.takeIf { it.kind == ChatKind.PERSON } ?: return false
         if (region.blocksSending) { changed(Change.REGION); return false }
-        val row = history.picture(message.id) ?: return false
-        val codec = PictureCodec.of(row.codec) ?: return false
-        val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes() ?: return false
-        val packets = PictureWire.split(row.pictureId, codec, row.width, row.height, bytes, row.sketch)
-        history.setPictureProgress(message.id, 0)
-        // No radio: it waits, saying so, and starts once one is ready (sendQueued).
-        if (!mayTransmit()) { history.setStatus(message.id, DeliveryStatus.QUEUED); changed(Change.DELIVERY); return true }
-        history.setStatus(message.id, DeliveryStatus.WAITING)
-        startPicture(message.id, chat.address, packets)
+        val retried = retryPersonPicture(message, chat)
         changed(Change.DELIVERY)
-        return true
+        return retried
+    }
+
+    /**
+     * Every stored packet of the picture that is not delivered or retired goes again, unchanged. Only a picture whose
+     * packets were all retired (a new QR session) is sealed anew, from its file, under the new keys.
+     */
+    private fun retryPersonPicture(message: Message, chat: Chat): Boolean = mailOperation {
+        val now = System.currentTimeMillis()
+        val contact = AppMailStore.idOf(chat.address)
+        val out = history.transaction {
+            val live = history.outbox(chat.address).filter { it.messageId == message.id && it.state != Postman.Status.SUPERSEDED.name }
+            val held = history.held(chat.address).any { it.messageId == message.id }
+            if (live.isNotEmpty() || held) {
+                if (!held && live.all { it.state == Postman.Status.DELIVERED.name }) throw org.phonemesh.core.mail.MailStore.Refused()
+                history.setStatus(message.id, DeliveryStatus.WAITING)
+                live.filter { it.state != Postman.Status.DELIVERED.name }.map { row ->
+                    history.updateOutbox(row.id, row.tries, now + Postman.RETRY_MS[0], Postman.Status.WAITING.name)
+                    Postman.Out(contact, row.packet, row.id, row.isReceipt)
+                }
+            } else {
+                val row = history.picture(message.id) ?: throw org.phonemesh.core.mail.MailStore.Refused()
+                val codec = PictureCodec.of(row.codec) ?: throw org.phonemesh.core.mail.MailStore.Refused()
+                val bytes = row.file?.let { File(picturesDir, it) }?.takeIf { it.isFile }?.readBytes()
+                    ?: throw org.phonemesh.core.mail.MailStore.Refused()
+                history.setStatus(message.id, DeliveryStatus.WAITING)
+                history.setPictureProgress(message.id, 0)
+                sealPicture(chat, message.id, PictureWire.splitV2(row.pictureId, codec, row.width, row.height, bytes, row.sketch), now)
+            }
+        }
+        out.forEach { push(it) }
+        schedulePostman()
+    }
+
+    /**
+     * Writes the file of every received picture whose pieces are all kept, then drops the pieces; gives up pictures the
+     * sender has stopped resending. Safe to repeat: a failure leaves the pieces for the next call (a restart, a receive).
+     * Expiry runs after the files, and never touches a picture whose pieces are all kept.
+     */
+    private fun materializePictures() {
+        val now = System.currentTimeMillis()
+        val ready = try {
+            personPictures.ready()
+        } catch (e: SQLiteException) {
+            Log.w(TAG, "received pictures wait", e)
+            pictureWorkAt = now + 5_000L
+            return
+        }
+        var changedSome = false
+        var retry = false
+        for (picture in ready) {
+            val name = "in-${picture.messageId}.pic"
+            try {
+                val tmp = File(picturesDir, "$name.tmp")
+                tmp.writeBytes(picture.bytes)
+                check(tmp.renameTo(File(picturesDir, name))) { "picture file not moved" }
+                personPictures.finished(picture, name)
+                changedSome = true
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "picture file waits", e)
+                retry = true
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "picture file waits", e)
+                retry = true
+            } catch (e: SQLiteException) {
+                Log.w(TAG, "picture file waits", e)
+                retry = true
+            }
+        }
+        try {
+            if (personPictures.expire(now - org.phonemesh.core.mail.MailStore.REPLAY_LIFETIME) > 0) changedSome = true
+        } catch (e: SQLiteException) {
+            Log.w(TAG, "old picture pieces stay", e)
+            retry = true
+        }
+        val expiry = try { personPictures.nextExpiry() } catch (e: SQLiteException) {
+            Log.w(TAG, "picture expiry waits", e)
+            retry = true
+            null
+        }
+        pictureWorkAt = listOfNotNull(expiry, if (retry) now + 5_000L else null).minOrNull()
+        if (changedSome) changed(Change.MESSAGES)
     }
 
     private fun startPicture(messageId: Long, address: String, packets: List<PictureWire.Packet>) {
@@ -926,6 +1950,21 @@ class AppCore private constructor(
 
     override fun onBroadcastData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long, signal: String) {
         t1?.got(sender, payload, channel, packetId, signal)
+        // The shared chat is read with or without a name of this phone's own, so it comes before the account check below.
+        if (port == MeshRadio.SHARED_CHAT_PORT) { if (channel == PRIMARY_CHANNEL) receiveShared(payload, packetId); return }
+        // A hello for this phone: "<name> veut vous parler". Phones without a name have no keys, so nothing to open.
+        if (channel != PRIMARY_CHANNEL || account() == null) return
+        when {
+            port == MeshRadio.ACCOUNT_PORT && Start.isHello(payload) -> mailOperation {
+                accountsFlow.onPacket(payload)?.let { request ->
+                    note(UiText(R.string.add_wants_to_talk, listOf(request.name)))
+                }
+                runPostman()
+                changed(Change.MESSAGES)
+            }
+            port == MeshRadio.ACCOUNT_PORT -> receivePerson(payload)
+            port == MeshRadio.HUB_ACK_PORT -> if (mailOperation { postman.hubAck(payload) }) changed(Change.DELIVERY)
+        }
     }
 
     override fun onData(sender: String, port: Int, payload: ByteArray, channel: Int, packetId: Long) {
@@ -1070,6 +2109,37 @@ class AppCore private constructor(
     /** The chosen name and colour, or null before a name is saved. Reads only: no keys are made. */
     fun account(): Pair<String, Int>? = history.accountRow()?.takeIf { it.name.isNotEmpty() }?.let { it.name to it.colour }
 
+    /** Adding people: codes, links, hellos, the safety picture (step 11). Only touched once a name is saved. */
+    val accountsFlow: Accounts by lazy {
+        Accounts(history, accounts, send = { _ ->
+            // Accounts has already committed the hello; use the same durable single-flight queue as every message.
+            runPostman()
+            false
+        })
+    }
+
+    fun acceptRequest(request: Accounts.Request): Accounts.Added.Contact? {
+        var added: Accounts.Added.Contact? = null
+        if (mailOperation { added = accountsFlow.accept(request) }) changed(Change.MESSAGES)
+        return added
+    }
+
+    fun ignoreRequest(request: Accounts.Request) {
+        if (mailOperation { accountsFlow.ignore(request) }) changed(Change.MESSAGES)
+    }
+
+    /** Existing contacts migrate the guide without recreating keys, sessions or chats. Opening a code alone does not. */
+    fun hasAddedSomeone(): Boolean {
+        if (!settings.firstPersonAdded && history.contactRows().isNotEmpty()) settings.firstPersonAdded = true
+        return settings.firstPersonAdded
+    }
+
+    /** Safety decisions update every visible contact view, even during a rapid activity return. */
+    fun setContactMet(account: org.phonemesh.core.account.AccountId, met: Boolean) {
+        accountsFlow.setMet(account, met)
+        changed(Change.MESSAGES)
+    }
+
     /** Saves the name and colour, making the account's keys the first time. */
     fun saveAccount(name: String, colour: Int) {
         accounts.setName(name, colour)
@@ -1078,12 +2148,29 @@ class AppCore private constructor(
 
     // ---- Playback
 
+    /** Choosing a voice never plays it or changes a peer's identity/session. */
+    fun setContactVoice(accountId: String, voiceId: String?): Boolean {
+        if (voiceId != null && store.list().none { it.kind == PackKind.VOICE && it.id == voiceId }) {
+            note(UiText(R.string.contact_voice_missing))
+            return false
+        }
+        val saved = try { history.setContactVoice(accountId, voiceId) }
+            catch (_: android.database.sqlite.SQLiteException) { false }
+        if (saved) changed(Change.MESSAGES) else note(UiText(R.string.contact_voice_failed))
+        return saved
+    }
+
     /** Plays a message; tapping the one playing stops it. One at a time. */
     fun play(messageId: Long) {
         if (playingId == messageId) { stopPlayback(); return }
         val message = history.message(messageId) ?: return
         if (message.kind != MessageKind.TEXT) return
-        speakAs(messageId, message.text, message.language)
+        // A claimed shared-chat sender is not an authenticated contact. Own messages and drafts
+        // retain the user's voice; only incoming person-chat content uses this local preference.
+        val chat = history.chat(message.chatId)
+        val voice = if (message.direction == Direction.IN && chat?.kind == ChatKind.PERSON)
+            history.contactRow(chat.address)?.voice else null
+        speakAs(messageId, message.text, message.language, voice)
     }
 
     fun playDraft(chatId: Long) {
@@ -1112,13 +2199,19 @@ class AppCore private constructor(
         speakAs(HOWTO_PLAYBACK, sentence ?: text(UiText(HowTo.sentence(scene))), currentLanguage().tag)
     }
 
-    /** The voice for the message's language; when it is missing, the user's own voice and a small note. */
-    private fun speakAs(id: Long, text: String, languageTag: String?) {
+    /** Explicit contact choice, then message-language voice, then the user's voice with a note. */
+    private fun speakAs(id: Long, text: String, languageTag: String?, preferredVoice: String? = null) {
         if (recordState != RecordState.IDLE) return
         val wanted = LanguageRegistry.forMessage(languageTag)
         val exact = wanted?.let { store.readiness(settings.engine, it.tag) as? Readiness.Ready }
-        val pack = exact ?: readiness() as? Readiness.Ready ?: run { note(UiText(R.string.voice_missing)); return }
-        if (exact == null && languageTag != null && wanted?.tag != currentLanguage().tag) {
+        val selected = preferredVoice?.let { id -> store.list().firstOrNull { it.kind == PackKind.VOICE && it.id == id } }
+        val preferred = selected?.let { voice ->
+            (store.readiness(settings.engine, checkNotNull(voice.languageTag)) as? Readiness.Ready)?.copy(voice = voice)
+        }
+        val pack = preferred ?: exact ?: readiness() as? Readiness.Ready ?: run { note(UiText(R.string.voice_missing)); return }
+        if (preferredVoice != null && preferred == null) {
+            note(UiText(R.string.contact_voice_missing))
+        } else if (preferred == null && exact == null && languageTag != null && wanted?.tag != currentLanguage().tag) {
             note(UiText(R.string.voice_fallback, listOf(wanted?.endonym ?: Locale.forLanguageTag(languageTag).let { it.getDisplayLanguage(it) })))
         }
         stopPlayback()
@@ -1281,6 +2374,13 @@ class AppCore private constructor(
         runCatching { speech.close() }
         runCatching { radio.close() }
         work.shutdown()
+        roamingActive = false
+        roamingEpoch++
+        runCatching { roamingHost?.stop() }
+        runCatching { hub?.leave() }
+        runCatching { bluetoothHub?.leave() }
+        hubSendIo.shutdownNow()
+        hubPollIo.shutdownNow()
         history.close()
     }
 
@@ -1290,6 +2390,9 @@ class AppCore private constructor(
     }
 
     companion object {
+        /** Person-chat references are numbers at or above this (radio packet ids are below). */
+        private const val REF_FLOOR = 1L shl 40
+
         const val PRIMARY_CHANNEL = 0
         const val DRAFT_PLAYBACK = -1L
         const val HOWTO_PLAYBACK = -2L
@@ -1298,6 +2401,8 @@ class AppCore private constructor(
         const val NAME_DRAFT = -4L
         const val BROADCAST = "^all"
         const val BACKGROUND_GRACE_MS = 60_000L
+        /** Android wants a started foreground service in the foreground within seconds; one that never reports is a failure. */
+        const val ROAMING_START_WAIT_MS = 15_000L
         const val CONNECT_WAIT_MS = 35_000L
         const val SCAN_WAIT_MS = 30_000L
         const val POLL_MS = 1_000L
@@ -1341,7 +2446,13 @@ class AppCore private constructor(
             planAlarm ?: SystemPlanAlarm(app),
             // Tests use their own Keystore names, so they never replace a real account's key.
             if (historyName == HISTORY_DB) "phonemesh" else "test-core",
-        )
+        ).also { core ->
+            if (historyName == HISTORY_DB) {
+                core.hub = WifiHubLink(app)
+                core.bluetoothHub = BleHubLink(app)
+                core.roamingHost = SystemRoamingHost(app)
+            }
+        }
 
         /** "Radio 4a2f": the last four hex digits of a radio id with no name yet. */
         fun unnamedRadio(id: String) =

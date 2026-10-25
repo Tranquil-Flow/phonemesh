@@ -83,6 +83,7 @@ class AccountStore(
     keyPrefix: String = "phonemesh",
 ) : OwnKeys {
     private val identityAlias = "$keyPrefix-identity"
+    val pendingRequests = PendingRequests(history, vault)
 
     private val account: History.AccountRow
     private val hardware: Boolean
@@ -152,9 +153,24 @@ class AccountStore(
         return state.takeIf { it.serial == serial }
     }
 
-    /** Stores [state] and the [outgoing] packet sealed with it, in one transaction; false when [state] is older. */
-    fun storeSession(contact: AccountId, state: SessionState, outgoing: History.OutboxRow? = null): Boolean =
-        history.storeSession(contact.toString(), state.serial, vault.seal(state.encode(), sessionLabel(contact)), now(), outgoing)
+    /** An update must name its exact predecessor, not just a higher serial from a possibly replaced session. */
+    fun storeSession(contact: AccountId, state: SessionState, outgoing: History.OutboxRow? = null,
+        consumeHeldId: Long? = null, expected: SessionState? = null): Boolean = history.transaction {
+        val existing = history.sessionRow(contact.toString())
+        if (existing != null) {
+            val current = session(contact) ?: return@transaction false
+            if (expected == null || !org.phonemesh.core.crypto.Bytes.equal(current.encode(), expected.encode())) return@transaction false
+        } else if (expected != null) return@transaction false
+        history.storeSession(contact.toString(), state.serial, vault.seal(state.encode(), sessionLabel(contact)), now(), outgoing, consumeHeldId)
+    }
+
+    /** Only an explicit mutual-QR action may replace an existing ratchet. Same showing is idempotent. */
+    fun installQrSession(contact: AccountId, state: SessionState): Boolean {
+        require(state.serial == 0L)
+        val encoded = state.encode()
+        return history.installQrSession(contact.toString(), org.phonemesh.core.crypto.Bytes.sha256(encoded),
+            vault.seal(encoded, sessionLabel(contact)), now())
+    }
 
     // ---- Inside
 

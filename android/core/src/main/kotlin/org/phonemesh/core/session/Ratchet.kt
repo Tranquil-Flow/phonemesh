@@ -38,7 +38,7 @@ object Ratchet {
     )
 
     sealed class Opened {
-        /** [counter] and [chainTag] are -1 and empty for a late packet opened with a kept key. */
+        /** A kept key retains its original acknowledgement identity, including across stored-state reopen. */
         class Delivered(val body: ByteArray, val code: ByteArray, val counter: Long, val stepped: Boolean, val chainTag: ByteArray, val state: SessionState) : Opened()
         /**
          * A packet of the other phone's new chain that came before any packet carrying its ratchet key; try again after
@@ -92,7 +92,13 @@ object Ratchet {
 
         state.skipped[codeHex]?.let { entry ->
             val body = openWith(entry.key, parsed) ?: return Opened.NotMine
-            return Opened.Delivered(body, code, -1, false, ByteArray(0), state.with(skipped = state.skipped - codeHex, heard = true))
+            // Legacy v1 kept no ack identity. Recover current-chain metadata with bounded work where possible.
+            val legacyCounter = if (entry.chainTag == null)
+                (maxOf(0L, state.nr - MAX_SKIP_SCAN) until state.nr).firstOrNull { Bytes.equal(code(state.hkr, it), code) }
+                else null
+            return Opened.Delivered(body, code, legacyCounter ?: entry.counter, false,
+                entry.chainTag ?: if (legacyCounter != null) tag(state.hkr) else ByteArray(0),
+                state.with(skipped = state.skipped - codeHex, heard = true))
         }
 
         for (i in 0 until WINDOW) {
@@ -217,25 +223,26 @@ object Ratchet {
         )
     }
 
-    private class Walk(val key: ByteArray, val next: ByteArray, val passed: List<Pair<ByteArray, ByteArray>>)
+    private class Passed(val code: ByteArray, val key: ByteArray, val tag: ByteArray, val counter: Long)
+    private class Walk(val key: ByteArray, val next: ByteArray, val passed: List<Passed>)
 
     /** From chain key [ck] at counter [from], to counter [to]: key [to], the chain key after it, and the keys passed. */
     private fun walk(ck: ByteArray, hk: ByteArray, from: Long, to: Long): Walk {
         var chain = ck
         var at = from
-        val passed = ArrayList<Pair<ByteArray, ByteArray>>()
+        val passed = ArrayList<Passed>()
         while (at < to) {
-            passed += code(hk, at) to messageKey(chain)
+            passed += Passed(code(hk, at), messageKey(chain), tag(hk), at)
             chain = nextChain(chain)
             at++
         }
         return Walk(messageKey(chain), nextChain(chain), passed)
     }
 
-    private fun keep(skipped: Map<String, SessionState.Skipped>, keys: List<Pair<ByteArray, ByteArray>>, now: Long): Map<String, SessionState.Skipped> {
+    private fun keep(skipped: Map<String, SessionState.Skipped>, keys: List<Passed>, now: Long): Map<String, SessionState.Skipped> {
         if (keys.isEmpty()) return skipped
         val out = LinkedHashMap(skipped)
-        for ((code, key) in keys) out[SessionState.hexOf(code)] = SessionState.Skipped(key, now)
+        for (entry in keys) out[SessionState.hexOf(entry.code)] = SessionState.Skipped(entry.key, now, entry.tag, entry.counter)
         while (out.size > MAX_SKIPPED) out.remove(out.keys.first())
         return out
     }

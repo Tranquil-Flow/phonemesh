@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 10, "snake" / "serpent" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M4 20c4 1.5 9 0 9-3s-7-2.5-7-6.5S12 6 15 7.5" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="4.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4 20c4 1.5 9 0 9-3s-7-2.5-7-6.5S12 6 15 7.5" android:fillColor="#00000000" android:strokeColor="#FF66BB6A" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M20.2,7.5A3.2,2.4 0 1,1 13.8,7.5A3.2,2.4 0 1,1 20.2,7.5Z" android:fillColor="#FF66BB6A" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M18.5,6.6A0.7,0.7 0 1,1 17.1,6.6A0.7,0.7 0 1,1 18.5,6.6Z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M20.2 7.8l2 .2M22.2 8l.8-.8M22.2 8l.8.8" android:fillColor="#00000000" android:strokeColor="#FFE53935" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

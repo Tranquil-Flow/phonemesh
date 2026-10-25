@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 50, "ball" / "ballon" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M21.5,12A9.5,9.5 0 1,1 2.5,12A9.5,9.5 0 1,1 21.5,12Z" android:fillColor="#FFFAFAFA" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M12 8.2l3.2 2.3l-1.2 3.8h-4l-1.2-3.8z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M12 8.2V3M15.2 10.5l4.6-1.6M14 14.3l2.9 4.2M10 14.3l-2.9 4.2M8.8 10.5L4.2 8.9" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.2 2.9L12 3l2.8-.1M19.8 8.9l1.5 2.4M16.9 18.5l-1.2 2.3M7.1 18.5l1.2 2.3M4.2 8.9L2.7 11.3" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.8" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

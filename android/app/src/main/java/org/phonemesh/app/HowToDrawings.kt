@@ -580,10 +580,12 @@ object HowToDrawings {
         },
     )
 
-    fun has(name: String) = name in scenes
+    fun has(name: String) = name in scenes || AccountsHowToDrawings.has(name)
 
-    fun draw(name: String, canvas: Canvas, kit: HowToKit, v: HowToValues) =
-        checkNotNull(scenes[name]) { "No drawing for how-to scene $name" }(canvas, kit, v)
+    fun draw(name: String, canvas: Canvas, kit: HowToKit, v: HowToValues) {
+        if (AccountsHowToDrawings.has(name)) AccountsHowToDrawings.draw(name, canvas, kit, v)
+        else checkNotNull(scenes[name]) { "No drawing for how-to scene $name" }(canvas, kit, v)
+    }
 
     // ---- The chat gestures' shared parts
 

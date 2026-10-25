@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 4, "goat" / "chèvre" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9.5 6C8 2.5 5 2 3.5 4M14.5 6C16 2.5 19 2 20.5 4" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.5 6C8 2.5 5 2 3.5 4M14.5 6C16 2.5 19 2 20.5 4" android:fillColor="#00000000" android:strokeColor="#FFA1887F" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M8.5 8.5L4 7.5l1 2.5zM15.5 8.5l4.5-1l-1 2.5z" android:fillColor="#FFD7CCC8" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M8 5.5h8l-1 11l-3 3l-3-3z" android:fillColor="#FFD7CCC8" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M10 18.5l2 4l2-4" android:fillColor="#FF8D6E63" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M10.8,10A0.8,0.8 0 1,1 9.2,10A0.8,0.8 0 1,1 10.8,10Z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M14.8,10A0.8,0.8 0 1,1 13.2,10A0.8,0.8 0 1,1 14.8,10Z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M11 15.5h2" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

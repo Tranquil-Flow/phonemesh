@@ -44,6 +44,7 @@ class HelpActivity : ScreenActivity() {
             R.string.help_more to HowToScenes.MORE,
             R.string.help_problems to listOf("lost", "bt", "short", "notheard", "mic"),
             R.string.help_rare to listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"),
+            R.string.add_title to HowToScenes.ACCOUNTS,
         )
     }
 }

@@ -17,6 +17,7 @@ import org.phonemesh.core.SetupPlan
 /** Settings: language, appearance, the Fast/Accurate speech cards, voice packs, share the app, licences, For helpers. */
 class SettingsActivity : ScreenActivity() {
     private lateinit var languageValue: TextView
+    private lateinit var hubValue: TextView
     private lateinit var nameValue: TextView
     private lateinit var nameDot: View
     private lateinit var packList: LinearLayout
@@ -34,7 +35,12 @@ class SettingsActivity : ScreenActivity() {
         column.addView(backBar(getString(R.string.settings)))
         column.addView(noteLine())
         column.addView(nameRow())
+        column.addView(Ui.button(this, palette, getString(R.string.settings_add), R.drawable.ic_person).apply {
+            tag = "settings_add"
+            setOnClickListener { if (core.account() != null) AddSomeoneActivity.open(this@SettingsActivity) else NameActivity.open(this@SettingsActivity) }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
         column.addView(languageRow())
+        column.addView(hubRow())
         column.addView(section(R.string.settings_appearance))
         themes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         column.addView(themes)
@@ -116,6 +122,25 @@ class SettingsActivity : ScreenActivity() {
         return row
     }
 
+    /** The village hub: the row shows the saved Wi-Fi's name (or None) and opens the hub screen. */
+    private fun hubRow(): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = Ui.dp(this@SettingsActivity, 64)
+            isClickable = true
+            tag = "settings_hub"
+            contentDescription = getString(R.string.hub_title)
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, HubActivity::class.java)) }
+        }
+        row.addView(Ui.icon(this, R.drawable.ic_radio_on, palette.text, 32))
+        row.addView(Ui.text(this, getString(R.string.hub_title), palette.text, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
+        hubValue = Ui.content(Ui.text(this, "", palette.muted).apply { tag = "hub_value" })
+        row.addView(hubValue)
+        return row
+    }
+
     private fun spaced() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         .apply { topMargin = pad() }
 
@@ -125,6 +150,7 @@ class SettingsActivity : ScreenActivity() {
 
     override fun render() {
         languageValue.text = core.currentLanguage().endonym
+        hubValue.text = core.settings.hubCard?.let { org.phonemesh.core.hub.HubCard.parse(it)?.wifi } ?: getString(R.string.hub_none)
         val account = core.account()
         nameValue.text = account?.first ?: getString(R.string.name_unset)
         nameDot.background = if (account != null) Ui.circle(AccountColours.argb(account.second)) else Ui.outline(this, palette.background, palette.outline, radiusDp = 16)

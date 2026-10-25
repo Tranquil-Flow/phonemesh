@@ -42,7 +42,7 @@ object TestCore {
     /** [named]: the person saved a name and colour already (its account keys exist), as on any phone past setup step 2. */
     fun install(
         language: String? = "fr", voices: List<String> = listOf("fr"), connected: Boolean = true, realSpeech: Boolean = false,
-        named: Boolean = true,
+        named: Boolean = true, added: Boolean = true,
     ): AppCore {
         onMain {
             StoryView.animationsEnabled = { false }
@@ -53,6 +53,7 @@ object TestCore {
             if (voices.isNotEmpty()) Fixtures.installReady(context, voices)
             access.reset()
             build(language, realSpeech, nextTheme)
+            core.settings.firstPersonAdded = added
             if (named) core.saveAccount("Awa", 3)
             if (connected) radio.connected(true)
         }

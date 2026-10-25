@@ -318,10 +318,12 @@ object HowToScenes {
             "ok" to OK88),
     )
 
-    /** Scene lists in Help-page order. */
-    val groups: List<List<String>> get() = listOf(SETUP, TALKING, MORE, PROBLEMS, RARE)
+    val ACCOUNTS = AccountsHowToScenes.NAMES
 
-    val all: Map<String, HowToScene> = (setup + talking + more + problems + rare).associateBy { it.name }
+    /** Scene lists in Help-page order. */
+    val groups: List<List<String>> get() = listOf(SETUP, TALKING, MORE, PROBLEMS, RARE, ACCOUNTS)
+
+    val all: Map<String, HowToScene> = (setup + talking + more + problems + rare + AccountsHowToScenes.all).associateBy { it.name }
 
     fun get(name: String): HowToScene = requireNotNull(all[name]) { "No how-to scene $name" }
 }

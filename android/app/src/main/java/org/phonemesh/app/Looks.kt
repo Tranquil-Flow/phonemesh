@@ -17,6 +17,7 @@ object Looks {
     fun status(status: DeliveryStatus, palette: Palette): StatusLook = when (status) {
         DeliveryStatus.WAITING -> StatusLook(R.drawable.ic_clock, palette.muted, R.string.status_waiting, false)
         DeliveryStatus.SENT -> StatusLook(R.drawable.ic_sent, palette.text, R.string.status_sent, true)
+        DeliveryStatus.HUB -> StatusLook(R.drawable.ic_radio_on, palette.text, R.string.status_hub, true)
         DeliveryStatus.DELIVERED -> StatusLook(R.drawable.ic_check, palette.good, R.string.status_delivered, false)
         DeliveryStatus.UNCONFIRMED -> StatusLook(R.drawable.ic_warning, palette.bad, R.string.status_unconfirmed, true)
         DeliveryStatus.FAILED -> StatusLook(R.drawable.ic_warning, palette.bad, R.string.status_failed, true)
@@ -24,14 +25,18 @@ object Looks {
     }
 
     /** Group: rounded square, people on yellow. Private: circle with a person. */
-    fun avatar(context: Context, palette: Palette, kind: ChatKind, sizeDp: Int): View = FrameLayout(context).apply {
+    /** [colour]: a person's chosen colour (accounts), filling the circle. */
+    fun avatar(context: Context, palette: Palette, kind: ChatKind, sizeDp: Int, colour: Int? = null): View = FrameLayout(context).apply {
         val size = Ui.dp(context, sizeDp)
         layoutParams = LinearLayout.LayoutParams(size, size)
-        background = if (kind == ChatKind.GROUP) Ui.outline(context, palette.accent, palette.outline, radiusDp = sizeDp / 4)
-        else Ui.circle(palette.surface).apply { setStroke(Ui.dp(context, 2), palette.outline) }
+        background = when {
+            kind == ChatKind.GROUP -> Ui.outline(context, palette.accent, palette.outline, radiusDp = sizeDp / 4)
+            colour != null -> Ui.circle(AccountColours.argb(colour)).apply { setStroke(Ui.dp(context, 2), palette.outline) }
+            else -> Ui.circle(palette.surface).apply { setStroke(Ui.dp(context, 2), palette.outline) }
+        }
         val icon = Ui.dp(context, sizeDp / 2)
         addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person,
-            if (kind == ChatKind.GROUP) palette.onAccent else palette.text, sizeDp / 2),
+            if (kind == ChatKind.GROUP) palette.onAccent else if (colour != null) android.graphics.Color.WHITE else palette.text, sizeDp / 2),
             FrameLayout.LayoutParams(icon, icon, Gravity.CENTER))
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }

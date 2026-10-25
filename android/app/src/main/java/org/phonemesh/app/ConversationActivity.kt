@@ -42,8 +42,6 @@ import org.phonemesh.core.DeliveryStatus
 import org.phonemesh.core.DraftFit
 import org.phonemesh.core.PlanDay
 import org.phonemesh.core.PlanWindow
-import org.phonemesh.core.DraftRules
-import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.RecordGesture
 import org.phonemesh.core.Tip
 import org.phonemesh.core.TipFacts
@@ -115,14 +113,19 @@ class ConversationActivity : ScreenActivity() {
     /** Typing and pasting stop at one radio part; deleting is always allowed. */
     private val fitFilter = InputFilter { source, start, end, dest, dstart, dend ->
         if (end == start) return@InputFilter null
-        val tag = core.currentLanguage().tag
+        // Input connections can recommit existing text while the editor is
+        // recreated. An identical replacement cannot increase the packet size;
+        // filtering it would silently shorten an already-oversized saved draft.
+        if (source.subSequence(start, end).contentEquals(dest.subSequence(dstart, dend))) {
+            return@InputFilter null
+        }
         val before = dest.subSequence(0, dstart).toString()
         val after = dest.subSequence(dend, dest.length).toString()
         fun fits(count: Int): Boolean {
             // An invalid half-surrogate is not evidence that a longer valid prefix fits.
             val boundary = if (count > 0 && Character.isHighSurrogate(source[start + count - 1])) count - 1 else count
-            return DraftRules.fit(
-                (before + source.subSequence(start, start + boundary) + after).replace('\n', ' '), tag,
+            return core.fitFor(
+                chatId, (before + source.subSequence(start, start + boundary) + after).replace('\n', ' '),
             ) != DraftFit.TOO_LONG
         }
         if (fits(end - start)) return@InputFilter null
@@ -168,6 +171,7 @@ class ConversationActivity : ScreenActivity() {
         bars.forEach { root.addView(it) }
         show(root)
         built = true
+        if (chat.kind == ChatKind.DIRECT) core.note(UiText(R.string.old_chat_read_only))
         if (editing) loadDraftForEditing()
     }
 
@@ -179,7 +183,7 @@ class ConversationActivity : ScreenActivity() {
             setPadding(pad() / 4, 0, pad() / 2, 0)
         }
         bar.addView(backButton())
-        bar.addView(Looks.avatar(this, palette, chat.kind, 40).apply {
+        bar.addView(Looks.avatar(this, palette, chat.kind, 40, core.chatColour(chat)).apply {
             (layoutParams as LinearLayout.LayoutParams).marginStart = pad() / 4
         })
         title = Ui.content(Ui.text(this, "", palette.text, 20f, bold = true).apply {
@@ -189,6 +193,10 @@ class ConversationActivity : ScreenActivity() {
             gravity = Gravity.CENTER_VERTICAL
             // A narrow phone gets smaller letters before any are cut; the bar's own height lets them grow back.
             setAutoSizeTextTypeUniformWithConfiguration(Ui.BODY_SP.toInt(), 20, 1, TypedValue.COMPLEX_UNIT_SP)
+            if (chat.kind == ChatKind.PERSON) {
+                contentDescription = getString(R.string.contact_details)
+                setOnClickListener { startActivity(ContactActivity.intent(this@ConversationActivity, chat.id)) }
+            }
         })
         bar.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = pad() })
         people = Looks.peopleBadge(this, palette).apply { tag = "people" }
@@ -583,14 +591,15 @@ class ConversationActivity : ScreenActivity() {
         if (!built) return
         val chat = core.history.chat(chatId) ?: run { finish(); return }
         title.text = core.chatTitle(chat)
-        Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) PeopleHeard.count(core.history.sendersHeard(chatId), null) else null)
+        if (chat.kind == ChatKind.PERSON) title.contentDescription = "${core.chatTitle(chat)}: ${getString(R.string.contact_details)}"
+        Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) core.peopleHeard(chatId) else null)
         Looks.radio(radioStatus, palette, core.connected)
         val messages = core.history.messages(chatId)
         bubbles.update(chat, messages, core.history.reactions(chatId).groupBy { it.target })
         renderPlanned()
         // Planning needs whole words that fit, like Send; not while typing, and not while the region card asks first.
         val regionAsks = core.region.blocksSending || core.region.phase != RegionPhase.Idle
-        later.visibility = if (core.draft(chatId) != null && !editing && !regionAsks && core.draftFit(chatId) == DraftFit.FITS) View.VISIBLE else View.GONE
+        later.visibility = if (core.draft(chatId) != null && !editing && !regionAsks && chat.kind != ChatKind.DIRECT && core.draftFit(chatId) == DraftFit.FITS) View.VISIBLE else View.GONE
         val answering = core.replyTarget(chatId)
         replyBar.visibility = if (answering != null) View.VISIBLE else View.GONE
         replyQuote.text = answering?.let { if (it.kind == MessageKind.PICTURE) getString(R.string.picture_label) else it.text }.orEmpty()
@@ -598,13 +607,14 @@ class ConversationActivity : ScreenActivity() {
         // A finger on the microphone does not survive a rotation: the recording carries on, locked.
         if (recordingHere && !pressing) core.recordLocked = true
         val draft = core.draft(chatId)
-        val drafting = draft != null || editing
+        // An old radio chat is read only: no microphone, no keyboard, no draft, no Send.
+        val drafting = (draft != null || editing) && chat.kind != ChatKind.DIRECT
         draftBox.visibility = if (drafting) View.VISIBLE else View.GONE
         draftText.visibility = if (draft != null && !editing) View.VISIBLE else View.GONE
         draftEdit.visibility = if (editing) View.VISIBLE else View.GONE
         draftText.text = draft.orEmpty()
         draftText.contentDescription = draft
-        micBar.visibility = if (drafting) View.GONE else View.VISIBLE
+        micBar.visibility = if (drafting || chat.kind == ChatKind.DIRECT) View.GONE else View.VISIBLE
         draftBar.visibility = if (drafting) View.VISIBLE else View.GONE
         // A draft that cannot go out yet is explained: the radio has no region, or its region is being set.
         regionSlot.removeAllViews()
@@ -619,8 +629,9 @@ class ConversationActivity : ScreenActivity() {
         renderMic(recordingHere)
         if (started != null) renderTip(when {
             recordingHere -> TipPlace.RECORDING
-            // One picture at a time: while the cut-off notice shows, the draft's tip waits.
-            drafting -> if (core.draftFit(chatId) == DraftFit.EMPTY || cutNotice.visibility == View.VISIBLE) null else TipPlace.DRAFT
+            // One picture at a time: a region explanation or cut-off notice owns the space.
+            // Otherwise the generic draft tip can push the actual discard/listen/send row off-screen.
+            drafting -> if (regionCard != null || core.draftFit(chatId) == DraftFit.EMPTY || cutNotice.visibility == View.VISIBLE) null else TipPlace.DRAFT
             else -> TipPlace.CHAT
         }, messages)
     }
@@ -960,11 +971,11 @@ class ConversationActivity : ScreenActivity() {
         // The long press is what the "hold" tip teaches: done once, it never shows again.
         if (tip == Tip.HOLD) endTip(learned = true) else core.settings.tipsShown = core.settings.tipsShown + Tip.HOLD.key
         tipBox.visibility = if (tip != null) View.VISIBLE else View.GONE
-        val others = core.chatRows().filter { it.chat.id != chatId }
+        val others = core.chatRows().filter { it.chat.id != chatId && !it.old }
         val picture = message.kind == MessageKind.PICTURE
         val privateOthers = others.filter { core.canSendPictures(it.chat.id) }
         // Only a message that went over the radio has an id the other phones know, so only it can be answered.
-        val overRadio = message.packetId != null
+        val overRadio = message.packetId != null && core.history.chat(chatId)?.kind != ChatKind.DIRECT
         show(Actions.menu(this, palette, listOfNotNull(
             if (overRadio) Actions.Item("action_reply", R.string.reply, R.drawable.ic_reply) { core.setReplyTarget(chatId, message.id) } else null,
             if (overRadio) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,

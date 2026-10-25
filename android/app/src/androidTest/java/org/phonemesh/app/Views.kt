@@ -37,9 +37,13 @@ object Views {
     fun clickRow(activity: Activity, rowTag: String) {
         val row = checkNotNull(tagged(activity, rowTag)) { "No row tagged $rowTag" }
         TestCore.onMain {
-            val list = row.parent as ListView
-            val position = list.getPositionForView(row)
-            list.performItemClick(row, position, list.getItemIdAtPosition(position))
+            // A section heading may wrap the tagged content inside the actual list item.
+            var item = row
+            while (item.parent is View && item.parent !is ListView) item = item.parent as View
+            val list = checkNotNull(item.parent as? ListView) { "Row $rowTag is not in a ListView" }
+            val position = list.getPositionForView(item)
+            check(position != ListView.INVALID_POSITION) { "Row $rowTag has no adapter position" }
+            list.performItemClick(item, position, list.getItemIdAtPosition(position))
         }
         inst.waitForIdleSync()
     }

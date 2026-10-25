@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 30, "pineapple" / "ananas" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M12 9C11 6 9 4 6.5 3.5C9 6 10 7.5 10.5 9zM12 9c1-3 3-5 5.5-5.5C15 6 14 7.5 13.5 9zM12 9c-.7-3-.5-5.5 0-7.5c.5 2 .7 4.5 0 7.5z" android:fillColor="#FF43A047" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M17.5,15.3A5.5,6.7 0 1,1 6.5,15.3A5.5,6.7 0 1,1 17.5,15.3Z" android:fillColor="#FFFFCA28" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M8 11l7.5 8.5M7 15l5 5.5M10.5 9l6 6.5M16 11l-7.5 8.5M17 15l-5 5.5M13.5 9l-6 6.5" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

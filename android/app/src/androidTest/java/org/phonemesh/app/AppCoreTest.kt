@@ -27,19 +27,18 @@ class AppCoreTest {
 
     @Test fun deletingStopsItsPlaybackAndALateReceiptChangesNothing() {
         TestCore.install()
-        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi")
         val sent = sendIn(direct, "A Kofi")
-        val packet = radio.sent.single().packetId
         main { core.play(sent.id) }
         assertEquals(sent.id, core.playingId)
         assertTrue(main { core.deleteMessage(sent.id) })
         assertNull(core.playingId)
         assertNull(core.history.message(sent.id))
-        main { radio.deliver(packet, DeliveryState.QUEUED); radio.deliver(packet, DeliveryState.ACKNOWLEDGED) }
+        PersonFixture.acknowledge(bea, radio.broadcasts.single().payload)
         assertNull(core.history.message(sent.id))
         assertNull(core.history.lastMessage(direct))
         assertFalse("already gone", main { core.deleteMessage(sent.id) })
-        assertEquals("nothing more goes out over the radio", 1, radio.sent.size)
+        assertEquals("nothing more goes out over the radio", 1, radio.broadcasts.size)
     }
 
     @Test fun aNewMessageIsReadAloudOnlyWhenAskedWhileOpenAndQuiet() {
@@ -265,11 +264,21 @@ class AppCoreTest {
         val direct = core.history.chats().single { it.kind == ChatKind.DIRECT }
         assertEquals("!0000bbbb", direct.address)
         assertEquals("Salut toi", core.history.lastMessage(direct.id)!!.text)
+        // Old radio-addressed chats still receive, but sending now requires a person's session.
+        main { core.setDraft(direct.id, "Pour toi"); assertFalse(core.send(direct.id)) }
+        assertEquals("Pour toi", core.draft(direct.id))
+        val (bea, person) = PersonFixture.meet("Bea")
         sendIn(group, "Pour tous")
-        sendIn(direct.id, "Pour toi")
-        assertEquals(listOf("^all", "!0000bbbb"), radio.sent.map { it.destinationId })
-        assertEquals(listOf("[pm1:fr] Pour tous", "[pm1:fr] Pour toi"), radio.sent.map { it.text })
-        assertEquals(listOf(0, 0), radio.sent.map { it.channel })
+        sendIn(person, "Pour toi")
+        assertEquals(listOf(303, 301), radio.broadcasts.map { it.port })
+        assertEquals(listOf("^all", "^all"), radio.broadcasts.map { it.destinationId })
+        assertEquals(listOf(0, 0), radio.broadcasts.map { it.channel })
+        assertEquals("Pour tous", org.phonemesh.core.wire.SharedPost.decode(radio.broadcasts[0].payload)!!.text)
+        val opened = bea.postman.receive(radio.broadcasts[1].payload, 1_000)!!.body as org.phonemesh.core.wire.Body.Text
+        assertEquals("Pour toi", opened.text)
+        assertEquals("fr", opened.language)
+        assertEquals("Salut toi", core.history.lastMessage(direct.id)!!.text)
+        assertEquals("Pour toi", core.history.lastMessage(person)!!.text)
     }
 
     @Test fun otherChannelsAndBrokenTextAreIgnored() {
@@ -284,57 +293,51 @@ class AppCoreTest {
     @Test fun groupShowsSentAndOnlyPrivateGetsATick() {
         TestCore.install()
         val group = core.groupChatId()
-        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi")
         val inGroup = sendIn(group, "Au groupe")
         val inPrivate = sendIn(direct, "A Kofi")
-        val (groupPacket, privatePacket) = radio.sent.map { it.packetId }
-        main {
-            radio.deliver(groupPacket, DeliveryState.SUBMITTING); radio.deliver(groupPacket, DeliveryState.QUEUED)
-            radio.deliver(privatePacket, DeliveryState.SUBMITTING); radio.deliver(privatePacket, DeliveryState.QUEUED)
-        }
+        val groupPacket = radio.sent.single().packetId
+        main { radio.deliver(groupPacket, DeliveryState.SUBMITTING); radio.deliver(groupPacket, DeliveryState.QUEUED) }
+        Views.waitUntil { core.history.message(inPrivate.id)!!.status == DeliveryStatus.SENT }
         assertEquals(DeliveryStatus.SENT, core.history.message(inGroup.id)!!.status)
-        assertEquals(DeliveryStatus.WAITING, core.history.message(inPrivate.id)!!.status)
-        main {
-            radio.deliver(groupPacket, DeliveryState.ACKNOWLEDGED); radio.deliver(groupPacket, DeliveryState.UNCONFIRMED)
-            radio.deliver(privatePacket, DeliveryState.ACKNOWLEDGED)
-        }
+        main { radio.deliver(groupPacket, DeliveryState.ACKNOWLEDGED); radio.deliver(groupPacket, DeliveryState.UNCONFIRMED) }
         assertEquals(DeliveryStatus.SENT, core.history.message(inGroup.id)!!.status)
+        assertEquals("a private message is Sent until the other phone's receipt", DeliveryStatus.SENT, core.history.message(inPrivate.id)!!.status)
+        PersonFixture.acknowledge(bea, radio.broadcasts.single { it.port == 301 }.payload)
         assertEquals(DeliveryStatus.DELIVERED, core.history.message(inPrivate.id)!!.status)
     }
 
     /** Review Focus 1, changed by the owner on 2026-10-13: no radio means waiting, said on the bubble, then sent by itself. */
     @Test fun withoutARadioMessagesWaitSayingSoAndGoInOrderOnceOneIsReady() {
         TestCore.install()
-        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi", accept = false)
         main { radio.connected(false) }
         val failed = sendIn(direct, "Tu es là ?")
         val next = sendIn(direct, "Réponds-moi")
-        assertEquals(DeliveryStatus.QUEUED, failed.status)
-        assertEquals(DeliveryStatus.QUEUED, next.status)
-        assertFalse("nothing to resend: it goes by itself", DeliveryStatus.QUEUED.canResend)
-        assertTrue(radio.sent.isEmpty())
+        assertEquals(DeliveryStatus.WAITING, failed.status)
+        assertEquals(DeliveryStatus.WAITING, next.status)
+        assertTrue(radio.broadcasts.isEmpty() && radio.sent.isEmpty())
+        val ref = core.history.message(failed.id)!!.packetId
+        assertNotNull("its reference is known from the start", ref)
         TestCore.restart()
-        assertEquals("closing the app keeps it waiting", DeliveryStatus.QUEUED, core.history.message(failed.id)!!.status)
+        assertEquals("closing the app keeps it waiting, with its sealed packet", DeliveryStatus.WAITING, core.history.message(failed.id)!!.status)
+        assertEquals(ref, core.history.message(failed.id)!!.packetId)
         main { radio.connected(true) }
-        assertEquals("one at a time: the radio's queue drops a fourth write", 1, radio.sent.size)
-        assertTrue(radio.sent[0].text.endsWith("Tu es là ?"))
-        assertEquals(DeliveryStatus.QUEUED, core.history.message(next.id)!!.status)
-        val packet = radio.sent.first().packetId
-        main { radio.deliver(packet, DeliveryState.SUBMITTING) }
-        assertEquals("being written is not taken", 1, radio.sent.size)
-        main { radio.deliver(packet, DeliveryState.QUEUED) }
-        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-        assertEquals("the next goes once the radio took the first, in the order written", 2, radio.sent.size)
-        assertTrue(radio.sent[1].text.endsWith("Réponds-moi"))
-        assertEquals(DeliveryStatus.WAITING, core.history.message(failed.id)!!.status)
-        assertEquals(packet, core.history.message(failed.id)!!.packetId)
-        // Lost after the radio took it: unconfirmed, resend gets a new packet, the old one's late report changes nothing.
-        main { radio.deliver(packet, DeliveryState.QUEUED); radio.deliver(packet, DeliveryState.UNCONFIRMED) }
-        assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(failed.id)!!.status)
-        assertTrue(main { core.resend(failed.id) })
-        val second = radio.sent.last().packetId
-        assertNotEquals(packet, second)
-        main { radio.deliver(packet, DeliveryState.FAILED); radio.deliver(second, DeliveryState.ACKNOWLEDGED) }
+        Views.waitUntil { radio.broadcasts.size == 1 }
+        assertEquals("one at a time: the radio's queue drops a fourth write", 1, radio.broadcasts.size)
+        val first = radio.broadcasts.first()
+        main { radio.deliver(first.packetId, DeliveryState.SUBMITTING) }
+        assertEquals("being written is not taken", 1, radio.broadcasts.size)
+        main { radio.deliver(first.packetId, DeliveryState.QUEUED) }
+        Views.waitUntil { radio.broadcasts.size == 2 }
+        assertEquals("the next goes once the radio took the first, in the order written", DeliveryStatus.SENT, core.history.message(failed.id)!!.status)
+        assertEquals(DeliveryStatus.WAITING, core.history.message(next.id)!!.status)
+        // The old write's late report changes nothing; the other phone's receipt delivers both.
+        main { radio.deliver(first.packetId, DeliveryState.FAILED) }
+        assertEquals(DeliveryStatus.SENT, core.history.message(failed.id)!!.status)
+        main { radio.deliver(radio.broadcasts[1].packetId, DeliveryState.QUEUED) }
+        radio.broadcasts.forEach { bea.postman.receive(it.payload, 1_000) }
+        PersonFixture.deliver(bea.postman.due(60_000).first().packet)
         assertEquals(DeliveryStatus.DELIVERED, core.history.message(failed.id)!!.status)
         assertEquals(2, core.history.messages(direct).size)
     }
@@ -379,17 +382,17 @@ class AppCoreTest {
     @Test fun waitingMessagesBecomeUnconfirmedAfterARestart() {
         TestCore.install()
         val group = core.groupChatId()
-        val direct = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi", accept = false)
         val privateWaiting = sendIn(direct, "Privé")
         val groupSent = sendIn(group, "Parti")
         main { radio.deliver(radio.sent.last().packetId, DeliveryState.QUEUED) }
         val groupWaiting = sendIn(group, "Pas encore parti")
         TestCore.restart()
-        assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(privateWaiting.id)!!.status)
+        assertEquals("a person's message keeps its sealed packet: still waiting", DeliveryStatus.WAITING, core.history.message(privateWaiting.id)!!.status)
         assertEquals(DeliveryStatus.SENT, core.history.message(groupSent.id)!!.status)
         assertEquals(DeliveryStatus.UNCONFIRMED, core.history.message(groupWaiting.id)!!.status)
         assertEquals(listOf("Parti", "Pas encore parti"), core.history.messages(group).map { it.text })
-        assertTrue(core.history.message(privateWaiting.id)!!.status!!.canResend)
+        assertEquals("WAITING", core.history.outbox(bea.account).single().state)
     }
 
     @Test fun unreadCountsOnlyWhileTheChatIsClosed() {
@@ -463,11 +466,12 @@ class AppCoreTest {
     @Test fun aTooLongDraftCannotBeSent() {
         TestCore.install()
         val group = core.groupChatId()
-        main { core.setDraft(group, "a".repeat(195)) }
+        main { core.setDraft(group, "a".repeat(220)) }
         assertEquals(DraftFit.TOO_LONG, core.draftFit(group))
         assertFalse(main { core.send(group) })
         assertTrue(radio.sent.isEmpty())
-        assertEquals("a".repeat(195), core.draft(group))
+        assertTrue(radio.broadcasts.isEmpty())
+        assertEquals("a".repeat(220), core.draft(group))
     }
 
     @Test fun theRememberedRadioReconnectsByItself() {

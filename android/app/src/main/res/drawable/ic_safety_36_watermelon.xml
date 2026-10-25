@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 36, "watermelon" / "pastèque" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M2 9h20a10 10 0 0 1-20 0z" android:fillColor="#FF43A047" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M4 9h16a8 8 0 0 1-16 0z" android:fillColor="#FFEF5350" />
+    <path android:pathData="M4 9a8 8 0 0 0 16 0" android:fillColor="#00000000" android:strokeColor="#FFC8E6C9" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.1,12A0.6,1 0 1,1 7.9,12A0.6,1 0 1,1 9.1,12Z" android:fillColor="#FF111111" />
+    <path android:pathData="M12.6,14.5A0.6,1 0 1,1 11.4,14.5A0.6,1 0 1,1 12.6,14.5Z" android:fillColor="#FF111111" />
+    <path android:pathData="M16.1,12A0.6,1 0 1,1 14.9,12A0.6,1 0 1,1 16.1,12Z" android:fillColor="#FF111111" />
+    <path android:pathData="M12.6,11A0.6,1 0 1,1 11.4,11A0.6,1 0 1,1 12.6,11Z" android:fillColor="#FF111111" />
+</vector>

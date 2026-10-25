@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 55, "scissors" / "ciseaux" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9.5 9.5L21 18M9.5 14.5L21 6" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.5 9.5L21 18M9.5 14.5L21 6" android:fillColor="#00000000" android:strokeColor="#FFB0BEC5" android:strokeWidth="1.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.2,7A3.2,3.2 0 1,1 2.8,7A3.2,3.2 0 1,1 9.2,7Z" android:fillColor="#FFE53935" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.2,17A3.2,3.2 0 1,1 2.8,17A3.2,3.2 0 1,1 9.2,17Z" android:fillColor="#FFE53935" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M7.3,7A1.3,1.3 0 1,1 4.7,7A1.3,1.3 0 1,1 7.3,7Z" android:fillColor="#FFFAFAFA" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M7.3,17A1.3,1.3 0 1,1 4.7,17A1.3,1.3 0 1,1 7.3,17Z" android:fillColor="#FFFAFAFA" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

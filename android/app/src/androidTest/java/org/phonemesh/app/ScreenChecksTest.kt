@@ -35,11 +35,12 @@ class ScreenChecksTest {
         val names = listOf(
             "01-welcome-1", "01-welcome-3", "01-welcome-5", "01-welcome-still",
             "01-language-from-settings", "02-chats-step1", "02-chats-step1-offline", "02-chats-friend-guide",
-            "02-chats-step-name", "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
+            "02-chats-step-name", "02-chats-step-add", "02-chats-add-upgrade", "02-chats-step2", "02-chats-step3", "02-chats-radio-lost", "03-chats", "04-chats-english", "05-conversation",
             "05-conversation-mic-hint", "05-conversation-tip", "05-conversation-reply", "05-forward-to", "05-hold-tip",
             "05-picture-choose", "05-picture-ready", "05-picture-bubbles",
             "06-draft-too-long", "06-draft-cut", "06-draft-planned", "06-plan-window", "06-plan-window-day", "06-plan-clock", "06-plan-calendar",
-            "07-recording", "07-recording-tip", "07-writing", "08-radio", "09-settings", "09-name", "09-name-filled", "10-help", "10-help-more", "11-note-picture",
+            "07-recording", "07-recording-tip", "07-writing", "08-radio", "09-settings", "09-name", "09-name-filled", "09-add-someone", "09-add-request", "09-safety",
+            "09-safety-mismatch", "09-contact", "09-contact-missing", "09-person-chat", "09-hub-none", "09-hub-searching", "09-hub-roaming", "10-help", "10-help-more", "10-help-accounts", "11-note-picture",
         )
         assertEquals(names, ScreenStates.all.map { it.first })
         assertEquals(names.map { "$it-dark" }, ScreenStates.dark.map { it.first })
@@ -48,7 +49,18 @@ class ScreenChecksTest {
     @Test fun language() = check(minTargets = 5) { ScreenStates.language() }
     @Test fun chatsWithSetupCards() = check(minTargets = 4) { ScreenStates.chatsSetup() }
     @Test fun chatsNameStep() = check(minTargets = 4) { ScreenStates.chatsStepName() }
+    @Test fun chatsAddStep() = check(minTargets = 4) { ScreenStates.chatsStepAdd() }
+    @Test fun chatsAddUpgrade() = check(minTargets = 4) { ScreenStates.chatsStepAdd(finished = true) }
     @Test fun nameScreen() = check(minTargets = 10) { ScreenStates.nameScreen(filled = true) }
+    @Test fun addSomeoneScreen() = check(minTargets = 5) { ScreenStates.addSomeone(request = true) }
+    @Test fun safetyScreen() = check(minTargets = 3) { ScreenStates.safety() }
+    @Test fun safetyMismatchScreen() = check(minTargets = 3) { ScreenStates.safety(mismatch = true) }
+    @Test fun contactDetailsScreen() = check(minTargets = 5) { ScreenStates.contactDetails() }
+    @Test fun missingContactVoiceScreen() = check(minTargets = 4) { ScreenStates.contactDetails(missing = true) }
+    @Test fun hubWithoutSavedCode() = check(minTargets = 3) { ScreenStates.hub(saved = false) }
+    @Test fun hubSearching() = check(minTargets = 4) { ScreenStates.hub() }
+    @Test fun hubRoaming() = check(minTargets = 4) { ScreenStates.hub(roaming = true) }
+    @Test fun personChatHeader() = check(minTargets = 4) { ScreenStates.contactDetails(conversation = true) }
     @Test fun chatsWithRows() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows() }
     @Test fun chatsInEnglish() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows("en-US") }
     @Test fun conversation() = check(minTargets = 6, minRows = 4) { ScreenStates.conversation() }
@@ -59,6 +71,7 @@ class ScreenChecksTest {
     @Test fun pictureReady() = check(minTargets = 8) { ScreenStates.pictureScreen(withPhoto = true) }
     @Test fun pictureBubbles() = check(minTargets = 4, minRows = 2) { ScreenStates.pictureBubbles() }
     @Test fun helpMore() = check(minTargets = 8) { ScreenStates.help(group = 2) }
+    @Test fun helpAccounts() = check(minTargets = 4) { ScreenStates.help(group = 5) }
     @Test fun conversationTip() = check(minTargets = 6, minRows = 2) { ScreenStates.conversationTip() }
     @Test fun draftTooLong() = check(minTargets = 3) { ScreenStates.draftTooLong() }
     @Test fun draftCut() = check(minTargets = 4) { ScreenStates.draftCut() }

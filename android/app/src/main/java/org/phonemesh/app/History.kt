@@ -122,6 +122,68 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             db.execSQL("CREATE INDEX outbox_by_contact ON outbox (account_id, id)")
             db.execSQL("CREATE TABLE hellos_seen (id BLOB PRIMARY KEY, at INTEGER NOT NULL)")
         }
+        // Messaging engine (plan step 13): each outgoing packet's recipient code (hub acks, references), the newest
+        // ack from each contact (flow control), and messages held past the window.
+        if (oldVersion < 7) {
+            db.execSQL("ALTER TABLE outbox ADD COLUMN code BLOB")
+            db.execSQL("ALTER TABLE contacts ADD COLUMN last_ack BLOB")
+            db.execSQL(
+                "CREATE TABLE held (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL, message_id INTEGER, " +
+                    "body BLOB NOT NULL, at INTEGER NOT NULL)",
+            )
+        }
+        if (oldVersion < 8) {
+            db.execSQL("CREATE TABLE received_mail (digest TEXT PRIMARY KEY CHECK(length(digest)=64), " +
+                "account_id TEXT NOT NULL, response_ack BLOB, receipt_due INTEGER, expires INTEGER NOT NULL, " +
+                "CHECK(response_ack IS NULL OR length(response_ack)=10), CHECK(receipt_due IS NULL OR response_ack IS NOT NULL))")
+            db.execSQL("CREATE INDEX received_mail_due ON received_mail(receipt_due)")
+            db.execSQL("CREATE INDEX received_mail_expiry ON received_mail(expires)")
+            db.execSQL("ALTER TABLE outbox ADD COLUMN is_receipt INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE outbox ADD COLUMN carried_ack BLOB")
+            // Acceptance of old receipt rows was never persisted. Offer those exact bytes once, conservatively.
+            db.execSQL("UPDATE outbox SET is_receipt=1, state='WAITING' WHERE state='RECEIPT'")
+        }
+        if (oldVersion < 9) db.execSQL("CREATE TABLE qr_sessions (account_id TEXT PRIMARY KEY, start_digest BLOB NOT NULL CHECK(length(start_digest)=32))")
+        if (oldVersion < 10) {
+            db.execSQL("CREATE TABLE incoming_held (account_id TEXT NOT NULL, digest TEXT NOT NULL CHECK(length(digest)=64), " +
+                "packet BLOB NOT NULL CHECK(length(packet)<=228), expires INTEGER NOT NULL, PRIMARY KEY(account_id,digest))")
+            db.execSQL("CREATE INDEX incoming_held_expiry ON incoming_held(expires)")
+        }
+        if (oldVersion < 11) {
+            db.execSQL("CREATE TABLE incoming_deadlines (account_id TEXT NOT NULL, code TEXT NOT NULL CHECK(length(code)=16), " +
+                "expires INTEGER NOT NULL, PRIMARY KEY(account_id,code))")
+            // Preserve the earliest v10 deadline; wire v2 has one marker byte followed by the eight-byte code.
+            db.execSQL("INSERT INTO incoming_deadlines SELECT account_id,lower(hex(substr(packet,2,8))),min(expires) " +
+                "FROM incoming_held GROUP BY account_id,substr(packet,2,8)")
+            db.execSQL("UPDATE incoming_held SET expires=(SELECT d.expires FROM incoming_deadlines d " +
+                "WHERE d.account_id=incoming_held.account_id AND d.code=lower(hex(substr(incoming_held.packet,2,8))))")
+        }
+        if (oldVersion < 12) {
+            db.execSQL("CREATE TABLE pending_requests (account_id TEXT PRIMARY KEY CHECK(length(account_id)=16), " +
+                "hello_id BLOB NOT NULL UNIQUE CHECK(length(hello_id)=16), sealed BLOB NOT NULL CHECK(length(sealed)<=8192), at INTEGER NOT NULL)")
+            PersonPictures.createTables(db)
+        }
+        if (oldVersion < 13) {
+            db.execSQL("CREATE TABLE picture_ids (account_id TEXT PRIMARY KEY CHECK(length(account_id)=16), " +
+                "used BLOB NOT NULL CHECK(length(used)=8192))")
+            // Preserve every retained outgoing v12 picture before local deletion can erase its wire id.
+            val allocated = mutableMapOf<String, ByteArray>()
+            db.rawQuery("SELECT c.address,p.picture_id FROM pictures p JOIN messages m ON m.id=p.message_id " +
+                "JOIN chats c ON c.id=m.chat_id WHERE c.kind='PERSON' AND m.direction='OUT'", null).use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getInt(1)
+                    require(id in 0..65535)
+                    val bits = allocated.getOrPut(c.getString(0)) { ByteArray(8192) }
+                    bits[id ushr 3] = (bits[id ushr 3].toInt() or (1 shl (id and 7))).toByte()
+                }
+            }
+            for ((account, bits) in allocated) db.insertOrThrow("picture_ids", null,
+                ContentValues().apply { put("account_id", account); put("used", bits) })
+        }
+        if (oldVersion < 14) db.execSQL("CREATE TABLE hub_cursor (pin TEXT PRIMARY KEY CHECK(length(pin)=43), seq INTEGER NOT NULL CHECK(seq>=0))")
+        // Only a pinned /send response binds custody to a particular hub. Legacy HUB observations remain unbound.
+        if (oldVersion < 15) db.execSQL("CREATE TABLE hub_custody (outbox_id INTEGER NOT NULL REFERENCES outbox(id), " +
+            "pin TEXT NOT NULL CHECK(length(pin)=43), PRIMARY KEY(outbox_id,pin))")
     }
 
     // ---- Accounts: raw rows; AccountStore seals and opens what they hold.
@@ -132,6 +194,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     class OutboxRow(
         val id: Long, val accountId: String, val messageId: Long?, val port: Int, val packet: ByteArray,
         val chainTag: ByteArray?, val counter: Long?, val created: Long, val tries: Int, val nextTry: Long, val state: String,
+        val code: ByteArray? = null,
+        val isReceipt: Boolean = false, val carriedAck: ByteArray? = null,
     )
 
     fun accountRow(): AccountRow? = readableDatabase.query("account", null, "id = 1", null, null, null, null).use { c ->
@@ -178,10 +242,21 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     fun dropPrekeysRetiredBefore(time: Long): Int = writableDatabase.delete("prekeys", "retired IS NOT NULL AND retired < ?", arrayOf(time.toString()))
 
     fun putContact(row: ContactRow) {
-        writableDatabase.insertWithOnConflict("contacts", null, ContentValues().apply {
+        val values = ContentValues().apply {
             put("account_id", row.accountId); put("card", row.card); put("name", row.name); put("colour", row.colour)
             put("met", if (row.met) 1 else 0); put("voice", row.voice); put("added", row.added)
-        }, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+        // Replacing the row would erase transport-owned columns such as last_ack.
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (db.update("contacts", values, "account_id = ?", arrayOf(row.accountId)) == 0) {
+                db.insertOrThrow("contacts", null, values)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun contactRow(accountId: String): ContactRow? =
@@ -189,6 +264,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     fun contactRows(): List<ContactRow> =
         readableDatabase.query("contacts", null, null, null, null, null, "added").use { c -> buildList { while (c.moveToNext()) add(c.contact()) } }
+
+    /** Local listening preference only; never replace the contact or its transport state. */
+    fun setContactVoice(accountId: String, voice: String?): Boolean =
+        writableDatabase.update("contacts", ContentValues().apply { put("voice", voice) },
+            "account_id = ?", arrayOf(accountId)) == 1
 
     private fun Cursor.contact() = ContactRow(
         getString(getColumnIndexOrThrow("account_id")), getBlob(getColumnIndexOrThrow("card")), getString(getColumnIndexOrThrow("name")),
@@ -205,23 +285,81 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
      * Stores a session state and, in the same transaction, the packet sealed with it (review F3): either both are kept
      * or neither. Refuses a state whose [serial] is not above the stored one (review F6): false, nothing written.
      */
-    fun storeSession(accountId: String, serial: Long, sealed: ByteArray, now: Long, outgoing: OutboxRow? = null): Boolean {
+    fun storeSession(accountId: String, serial: Long, sealed: ByteArray, now: Long, outgoing: OutboxRow? = null, consumeHeldId: Long? = null): Boolean {
         val db = writableDatabase
         db.beginTransaction()
         try {
             val stored = db.query("sessions", arrayOf("serial"), "account_id = ?", arrayOf(accountId), null, null, null)
                 .use { if (it.moveToFirst()) it.getLong(0) else null }
             if (stored != null && serial <= stored) return false
-            db.insertWithOnConflict("sessions", null, ContentValues().apply {
+            if (consumeHeldId != null) {
+                require(outgoing != null) { "held consumption needs a replacement" }
+                val held = held(accountId).firstOrNull { it.id == consumeHeldId }
+                check(held != null && held.messageId == outgoing.messageId) { "held ownership changed" }
+            }
+            db.replaceOrThrow("sessions", null, ContentValues().apply {
                 put("account_id", accountId); put("serial", serial); put("state", sealed); put("updated", now)
-            }, SQLiteDatabase.CONFLICT_REPLACE)
+            })
             if (outgoing != null) db.insertOrThrow("outbox", null, ContentValues().apply {
                 put("account_id", accountId); put("message_id", outgoing.messageId); put("port", outgoing.port)
                 put("packet", outgoing.packet); put("chain_tag", outgoing.chainTag); put("counter", outgoing.counter)
                 put("created", outgoing.created); put("next_try", outgoing.nextTry); put("state", outgoing.state)
-            })
+                put("code", outgoing.code)
+                put("is_receipt", if (outgoing.isReceipt) 1 else 0); put("carried_ack", outgoing.carriedAck)
+            }).also { lastOutboxId = it }
+            if (consumeHeldId != null) check(db.delete("held", "id = ? AND account_id = ?",
+                arrayOf(consumeHeldId.toString(), accountId)) == 1) { "held row was not consumed" }
             db.setTransactionSuccessful()
             return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    /** An explicit fresh QR supersedes retry work atomically; repeating one showing cannot rewind it. */
+    fun installQrSession(accountId: String, digest: ByteArray, sealed: ByteArray, now: Long): Boolean = transaction {
+        val db = writableDatabase
+        val previous = db.query("qr_sessions", arrayOf("start_digest"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { if (it.moveToFirst()) it.getBlob(0) else null }
+        if (previous != null && previous.contentEquals(digest)) return@transaction true
+        retireSessionWork(accountId)
+        check(storeSession(accountId, 0, sealed, now))
+        db.replaceOrThrow("qr_sessions", null, ContentValues().apply { put("account_id", accountId); put("start_digest", digest) })
+        true
+    }
+
+    /** A crossed link loses to the smaller opener only; QR provenance always wins. Caller owns the transaction. */
+    fun hasQrStart(accountId: String): Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM qr_sessions WHERE account_id=?", arrayOf(accountId),
+    ).use { it.moveToFirst() }
+
+    fun retireSessionWork(accountId: String) {
+        val db = writableDatabase
+        val live = outbox(accountId).filter { it.state != "SUPERSEDED" }
+        val unfinished = (live.filter { it.state != "DELIVERED" }.mapNotNull { it.messageId } +
+            held(accountId).mapNotNull { it.messageId }).toSet()
+        for (row in live) {
+            // A partly delivered picture must retire as one generation, including its delivered pieces.
+            if (row.state == "DELIVERED" && row.messageId !in unfinished) continue
+            setOutboxState(row.id, "SUPERSEDED")
+        }
+        unfinished.forEach { setStatus(it, DeliveryStatus.FAILED) }
+        db.delete("held", "account_id = ?", arrayOf(accountId))
+        db.delete("received_mail", "account_id = ?", arrayOf(accountId))
+        db.delete("incoming_held", "account_id = ?", arrayOf(accountId))
+        db.delete("incoming_deadlines", "account_id = ?", arrayOf(accountId))
+        db.execSQL("UPDATE contacts SET last_ack=NULL WHERE account_id=?", arrayOf(accountId))
+        db.delete("sessions", "account_id = ?", arrayOf(accountId))
+    }
+
+    /** Existing nested History helpers join this outer transaction; no notification escapes before commit. */
+    fun <T> transaction(action: () -> T): T {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val result = action()
+            db.setTransactionSuccessful()
+            return result
         } finally {
             db.endTransaction()
         }
@@ -238,9 +376,63 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
                     c.getColumnIndexOrThrow("counter").let { if (c.isNull(it)) null else c.getLong(it) },
                     c.getLong(c.getColumnIndexOrThrow("created")), c.getInt(c.getColumnIndexOrThrow("tries")),
                     c.getLong(c.getColumnIndexOrThrow("next_try")), c.getString(c.getColumnIndexOrThrow("state")),
+                    c.getColumnIndexOrThrow("code").let { if (c.isNull(it)) null else c.getBlob(it) },
+                    c.getInt(c.getColumnIndexOrThrow("is_receipt")) != 0,
+                    c.getColumnIndexOrThrow("carried_ack").let { if (c.isNull(it)) null else c.getBlob(it) },
                 ))
             }
         }
+
+    /** The id of the last outbox row [storeSession] wrote. */
+    @Volatile var lastOutboxId: Long = -1
+        private set
+
+    /** Every outbox row in [states], all contacts, oldest first. */
+    fun outboxIn(states: Set<String>): List<OutboxRow> =
+        readableDatabase.query("outbox", arrayOf("DISTINCT account_id"), null, null, null, null, null)
+            .use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+            .flatMap { outbox(it) }.filter { it.state in states }.sortedBy { it.id }
+
+    fun outboxRow(id: Long): OutboxRow? = readableDatabase.query("outbox", arrayOf("account_id"), "id = ?", arrayOf(id.toString()), null, null, null)
+        .use { c -> if (c.moveToFirst()) c.getString(0) else null }?.let { account -> outbox(account).firstOrNull { it.id == id } }
+
+    fun updateOutbox(id: Long, tries: Int, nextTry: Long, state: String) {
+        writableDatabase.update("outbox", ContentValues().apply { put("tries", tries); put("next_try", nextTry); put("state", state) },
+            "id = ?", arrayOf(id.toString()))
+    }
+
+    fun setOutboxState(id: Long, state: String) {
+        writableDatabase.update("outbox", ContentValues().apply { put("state", state) }, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun lastAck(accountId: String): ByteArray? =
+        readableDatabase.query("contacts", arrayOf("last_ack"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getBlob(0) else null }
+
+    fun saveAck(accountId: String, ack: ByteArray) {
+        writableDatabase.update("contacts", ContentValues().apply { put("last_ack", ack) }, "account_id = ?", arrayOf(accountId))
+    }
+
+    class HeldRow(val id: Long, val accountId: String, val messageId: Long?, val body: ByteArray)
+
+    fun hold(accountId: String, messageId: Long?, body: ByteArray, now: Long) {
+        writableDatabase.insertOrThrow("held", null, ContentValues().apply {
+            put("account_id", accountId); put("message_id", messageId); put("body", body); put("at", now)
+        })
+    }
+
+    fun held(accountId: String): List<HeldRow> =
+        readableDatabase.query("held", null, "account_id = ?", arrayOf(accountId), null, null, "id").use { c ->
+            buildList {
+                while (c.moveToNext()) add(HeldRow(
+                    c.getLong(c.getColumnIndexOrThrow("id")), c.getString(c.getColumnIndexOrThrow("account_id")),
+                    c.getColumnIndexOrThrow("message_id").let { if (c.isNull(it)) null else c.getLong(it) },
+                    c.getBlob(c.getColumnIndexOrThrow("body")),
+                ))
+            }
+        }
+
+    fun dropHeld(id: Long) { writableDatabase.delete("held", "id = ?", arrayOf(id.toString())) }
 
     /** True the first time a hello [id] is seen; false for a replay (review F2). */
     fun firstHello(id: ByteArray, now: Long): Boolean =
@@ -448,8 +640,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         writableDatabase.update("pictures", ContentValues().apply { put("lost", 1) }, "message_id = ?", arrayOf(messageId.toString()))
 
     /** Once per process start: a picture still arriving lost its pieces with the old process. */
-    fun loseUnfinishedPictures(): Int =
-        writableDatabase.update("pictures", ContentValues().apply { put("lost", 1) }, "file IS NULL AND lost = 0", null)
+    fun loseUnfinishedPictures(): Int = writableDatabase.update(
+        "pictures", ContentValues().apply { put("lost", 1) },
+        // Pictures between people keep their pieces on disk (picture_pieces) and carry on after a restart.
+        "file IS NULL AND lost = 0 AND message_id NOT IN (SELECT m.id FROM messages m JOIN chats c ON c.id = m.chat_id WHERE c.kind = 'PERSON')", null,
+    )
 
     private fun insert(
         chatId: Long, direction: Direction, senderId: String?, text: String, language: String?, time: Long,
@@ -489,6 +684,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         db.beginTransaction()
         try {
             db.delete("pictures", "message_id IN (SELECT id FROM messages WHERE chat_id = ?)", arrayOf(chatId.toString()))
+            if (chat.kind == ChatKind.PERSON) db.delete("picture_pieces", "account_id = ?", arrayOf(chat.address))
             val messages = db.delete("messages", "chat_id = ?", arrayOf(chatId.toString())) +
                 db.delete("planned", "chat_id = ?", arrayOf(chatId.toString()))
             val removed = if (chat.kind == ChatKind.GROUP) {
@@ -506,6 +702,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     /** Removes one message (and its picture row; the caller deletes the file); its chat stays. False when it was already gone. */
     fun deleteMessage(messageId: Long): Boolean {
+        writableDatabase.execSQL(
+            "DELETE FROM picture_pieces WHERE EXISTS (SELECT 1 FROM pictures p JOIN messages m ON m.id = p.message_id " +
+                "JOIN chats c ON c.id = m.chat_id WHERE p.message_id = ? AND m.direction = 'IN' AND c.kind = 'PERSON' " +
+                "AND c.address = picture_pieces.account_id AND p.picture_id = picture_pieces.picture_id)",
+            arrayOf<Any>(messageId),
+        )
         writableDatabase.delete("pictures", "message_id = ?", arrayOf(messageId.toString()))
         return writableDatabase.delete("messages", "id = ?", arrayOf(messageId.toString())) > 0
     }
@@ -543,10 +745,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         arrayOf(chatId.toString()),
     ).use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
 
-    /** Once per process start: clocks left from before cannot finish any more (DeliveryRules.onReopen). */
+    /** Legacy clocks cannot finish after restart. Durable account outbox/held ownership can, so retain those clocks. */
     fun expireWaiting(): Int = writableDatabase.update(
         "messages", ContentValues().apply { put("delivery", DeliveryRules.onReopen(DeliveryStatus.WAITING).name) },
-        "direction = 'OUT' AND delivery = ?", arrayOf(DeliveryStatus.WAITING.name),
+        "direction = 'OUT' AND delivery = ? " +
+            "AND id NOT IN (SELECT message_id FROM outbox WHERE message_id IS NOT NULL AND state IN ('WAITING','SENT','HUB')) " +
+            "AND id NOT IN (SELECT message_id FROM held WHERE message_id IS NOT NULL)", arrayOf(DeliveryStatus.WAITING.name),
     )
 
     private fun Cursor.chat() = Chat(
@@ -594,6 +798,6 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 6
+        const val VERSION = 15
     }
 }

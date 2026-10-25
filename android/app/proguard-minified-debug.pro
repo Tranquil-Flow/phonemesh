@@ -1,3 +1,6 @@
+# Instrumentation reaches app/core APIs beyond the production call graph.
+-keep class org.phonemesh.** { *; }
+
 # The androidTest APK has no Kotlin stdlib of its own; it loads these classes from the app.
 # Keep just the ones androidx.test and the test sources reference (release shrinks the rest).
 -keep class kotlin.Lazy { *; }

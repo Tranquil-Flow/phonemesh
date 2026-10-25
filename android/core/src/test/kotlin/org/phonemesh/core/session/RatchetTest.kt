@@ -4,12 +4,14 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.phonemesh.core.crypto.Aead
 import org.phonemesh.core.crypto.Vectors
 import org.phonemesh.core.wire.Body
+import org.phonemesh.core.wire.Ack
 import org.phonemesh.core.wire.WireV2
 import kotlin.random.Random
 
@@ -80,6 +82,42 @@ class RatchetTest {
         val later = a.send("after healing").packet
         assertEquals("after healing", b.receive(later))
         assertTrue(Ratchet.open(stolen, later, b.keys) !is Ratchet.Opened.Delivered)
+    }
+
+    @Test fun aStoredSkippedPacketKeepsItsAcknowledgementIdentity() {
+        val (a, b) = Phone.qrPair()
+        val late = a.send("late")
+        assertEquals("later", b.receive(a.send("later").packet))
+        val reopened = SessionState.decode(b.state.encode())!!
+        val delivered = Ratchet.open(reopened, late.packet, b.keys) as Ratchet.Opened.Delivered
+        assertEquals(late.counter, delivered.counter)
+        assertArrayEquals(late.chainTag, delivered.chainTag)
+    }
+
+    @Test fun versionOneStateStillOpensItsCurrentChainSkippedKey() {
+        val (a, b) = Phone.qrPair()
+        val late = a.send("legacy late")
+        b.receive(a.send("later").packet)
+        assertEquals(1, b.state.skippedCount)
+        val encoded = b.state.encode()
+        // v1 has the same header and key/time entry, but no presence/tag/counter suffix.
+        val legacy = encoded.copyOf(encoded.size - 1 - Ack.TAG - 8).also { it[0] = 1 }
+        val reopened = SessionState.decode(legacy)!!
+        val delivered = Ratchet.open(reopened, late.packet, b.keys) as Ratchet.Opened.Delivered
+        assertEquals(late.counter, delivered.counter)
+        assertArrayEquals(late.chainTag, delivered.chainTag)
+        assertNotNull(SessionState.decode(reopened.encode()))
+    }
+
+    @Test fun aSkippedOldChainPacketKeepsItsIdentityAfterTurnsAndReopen() {
+        val (a, b) = Phone.qrPair()
+        val late = a.send("old chain")
+        b.receive(a.send("later").packet)
+        repeat(3) { a.receive(b.send("reply").packet); b.receive(a.send("new turn").packet) }
+        val reopened = SessionState.decode(b.state.encode())!!
+        val delivered = Ratchet.open(reopened, late.packet, b.keys) as Ratchet.Opened.Delivered
+        assertEquals(late.counter, delivered.counter)
+        assertArrayEquals(late.chainTag, delivered.chainTag)
     }
 
     @Test fun stateSurvivesBeingStored() {

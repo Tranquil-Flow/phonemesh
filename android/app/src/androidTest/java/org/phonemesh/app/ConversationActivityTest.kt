@@ -282,12 +282,12 @@ class ConversationActivityTest {
         Views.tap(a, "keyboard")
         val edit = Views.tagged(a, "draft_edit") as EditText
         TestCore.onMain { edit.setText("a".repeat(300)) }
-        assertEquals(191, TestCore.onMain { edit.text.length })
+        assertEquals("the group draft stops at a shared post's room for Awa in fr: 228 - 14 - 1 - 3 - 1 - 2", 207, TestCore.onMain { edit.text.length })
         TestCore.onMain { edit.append("bbb") }
-        assertEquals(191, TestCore.onMain { edit.text.length })
+        assertEquals(207, TestCore.onMain { edit.text.length })
         assertEquals(DraftFit.FITS, core.draftFit(group))
         TestCore.onMain { edit.text.delete(0, 10) }
-        assertEquals("deleting is always allowed", 181, TestCore.onMain { edit.text.length })
+        assertEquals("deleting is always allowed", 197, TestCore.onMain { edit.text.length })
     }
 
     @Test fun pastingRespectsUtf8AndNeverSplitsAnEmoji() {
@@ -297,10 +297,10 @@ class ConversationActivityTest {
         Views.tap(a, "keyboard")
         val edit = Views.tagged(a, "draft_edit") as EditText
         TestCore.onMain { edit.setText("😀".repeat(100)) }
-        assertEquals("😀".repeat(47), TestCore.onMain { edit.text.toString() })
+        assertEquals("😀".repeat(51), TestCore.onMain { edit.text.toString() })
         assertEquals(DraftFit.FITS, core.draftFit(group))
         TestCore.onMain { edit.text.replace(0, 2, "é".repeat(100)) }
-        assertEquals("ééé" + "😀".repeat(46), TestCore.onMain { edit.text.toString() })
+        assertEquals("ééé" + "😀".repeat(50), TestCore.onMain { edit.text.toString() })
         assertEquals(DraftFit.FITS, core.draftFit(group))
     }
 
@@ -353,8 +353,33 @@ class ConversationActivityTest {
         Views.tap(a, "keyboard")
         val edit = Views.tagged(a, "draft_edit") as EditText
         TestCore.onMain { edit.setText("😀".repeat(99)) }
-        assertEquals("😀".repeat(47), TestCore.onMain { edit.text.toString() })
+        assertEquals("😀".repeat(51), TestCore.onMain { edit.text.toString() })
         assertEquals(DraftFit.FITS, core.draftFit(group))
+    }
+
+    @Test fun recommittingAnUnchangedOversizedDraftDoesNotShortenIt() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val old = "a".repeat(300)
+        TestCore.onMain { core.setDraft(group, old) }
+        val a = open(group)
+        Views.tap(a, "draft_text")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        assertEquals(old, TestCore.onMain { edit.text.toString() })
+        // An input connection may replace the same text during editor recreation.
+        // Recommitting identical content is not an edit and must not truncate it.
+        TestCore.onMain { edit.text.replace(0, edit.text.length, old) }
+        assertEquals("unchanged input must keep every existing character", old,
+            TestCore.onMain { edit.text.toString() })
+        assertEquals(old, TestCore.onMain { core.draft(group) })
+        assertFalse(Views.tagged(a, "draft_send")!!.isEnabled)
+        TestCore.onMain { edit.append("b") }
+        assertEquals("a new character is still refused", old,
+            TestCore.onMain { edit.text.toString() })
+        TestCore.onMain { edit.text.delete(0, 100) }
+        assertEquals(200, TestCore.onMain { edit.text.length })
+        assertEquals(DraftFit.FITS, TestCore.onMain { core.draftFit(group) })
+        assertTrue(TestCore.radio.sent.isEmpty())
     }
 
     @Test fun anOldOversizedDraftStaysIntactUntilDeleted() {
@@ -682,7 +707,7 @@ class ConversationActivityTest {
     @Test fun tooLongShowsAndDisablesSend() {
         TestCore.install()
         val group = core.groupChatId()
-        TestCore.onMain { core.setDraft(group, "a".repeat(195)) }
+        TestCore.onMain { core.setDraft(group, "a".repeat(220)) }
         val a = open(group)
         assertEquals("Trop long. Raccourcissez.", Views.textOf(Views.tagged(a, "too_long")!!))
         assertFalse(Views.tagged(a, "draft_send")!!.isEnabled)
@@ -738,15 +763,16 @@ class ConversationActivityTest {
     @Test fun privateTickGroupSentAndAFailureThatCanBeResent() {
         TestCore.install()
         val group = core.groupChatId()
-        val direct = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi")
         TestCore.onMain { core.setDraft(direct, "Bien reçu ?"); core.send(direct) }
         val privateMessage = core.history.lastMessage(direct)!!
-        TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sent.last().packetId, DeliveryState.ACKNOWLEDGED) }
+        PersonFixture.acknowledge(bea, TestCore.radio.broadcasts.last().payload)
         var a: Activity = open(direct)
         assertEquals("Arrivé", description(a, "status:${privateMessage.id}"))
         assertNull(Views.tagged(a, "resend:${privateMessage.id}"))
         Views.finish(a)
-        TestCore.onMain { core.setDraft(group, "Au groupe"); core.send(group) }
+        // This half drives acceptance itself; PersonFixture enabled automatic acceptance for the private half.
+        TestCore.onMain { TestCore.radio.acceptBroadcasts = false; core.setDraft(group, "Au groupe"); core.send(group) }
         val groupMessage = core.history.lastMessage(group)!!
         TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sent.last().packetId, DeliveryState.QUEUED) }
         // The radio took it, then reported it could not send it: a failure to resend (no radio at all waits instead).
@@ -785,17 +811,17 @@ class ConversationActivityTest {
 
     @Test fun anUnconfirmedMessageAsksToResendAndAFailureSaysSo() {
         TestCore.install()
-        val direct = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, direct) = PersonFixture.meet("Kofi", accept = false)
         TestCore.onMain { core.setDraft(direct, "Premier"); core.send(direct) }
         val unconfirmed = core.history.lastMessage(direct)!!
-        TestCore.onMain {
-            val packet = TestCore.radio.sent.last().packetId
-            TestCore.radio.deliver(packet, DeliveryState.QUEUED)
-            TestCore.radio.deliver(packet, DeliveryState.UNCONFIRMED)
-            core.setDraft(direct, "Second"); core.send(direct)
-            TestCore.radio.deliver(TestCore.radio.sent.last().packetId, DeliveryState.FAILED)
-        }
+        TestCore.onMain { core.setDraft(direct, "Second"); core.send(direct) }
         val failed = core.history.lastMessage(direct)!!
+        // A person's message is unconfirmed when the app cannot tell, and failed once every resend gave up.
+        TestCore.onMain {
+            core.history.setStatus(unconfirmed.id, org.phonemesh.core.DeliveryStatus.UNCONFIRMED)
+            core.history.outbox(bea.account).filter { it.messageId == failed.id }.forEach { core.history.setOutboxState(it.id, "FAILED") }
+            core.history.setStatus(failed.id, org.phonemesh.core.DeliveryStatus.FAILED)
+        }
         val a = open(direct)
         assertEquals("Pas confirmé", Views.textOf(Views.tagged(a, "status_label:${unconfirmed.id}")!!))
         assertNotNull(Views.tagged(a, "resend:${unconfirmed.id}"))
@@ -1218,7 +1244,7 @@ class ConversationActivityTest {
     @Test fun forwardingPutsTheWordsInTheOtherChatsDraftAndSendsNothing() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }
-        val kofi = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (_, kofi) = PersonFixture.meet("Kofi")
         val heard = TestCore.onMain { core.history.addIncoming(group, "!1234abcd", "Le marché est demain", "fr", System.currentTimeMillis(), false) }
         val a = open(group)
         val menu = longPress(a, heard.id)
@@ -1456,13 +1482,15 @@ class ConversationActivityTest {
         assertTrue("nothing was used or closed", core.settings.tipsShown.isEmpty())
         assertEquals("the group never shows the delivery tip", mapOf("listen" to 2), core.settings.tipShowings)
         // The first send in a private chat is its moment.
-        val direct = TestCore.onMain { core.startDirectChat(RadioPeer("!1234abcd", "Awa")) }
+        val (_, direct) = PersonFixture.meet("Awa")
         val b = open(direct)
         assertNull("nothing was sent here yet", Views.tagged(b, "tip:delivery"))
         TestCore.onMain { core.setDraft(direct, "Salut"); core.openChat(direct) }
         inst.waitForIdleSync()
         Views.tap(b, "draft_send")
-        assertEquals(listOf("^all", "!1234abcd"), TestCore.radio.sent.map { it.destinationId })
+        assertEquals(listOf("^all"), TestCore.radio.sent.map { it.destinationId })
+        assertEquals("the private message went out on the accounts port", 1, TestCore.radio.broadcasts.count { it.port == 301 })
+        assertEquals("the preceding group send used its own port", 1, TestCore.radio.broadcasts.count { it.port == 303 })
         assertNotNull(Views.tagged(b, "tip:delivery"))
         Views.tap(b, "tip_close")
         assertNull(Views.tagged(b, "tip:delivery"))
@@ -1615,7 +1643,7 @@ class ConversationActivityTest {
     }
     @Test fun thePictureScreenOffersTheCameraAndThePhotosAndSaysWhatToDo() {
         TestCore.install()
-        val chat = TestCore.onMain { TestCore.core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
+        val (_, chat) = PersonFixture.meet("Kofi")
         val a = Views.launch<PictureActivity>(PictureActivity.intent(context, chat)).also { activity = it }
         val words = TestCore.core.localized()
         assertNotNull(Views.tagged(a, "picture_take"))
@@ -1630,15 +1658,15 @@ class ConversationActivityTest {
 
     @Test fun aPictureHasAMessageMenuAndOpensLargeWithItsViews() {
         TestCore.install()
-        val chat = TestCore.onMain { core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
-        val other = TestCore.onMain { core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000bbbb", "Ama")) }
+        val (_, chat) = PersonFixture.meet("Kofi")
+        val (_, other) = PersonFixture.meet("Ama")
         val photo = android.graphics.Bitmap.createBitmap(120, 90, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(90, 140, 200)) }
         TestCore.onMain { core.sendPicture(chat, PictureMaker.prepare(photo, PictureSize.MEDIUM, grey = false)) }
         val message = checkNotNull(core.history.lastMessage(chat))
         val a = open(chat)
         val menu = longPress(a, message.id)
-        assertEquals("not yet confirmed by the other radio: no reply or reaction yet",
-            listOf("action_open", "action_save", "action_share", "action_forward", "action_delete"), dialogTags(menu))
+        assertEquals("its reference is known from the start: reply and reaction at once",
+            listOf("action_reply", "action_react", "action_open", "action_save", "action_share", "action_forward", "action_delete"), dialogTags(menu))
         tapInDialog(menu, "action_forward")
         val choose = checkNotNull(a.dialogForTest)
         val targets = TestCore.onMain { Views.descendants(choose.window!!.decorView).mapNotNull { (it.tag as? String)?.takeIf { t -> t.startsWith("forward_to:") } } }
@@ -1710,14 +1738,19 @@ class ConversationActivityTest {
 
     @Test fun aPictureTheOtherRadioNeverAnsweredSaysSo() {
         TestCore.install()
-        val chat = TestCore.onMain { TestCore.core.startDirectChat(org.phonemesh.ble.RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi", accept = false)
         val photo = android.graphics.Bitmap.createBitmap(120, 90, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.rgb(90, 140, 200)) }
         TestCore.onMain { TestCore.core.sendPicture(chat, PictureMaker.prepare(photo, PictureSize.MEDIUM, grey = false)) }
         val message = checkNotNull(TestCore.core.history.lastMessage(chat))
         val a = open(chat)
         assertEquals("one picture, as a share of it", "Envoi de la photo : 0 %", Views.textOf(Views.tagged(a, "picture_caption:${message.id}")!!))
         assertNotNull(Views.tagged(a, "picture_progress:${message.id}"))
-        repeat(3) { TestCore.onMain { TestCore.radio.deliver(TestCore.radio.sentData.last().packetId, org.phonemesh.ble.DeliveryState.UNCONFIRMED) } }
+        // Every resend gave up (three days): the picture failed, and the screen is told.
+        TestCore.onMain {
+            TestCore.core.history.outbox(bea.account).forEach { TestCore.core.history.setOutboxState(it.id, "FAILED") }
+            TestCore.core.history.setStatus(message.id, org.phonemesh.core.DeliveryStatus.FAILED)
+            TestCore.core.setReplyTarget(chat, null)
+        }
         Views.waitUntil { TestCore.core.history.message(message.id)!!.status == org.phonemesh.core.DeliveryStatus.FAILED }
         Views.waitUntil { Views.descendants(a.window.decorView).any { it.tag == "picture_caption:${message.id}" && (it as android.widget.TextView).text.toString() == "Leur radio n'a pas répondu." } }
         assertNull(Views.tagged(a, "picture_progress:${message.id}"))

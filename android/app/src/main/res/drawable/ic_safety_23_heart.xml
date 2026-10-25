@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 23, "heart" / "cœur" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M12 21s-8.5-5.3-8.5-11.2C3.5 6.5 6 4 8.8 4c1.5 0 2.6.7 3.2 1.8C12.6 4.7 13.7 4 15.2 4c2.8 0 5.3 2.5 5.3 5.8C20.5 15.7 12 21 12 21z" android:fillColor="#FFE53935" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M6.8 8.2c.3-1 1-1.7 2-1.9" android:fillColor="#00000000" android:strokeColor="#FFFFCDD2" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

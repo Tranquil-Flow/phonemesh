@@ -27,21 +27,17 @@ import java.security.KeyStore
 @RunWith(AndroidJUnit4::class)
 class AccountStoreTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val opened = ArrayList<History>()
-    private val vault = Vault("test-vault")
+    private val fixture = AccountTestResources(context)
+    private val opened = fixture.opened
+    private val vault get() = fixture.vault
     private var now = 1_791_000_000_000L
     private val day = AccountStore.DAY
 
-    private fun history(file: String) = History(context, file).also { opened += it }
+    private fun history(file: String) = fixture.history(file)
     private fun store(file: String, software: Boolean) =
-        AccountStore(history(file), vault, software, { now }, keyPrefix = "test-$file")
+        AccountStore(history(file), vault, software, { now }, keyPrefix = fixture.keyPrefix(file))
 
-    @After fun clean() {
-        opened.forEach { it.close() }
-        for (f in listOf(A, B, OLD)) context.deleteDatabase(f)
-        val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        keys.aliases().toList().filter { it.startsWith("test-") }.forEach { keys.deleteEntry(it) }
-    }
+    @After fun clean() = fixture.clean()
 
     /** A QR start between [mine] and a software peer; one message each way must open. */
     private fun talk(mine: OwnKeys) {
@@ -63,6 +59,23 @@ class AccountStoreTest {
     @Test fun theKeystoreIdentityWorksWithTheCore() {
         val store = store(A, software = false)
         assertEquals(if (Build.VERSION.SDK_INT >= 31) AccountStore.STORE_KEYSTORE else AccountStore.STORE_SEALED, store.store)
+        if (Build.VERSION.SDK_INT >= 31) {
+            val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val key = keys.getKey("${fixture.keyPrefix(A)}-identity", null) as java.security.PrivateKey
+            val info = java.security.KeyFactory.getInstance(key.algorithm, "AndroidKeyStore")
+                .getKeySpec(key, android.security.keystore.KeyInfo::class.java)
+            assertEquals(256, info.keySize)
+            assertEquals(android.security.keystore.KeyProperties.ORIGIN_GENERATED, info.origin)
+            val level = info.securityLevel
+            // Emulator software Keystore is valid API-path evidence, not hardware evidence.
+            // The authorized physical Pixel must report TEE or StrongBox; never assume/skip it.
+            if (Build.MANUFACTURER.equals("Google", ignoreCase = true) && Build.MODEL.startsWith("Pixel")) {
+                assertTrue("Pixel identity must be hardware-backed (securityLevel=$level)",
+                    level == android.security.keystore.KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT ||
+                    level == android.security.keystore.KeyProperties.SECURITY_LEVEL_STRONGBOX)
+            }
+            android.util.Log.i("AccountKeyMetadata", "identity securityLevel=$level")
+        }
         talk(store)
     }
 
@@ -89,7 +102,7 @@ class AccountStoreTest {
             assertArrayEquals(sharedPrekey, again.agreePrekey(prekeys[0], peer))
             assertNull("an invalid peer key", again.agreeIdentity(ByteArray(33)))
             opened.forEach { it.close() }; opened.clear()
-            context.deleteDatabase(A)
+            fixture.deleteDatabase(A)
         }
     }
 
@@ -121,9 +134,9 @@ class AccountStoreTest {
         assertTrue(store.storeSession(contact, start))
         val sealed = Ratchet.seal(start, Body.encode(Body.Text("fr", "un")))
         val row = History.OutboxRow(0, contact.toString(), null, 301, sealed.packet, sealed.chainTag, sealed.counter, now, 0, now, "WAITING")
-        assertTrue(store.storeSession(contact, sealed.state, row))
-        assertFalse("an older state", store.storeSession(contact, start))
-        assertFalse("the same state again", store.storeSession(contact, sealed.state))
+        assertTrue(store.storeSession(contact, sealed.state, row, expected = start))
+        assertFalse("an older state", store.storeSession(contact, start, expected = sealed.state))
+        assertFalse("the same state again", store.storeSession(contact, sealed.state, expected = sealed.state))
         assertEquals(sealed.state.serial, store.session(contact)!!.serial)
         val outbox = opened[0].outbox(contact.toString())
         assertEquals(1, outbox.size)
@@ -145,13 +158,18 @@ class AccountStoreTest {
     }
 
     @Test fun noSecretReachesTheLog() {
-        Runtime.getRuntime().exec(arrayOf("logcat", "-c")).waitFor()
+        val since = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+        val marker = "account-log-sentinel-${java.util.UUID.randomUUID()}"
+        android.util.Log.i("AccountLogSentinel", marker)
+        // The marker exists before the action and must survive it; never clear logs to test this.
+        assertTrue("log marker must be readable before the action", AccountTestResources.readProcessLog(since).contains(marker))
         val store = store(A, software = true)
         talk(store)
         store.rotateIfDue()
         val scalar = vault.open(opened[0].accountRow()!!.sealed!!, "identity")!!
         val prekey = opened[0].prekeyRows().first().let { vault.open(it.sealed, "prekey:" + hex(it.public))!! }
-        val log = Runtime.getRuntime().exec(arrayOf("logcat", "-d")).inputStream.bufferedReader().readText().lowercase()
+        val log = AccountTestResources.readProcessLog(since).lowercase(java.util.Locale.ROOT)
+        assertTrue("preexisting harmless marker must survive", log.contains(marker))
         for (secret in listOf(scalar, prekey)) {
             assertFalse(log.contains(hex(secret)))
             assertFalse(log.contains(android.util.Base64.encodeToString(secret, android.util.Base64.NO_WRAP).lowercase()))
@@ -160,7 +178,6 @@ class AccountStoreTest {
 
     /** A phone on history version 5 keeps its chats, messages and pictures, and gains the account tables. */
     @Test fun aVersionFiveHistoryKeepsItsChats() {
-        context.deleteDatabase(OLD)
         context.openOrCreateDatabase(OLD, 0, null).use { db ->
             db.execSQL("CREATE TABLE chats (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, address TEXT NOT NULL, " +
                 "name TEXT NOT NULL DEFAULT '', last_activity INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0, " +
@@ -187,17 +204,133 @@ class AccountStoreTest {
         assertTrue(kofi.pinned)
         assertEquals(listOf("Salut", ""), upgraded.messages(kofi.id).map { it.text })
         assertEquals(7, upgraded.picture(2)!!.pictureId)
-        val store = AccountStore(upgraded, vault, true, { now }, keyPrefix = "test-old")
+        val store = AccountStore(upgraded, vault, true, { now }, keyPrefix = fixture.keyPrefix(OLD))
         val person = upgraded.personChat(store.accountId.toString(), "Awa")
         assertEquals(ChatKind.PERSON, person.kind)
         assertEquals(2, upgraded.chats().size)
     }
 
+    @Test fun cleanupPreservesUnrelatedFixtureResources() {
+        val token = java.util.UUID.randomUUID().toString()
+        val sentinelAlias = "test-sentinel-$token"
+        val sentinelFile = "test-sentinel-$token.db"
+        val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        assertFalse(keys.containsAlias(sentinelAlias))
+        val path = context.getDatabasePath(sentinelFile)
+        path.parentFile!!.mkdirs()
+        check(path.createNewFile()) { "sentinel file already exists" }
+        try {
+            path.writeText("unrelated fixture")
+            val sentinel = Vault(sentinelAlias)
+            val sealed = sentinel.seal(byteArrayOf(1, 2, 3), "sentinel")
+            store(A, software = true)
+            clean() // Exercise the class's actual teardown, not a second cleanup implementation.
+            assertEquals("unrelated fixture", path.readText())
+            assertTrue("unrelated key must survive", keys.containsAlias(sentinelAlias))
+            assertArrayEquals(byteArrayOf(1, 2, 3), sentinel.open(sealed, "sentinel"))
+        } finally {
+            keys.deleteEntry(sentinelAlias)
+            context.deleteDatabase(sentinelFile)
+        }
+    }
+
+    private fun fixtureNames() = listOf(A, OLD)
+
+    @Test fun fixtureInstancesNeverShareDatabaseNames() {
+        val other = AccountStoreTest()
+        try {
+            assertTrue("each instance must have its own databases", fixtureNames().zip(other.fixtureNames()).all { (a, b) -> a != b })
+        } finally { other.clean() }
+    }
+
+    @Test fun cleanupStillRemovesOwnedResourcesAfterCloseFailure() {
+        val owned = AccountTestResources(context)
+        val unrelated = AccountTestResources(context)
+        val file = owned.database("close-failure")
+        val sentinelFile = unrelated.database("sentinel")
+        try {
+            owned.history(file).writableDatabase
+            unrelated.history(sentinelFile).writableDatabase
+            val sealed = unrelated.vault.seal(byteArrayOf(9), "sentinel")
+            owned.vault.seal(byteArrayOf(1), "owned")
+            val alias = owned.vaultAlias
+            val failure = runCatching {
+                owned.clean { it.close(); error("injected close failure") }
+            }.exceptionOrNull()
+            assertNotNull("close failure must not be swallowed", failure)
+            assertFalse(context.getDatabasePath(file).exists())
+            val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            assertFalse(keys.containsAlias(alias))
+            assertTrue(context.getDatabasePath(sentinelFile).exists())
+            assertArrayEquals(byteArrayOf(9), unrelated.vault.open(sealed, "sentinel"))
+        } finally {
+            try { owned.clean() } finally { unrelated.clean() }
+        }
+    }
+
+    @Test fun aCollidingFixtureCannotAdoptOrDeleteExistingResources() {
+        val namespace = "test-collision-${java.util.UUID.randomUUID()}"
+        val owner = AccountTestResources(context, namespace)
+        val intruder = AccountTestResources(context, namespace)
+        val file = owner.database("sentinel")
+        try {
+            owner.history(file).writableDatabase
+            val sealed = owner.vault.seal(byteArrayOf(7), "sentinel")
+            assertNotNull(runCatching { intruder.database("sentinel") }.exceptionOrNull())
+            assertNotNull(runCatching { intruder.vault }.exceptionOrNull())
+            intruder.clean()
+            assertTrue(context.getDatabasePath(file).exists())
+            assertArrayEquals(byteArrayOf(7), owner.vault.open(sealed, "sentinel"))
+        } finally { owner.clean() }
+    }
+
+    @Test fun aPreexistingIdentityAliasIsRefusedBeforeAccountStoreConstruction() {
+        val namespace = "test-identity-collision-${java.util.UUID.randomUUID()}"
+        val owner = AccountTestResources(context, namespace)
+        val intruder = AccountTestResources(context, namespace)
+        val file = owner.database("sentinel")
+        val alias = "${owner.keyPrefix(file)}-identity"
+        try {
+            // Reserve the exact identity alias with a disposable key, not an owner key.
+            val sentinel = Vault(alias)
+            val sealed = sentinel.seal(byteArrayOf(5), "sentinel")
+            val collision = intruder.database("sentinel") // No database exists yet.
+            val failure = runCatching {
+                AccountStore(intruder.history(collision), intruder.vault, false,
+                    keyPrefix = intruder.keyPrefix(collision))
+            }.exceptionOrNull()
+            assertNotNull("must refuse before AccountStore can replace the key", failure)
+            intruder.clean()
+            assertArrayEquals(byteArrayOf(5), sentinel.open(sealed, "sentinel"))
+        } finally {
+            try { intruder.clean() } finally { owner.clean() }
+        }
+    }
+
+    @Test fun logReadIsReadOnlyPidScopedAndFailsClosed() {
+        val since = "01-01 00:00:00.000"
+        assertEquals(listOf("logcat", "-d", "-v", "brief", "--pid=${android.os.Process.myPid()}", "-T", since),
+            AccountTestResources.logCommand(since))
+        fun fake(code: Int, text: String) = object : java.lang.Process() {
+            override fun getInputStream() = java.io.ByteArrayInputStream(text.toByteArray())
+            override fun getErrorStream() = java.io.ByteArrayInputStream(byteArrayOf())
+            override fun getOutputStream() = java.io.ByteArrayOutputStream()
+            override fun waitFor() = code
+            override fun exitValue() = code
+            override fun destroy() = Unit
+        }
+        assertEquals("marker", AccountTestResources.readProcessLog(since) { fake(0, "marker") })
+        for ((code, text) in listOf(1 to "never-export-this-output", 0 to "x".repeat(1024 * 1024 + 1))) {
+            val error = runCatching { AccountTestResources.readProcessLog(since) { fake(code, text) } }.exceptionOrNull()
+            assertTrue("failed/oversized reads must fail", error is AssertionError)
+            assertFalse(error!!.message.orEmpty().contains("never-export-this-output"))
+            assertNull(error.cause)
+        }
+    }
+
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 
-    private companion object {
-        const val A = "account-test-a.db"
-        const val B = "account-test-b.db"
-        const val OLD = "history-version-five-test.db"
-    }
+    private val A = fixture.database("a")
+    private val B = fixture.database("b")
+    private val OLD = fixture.database("old")
 }

@@ -9,6 +9,8 @@ object HowTo {
     val showPair: Boolean = false
 
     private val sentences = mapOf(
+        "add_qr" to R.string.howto_add_qr, "add_link" to R.string.howto_add_link,
+        "add_accept" to R.string.howto_add_accept, "same_picture" to R.string.howto_same_picture,
         "download" to R.string.howto_download, "friend" to R.string.howto_friend, "power" to R.string.howto_power,
         "close" to R.string.howto_close, "search" to R.string.howto_search, "pair" to R.string.howto_pair,
         "hello" to R.string.howto_hello, "lost" to R.string.howto_lost,

@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- Planned messages sent while the app is closed (owner decision, 2026-10-12): an exact alarm wakes a short
          foreground service that connects the radio. The notification is shown when allowed and never asked for.
          A short service needs no further permission, so a refused Bluetooth permission cannot stop it reaching
@@ -8,8 +9,20 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Hub roaming (accounts decision 9), opt-in: a connectedDevice foreground service, with no time cap, holds the hub
+         while no screen is open. Android 14 also wants CHANGE_WIFI_STATE (declared below) or a held Bluetooth permission. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- A hub on the village Wi-Fi (accounts step 16): the app joins that one Wi-Fi by name and talks to the hub over
+         HTTPS pinned to the hub's own key. Only what the calls need: requestNetwork, its callbacks, and the Wi-Fi
+         specifier. ACCESS_WIFI_STATE is a normal permission for checking an already-connected exact SSID;
+         no new runtime prompt or active Wi-Fi scan. Cleartext traffic stays off. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application android:label="Phonemesh" android:theme="@style/Theme.Phonemesh"
         android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
         <activity android:name=".ChatsActivity" android:exported="true" android:launchMode="singleTask"
@@ -30,9 +43,24 @@
             </intent-filter>
         </activity>
         <activity android:name=".LanguageActivity" android:exported="false" />
+        <activity android:name=".AddSomeoneActivity" android:exported="false" />
+        <activity android:name=".ScanActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".SafetyActivity" android:exported="false" />
+        <activity android:name=".ContactActivity" android:exported="false" />
+        <!-- Add-me links (accounts step 11). The card after # never reaches the website; assetlinks.json verifies. -->
+        <activity android:name=".LinkActivity" android:exported="true" android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="tranquil-flow.github.io" android:pathPrefix="/phonemesh/add" />
+            </intent-filter>
+        </activity>
         <activity android:name=".NameActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RadioActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
+        <activity android:name=".HubActivity" android:exported="false" />
         <activity android:name=".HelpActivity" android:exported="false" />
         <activity android:name=".RegionActivity" android:exported="false" />
         <activity android:name=".PictureActivity" android:exported="false" />
@@ -40,6 +68,7 @@
         <activity android:name=".ConversationActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <receiver android:name=".PlannedReceiver" android:exported="false" />
         <service android:name=".PlannedSendService" android:exported="false" android:foregroundServiceType="shortService" />
+        <service android:name=".HubRoamingService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <provider android:name=".ShareProvider" android:authorities="${applicationId}.share"
             android:exported="false" android:grantUriPermissions="true" />
         <!-- The camera app's photo, written into this app's cache only; no camera permission. -->

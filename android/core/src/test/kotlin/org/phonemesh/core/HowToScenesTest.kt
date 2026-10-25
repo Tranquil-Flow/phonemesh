@@ -79,7 +79,7 @@ class HowToScenesTest {
     @Test fun theProblemScenesAreThere() {
         assertEquals(listOf("bt", "short", "notheard", "mic"), HowToScenes.PROBLEMS)
         assertEquals(listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"), HowToScenes.RARE)
-        assertEquals(listOf(HowToScenes.SETUP, HowToScenes.TALKING, HowToScenes.MORE, HowToScenes.PROBLEMS, HowToScenes.RARE), HowToScenes.groups)
+        assertEquals(listOf(HowToScenes.SETUP, HowToScenes.TALKING, HowToScenes.MORE, HowToScenes.PROBLEMS, HowToScenes.RARE, HowToScenes.ACCOUNTS), HowToScenes.groups)
     }
 
     @Test fun problemAndRareActionsMatchTheApprovedKeyframes() {
@@ -150,9 +150,9 @@ class HowToScenesTest {
         }
     }
 
-    @Test fun everySceneLastsFiveToEightSecondsExceptTheTwoLongerApprovedOnes() {
+    @Test fun everySceneLastsFiveToEightSecondsExceptNamedApprovedOnes() {
         // Forward (four steps) and the clock-and-calendar picture were approved at 9 s and 10 s (round 10, 2026-10-12).
-        val longer = mapOf("forward" to 9_000L, "later_pick" to 10_000L)
+        val longer = mapOf("forward" to 9_000L, "later_pick" to 10_000L, "add_qr" to 10_000L, "same_picture" to 13_000L)
         HowToScenes.all.values.forEach { assertTrue(it.name, it.durationMs in 5_000L..8_000L || longer[it.name] == it.durationMs) }
         assertEquals(5_000L, HowToScenes.get("power").durationMs)
     }

@@ -7,6 +7,23 @@ Code source : fourni avec chaque version publiée
 
 Composants tiers
 
+ZXing core 3.5.4
+Copyright ZXing authors
+Licence : Apache-2.0
+https://github.com/zxing/zxing
+
+ncnn 20260526
+Copyright 2017 Tencent
+Licence : BSD-3-Clause
+https://github.com/Tencent/ncnn
+
+ThumbHash
+Copyright 2023 Evan Wallace
+Licence : MIT
+https://github.com/evanw/thumbhash
+
+Textes des licences : docs/licenses dans le code source.
+
 sherpa-onnx 1.13.8
 Licence : Apache-2.0
 https://github.com/k2-fsa/sherpa-onnx
@@ -15,9 +32,15 @@ ONNX Runtime
 Licence : MIT
 https://github.com/microsoft/onnxruntime
 
-espeak-ng
+espeak-ng (fork Piper)
 Licence : GPL-3.0
-Code source : https://github.com/espeak-ng/espeak-ng
+Code source : https://github.com/csukuangfj/espeak-ng
+
+piper-phonemize
+Copyright 2023 Michael Hansen
+Licence : MIT
+https://github.com/csukuangfj/piper-phonemize
+uni-algo : domaine public (Unlicense)
 
 protobuf (protobuf-javalite 3.25.5)
 Licence : BSD-3-Clause

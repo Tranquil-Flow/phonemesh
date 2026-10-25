@@ -20,7 +20,7 @@ class WireTest {
     private val ref = byteArrayOf(1, 2, 3, 4)
 
     @Test fun everyKindRoundTrips() {
-        val head = PictureWire.encode(PictureWire.Head(9, PictureCodec.WEBP, 64, 48, 1200, PictureWire.partsFor(1200), 0L, byteArrayOf(1, 2, 3)))
+        val head = PictureWire.encodeV2(PictureWire.Head(9, PictureCodec.WEBP, 64, 48, 1200, PictureWire.partsForV2(1200), 0L, byteArrayOf(1, 2, 3)))
         val part = PictureWire.encode(PictureWire.Part(9, 0, ByteArray(198) { it.toByte() }))
         val bodies = listOf(
             Body.Text("fr", "bonjour"), Body.Text("pt-BR", "é"), Body.Reply(ref, "en-US", "yes"), Body.Reaction(ref, "👍"),
@@ -55,8 +55,9 @@ class WireTest {
         val (a, _) = Phone.qrPair()
         val part = Body.encode(Body.PicturePart(PictureWire.encode(PictureWire.Part(1, 0, ByteArray(198)))))
         assertEquals(WireV2.MAX_PACKET, Ratchet.seal(a.state, part).packet.size)
-        val bigger = Body.encode(Body.PicturePart(PictureWire.encode(PictureWire.Part(1, 0, ByteArray(199)))))
-        assertTrue(runCatching { Ratchet.seal(a.state, bigger) }.isFailure)
+        val bigger = PictureWire.encode(PictureWire.Part(1, 0, ByteArray(199)))
+        assertTrue("a 199-byte part is not a v2 body", runCatching { Body.encode(Body.PicturePart(bigger)) }.isFailure)
+        assertTrue(runCatching { Ratchet.seal(a.state, ByteArray(WireV2.maxBody(false) + 1) { 1 }) }.isFailure)
     }
 
     @Test fun aReceiptIsSmall() {

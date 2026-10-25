@@ -6,6 +6,8 @@ enum class DeliveryStatus {
     WAITING,
     /** 📡 "parti": a group message left the user's radio; final for groups. */
     SENT,
+    /** The hub has the ciphertext, not proof that the recipient phone has it. */
+    HUB,
     /** ✓ green tick: the destination radio confirmed (private only). */
     DELIVERED,
     /** ⚠ "Pas confirmé" + Renvoyer. Never called a failure. */

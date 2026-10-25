@@ -203,7 +203,7 @@ class ChatsActivityTest {
         val chats = start()
         val voiceCard = Views.tagged(chats, "card_voice")!!
         assertNotNull("the current step is numbered", Views.tagged(chats, "step_of"))
-        assertEquals("ÉTAPE 1 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 1 SUR 5", Views.textOf(Views.tagged(chats, "step_of")!!))
         saveSetupPicture(chats, "step1")
         assertNotNull(Views.descendants(voiceCard).filterIsInstance<TextView>()
             .firstOrNull { Views.textOf(it) == "Voix française · 66 Mo · une seule fois" })
@@ -217,6 +217,7 @@ class ChatsActivityTest {
         assertNotNull(Views.tagged(chats, "step_row:2"))
         assertNotNull(Views.tagged(chats, "step_row:3"))
         assertNotNull(Views.tagged(chats, "step_row:4"))
+        assertNotNull(Views.tagged(chats, "step_row:5"))
         assertEquals("Radio non connectée", Views.tagged(chats, "radio_status")!!.contentDescription)
         assertEquals("step 1 shows only the steps", listOf(false, false, false), chatParts(chats))
 
@@ -227,7 +228,7 @@ class ChatsActivityTest {
         }
         // Step 2: the name, which needs the voice to hear it.
         assertNotNull(Views.tagged(chats, "card_name"))
-        assertEquals("ÉTAPE 2 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 2 SUR 5", Views.textOf(Views.tagged(chats, "step_of")!!))
         assertNotNull(Views.tagged(chats, "step_done:1"))
         assertNotNull(Views.withText(chats, "Dites votre nom"))
         assertNotNull(Views.tagged(chats, "howto:hello"))
@@ -241,7 +242,7 @@ class ChatsActivityTest {
         TestCore.onMain { chats.onCoreChange(AppCore.Change.MESSAGES) }
 
         assertNotNull(Views.tagged(chats, "card_radio"))
-        assertEquals("ÉTAPE 3 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 3 SUR 5", Views.textOf(Views.tagged(chats, "step_of")!!))
         assertNotNull(Views.tagged(chats, "step_done:1"))
         assertNotNull(Views.tagged(chats, "step_done:2"))
         assertNotNull("the done row shows the name", Views.withText(chats, "Awa"))
@@ -261,7 +262,7 @@ class ChatsActivityTest {
 
         TestCore.onMain { TestCore.radio.connected(true) }
         assertNotNull(Views.tagged(chats, "card_hello"))
-        assertEquals("ÉTAPE 4 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+        assertEquals("ÉTAPE 5 SUR 5", Views.textOf(Views.tagged(chats, "step_of")!!))
         assertNotNull(Views.tagged(chats, "step_done:1"))
         assertNotNull(Views.tagged(chats, "step_done:2"))
         assertNotNull(Views.tagged(chats, "step_done:3"))
@@ -284,7 +285,7 @@ class ChatsActivityTest {
         assertTrue(core.settings.setupFinished)
         TestCore.onMain { chats.onCoreChange(AppCore.Change.PEERS) }
         Views.waitUntil(4_000) { Views.descendants(chats.window.decorView).none { it.tag == "setup_done" && it.isShown } }
-        listOf("card_voice", "card_name", "card_radio", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
+        listOf("card_voice", "card_name", "card_radio", "card_add", "card_hello", "step_of").forEach { assertNull(it, Views.tagged(chats, it)) }
         assertEquals(listOf(true, false, true), chatParts(chats))
         assertTrue(core.canTalk())
         Views.finish(chats)
@@ -390,7 +391,12 @@ class ChatsActivityTest {
         }
         val group = core.groupChatId()
         val direct = core.history.chats().single { it.kind == ChatKind.DIRECT }.id
-        TestCore.onMain { core.setDraft(direct, "Bien reçu"); core.send(direct) }
+        TestCore.onMain {
+            // Historical direct chats are read-only: seed the pre-upgrade outgoing bubble, do not send a new one.
+            core.history.addOutgoing(direct, "Bien reçu", "fr", System.currentTimeMillis())
+            core.settings.firstMessageSent = true
+            core.settings.setupFinished = true
+        }
         val chats = start()
         val list = Views.all(chats).filter { (it.tag as? String)?.startsWith("chat:") == true }.map { it.tag }
         assertEquals(listOf("chat:$group", "chat:$direct"), list)
@@ -463,21 +469,36 @@ class ChatsActivityTest {
         assertNull(Views.tagged(chats, "unread:$direct"))
     }
 
-    @Test fun plusOpensAPrivateChatWithAHeardRadio() {
-        TestCore.install()
-        // After setup: during it the chats screen shows only the steps.
+    @Test fun plusOpensAddSomeoneWithoutAHeardRadio() {
+        TestCore.install(connected = false)
         TestCore.onMain { core.settings.firstMessageSent = true; core.settings.setupFinished = true }
         val chats = start()
         Views.tap(chats, "new_chat")
-        assertEquals("Aucune radio entendue.", Views.textOf(Views.tagged(chats, "note")!!))
-        TestCore.onMain { TestCore.radio.setPeers(listOf(RadioPeer("!0000aaaa", "Kofi"), RadioPeer("!0bad4a2f", "!0bad4a2f"))) }
+        Views.waitUntil { resumedNow() is AddSomeoneActivity }
+        val add = checkNotNull(Views.resumed())
+        assertNotNull(Views.tagged(add, "add_scan"))
+        assertNotNull(Views.tagged(add, "add_link"))
+        assertTrue(core.history.chats().none { it.kind == ChatKind.DIRECT })
+        assertTrue(TestCore.radio.sent.isEmpty())
+    }
+
+    @Test fun plusUsesAccountsEvenWhenRadiosHaveBeenHeard() {
+        TestCore.install()
+        TestCore.onMain {
+            core.settings.firstMessageSent = true; core.settings.setupFinished = true
+            TestCore.radio.setPeers(listOf(RadioPeer("!0000aaaa", "Kofi"), RadioPeer("!0bad4a2f", "!0bad4a2f")))
+        }
+        // Keep the old radio-label invariant, but adding a person no longer picks a radio.
+        assertEquals("Kofi", core.radioLabel("Kofi", "!0000aaaa"))
+        assertEquals("Radio 4a2f", core.radioLabel("!0bad4a2f", "!0bad4a2f"))
+        val chats = start()
         Views.tap(chats, "new_chat")
-        val dialog = checkNotNull(chats.peerDialogForTest)
-        val names = TestCore.onMain { (0 until dialog.listView.adapter.count).map { dialog.listView.adapter.getItem(it).toString() } }
-        assertEquals(listOf("Kofi", "Radio 4a2f"), names)
-        TestCore.onMain { dialog.listView.performItemClick(null, 1, 1) }
-        Views.waitUntil { resumedNow() is ConversationActivity }
-        assertEquals("Radio 4a2f", Views.textOf(Views.tagged(checkNotNull(Views.resumed()), "title")!!))
+        Views.waitUntil { resumedNow() is AddSomeoneActivity }
+        assertTrue(core.history.chats().none { it.kind == ChatKind.DIRECT })
+        Views.finish(Views.resumed())
+        Views.waitUntil { resumedNow() === chats }
+        assertTrue(core.history.chats().none { it.kind == ChatKind.DIRECT })
+        assertTrue(TestCore.radio.sent.isEmpty())
     }
 
     @Test fun veryLongNamesAndMessagesStayOnOneLine() {
@@ -677,6 +698,10 @@ class ChatsActivityTest {
         } finally {
             Views.finish(top)
         }
+        // Finishing the cover only requests the transition. Idle-sync can return
+        // while Chats is still stopped; assert the picture after the real resume,
+        // without resetting or extending its original twelve-second deadline.
+        Views.waitUntil { resumedNow() === chats && chats.window.decorView.isShown }
         val returned = TestCore.onMain {
             "elapsed=${android.os.SystemClock.elapsedRealtime() - shownAt}, " +
                 "resumed=${resumedNow() === chats}, decorShown=${chats.window.decorView.isShown}, " +
@@ -807,7 +832,7 @@ class ChatsActivityTest {
             assertSame(chats, Views.resumed())
             val card = Views.tagged(chats, "card_voice")!!
             assertTrue("the guide sits in the step's card", TestCore.onMain { Views.descendants(card).any { it === guide } })
-            assertEquals("ÉTAPE 1 SUR 4", Views.textOf(Views.tagged(chats, "step_of")!!))
+            assertEquals("ÉTAPE 1 SUR 5", Views.textOf(Views.tagged(chats, "step_of")!!))
             assertNotNull(Views.withText(chats, "2 · D'un ami"))
             val shown = TestCore.onMain { Views.descendants(guide).filter { it.isShown } }
             assertEquals(listOf("howto:friend", "howto:allow"), shown.filterIsInstance<HowToView>().map { it.tag })

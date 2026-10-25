@@ -41,8 +41,9 @@ class SessionState internal constructor(
     val serial: Long,
     internal val skipped: Map<String, Skipped>,
 ) {
-    class Skipped(key: ByteArray, val at: Long) {
+    class Skipped(key: ByteArray, val at: Long, chainTag: ByteArray? = null, val counter: Long = -1) {
         internal val key: ByteArray = key.copyOf()
+        internal val chainTag: ByteArray? = chainTag?.copyOf()
     }
 
     internal fun with(
@@ -76,18 +77,23 @@ class SessionState internal constructor(
             write(nhk)
             writeLong(serial)
             writeByte(skipped.size)
-            for ((code, entry) in skipped) { write(hex(code)); write(entry.key); writeLong(entry.at) }
+            for ((code, entry) in skipped) {
+                write(hex(code)); write(entry.key); writeLong(entry.at)
+                writeBoolean(entry.chainTag != null)
+                entry.chainTag?.let { write(it); writeLong(entry.counter) }
+            }
         }
         return out.toByteArray()
     }
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2
 
         /** A stored state; null when the bytes are not one this version wrote, or its keys are not valid (F15). */
         fun decode(bytes: ByteArray): SessionState? = try {
             DataInputStream(bytes.inputStream()).run {
-                if (readUnsignedByte() != VERSION) return null
+                val version = readUnsignedByte()
+                if (version !in 1..VERSION) return null
                 val flags = readUnsignedByte()
                 if (flags and 0x80 != 0) return null
                 fun bytes(n: Int) = ByteArray(n).also { readFully(it) }
@@ -101,7 +107,13 @@ class SessionState internal constructor(
                 val count = readUnsignedByte()
                 if (count > Ratchet.MAX_SKIPPED || serial < 0) return null
                 val skipped = LinkedHashMap<String, Skipped>()
-                repeat(count) { skipped[hexOf(bytes(8))] = Skipped(bytes(32), readLong()) }
+                repeat(count) {
+                    val code = hexOf(bytes(8)); val key = bytes(32); val at = readLong()
+                    val tag = if (version >= 2 && readBoolean()) bytes(org.phonemesh.core.wire.Ack.TAG) else null
+                    val counter = if (tag != null) readLong() else -1
+                    if (tag != null && counter !in 0..0xffffffffL) return null
+                    if (skipped.put(code, Skipped(key, at, tag, counter)) != null) return null
+                }
                 if (read() != -1) return null
                 if (mine != null && !mine.consistent()) return null
                 if (theirs != null && P256.decompress(theirs) == null) return null
@@ -114,7 +126,7 @@ class SessionState internal constructor(
             null
         }
 
-        internal fun hexOf(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+        fun hexOf(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
         private fun hex(text: String) = ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
     }
 }

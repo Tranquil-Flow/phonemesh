@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 15, "rabbit" / "lapin" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M9.5 9.5C7 6 7 1.5 9 1.5s2.5 4.5 2 8M14.5 9.5c2.5-3.5 2.5-8 .5-8s-2.5 4.5-2 8" android:fillColor="#FFFAFAFA" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9 4.5c.5 1.5.5 3 .5 4M15 4.5c-.5 1.5-.5 3-.5 4" android:fillColor="#00000000" android:strokeColor="#FFF48FB1" android:strokeWidth="1" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M18.5,15A6.5,6 0 1,1 5.5,15A6.5,6 0 1,1 18.5,15Z" android:fillColor="#FFFAFAFA" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M10.4,14A0.9,0.9 0 1,1 8.6,14A0.9,0.9 0 1,1 10.4,14Z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M15.4,14A0.9,0.9 0 1,1 13.6,14A0.9,0.9 0 1,1 15.4,14Z" android:fillColor="#FF111111" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M11.2 16.5h1.6l-.8 1z" android:fillColor="#FFF48FB1" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M12 17.5v1M10.5 19h3" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

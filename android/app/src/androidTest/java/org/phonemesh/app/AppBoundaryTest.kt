@@ -43,18 +43,28 @@ class AppBoundaryTest {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val requested=context.packageManager.getPackageInfo(context.packageName,PackageManager.GET_PERMISSIONS)
             .requestedPermissions.orEmpty().toSet()
-        // Network is used only for setup-time pack downloads (PackDownloads).
+        // Network: setup-time pack downloads (PackDownloads), and pinned HTTPS to a hub's local Wi-Fi (HubClient, WifiHubLink).
+        // Only what the code calls: requestNetwork needs CHANGE_NETWORK_STATE, its callbacks ACCESS_NETWORK_STATE, and
+        // WifiNetworkSpecifier CHANGE_WIFI_STATE; WifiManager's exact existing-SSID visibility check ACCESS_WIFI_STATE.
         val expected=mutableSetOf(Manifest.permission.RECORD_AUDIO,Manifest.permission.INTERNET,
+            Manifest.permission.ACCESS_NETWORK_STATE,Manifest.permission.CHANGE_NETWORK_STATE,Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT,
             // Planned messages sent while the app is closed (owner decision, 2026-10-12): an exact alarm and a short
             // foreground service; its notification is never asked for.
-            Manifest.permission.USE_EXACT_ALARM,Manifest.permission.FOREGROUND_SERVICE,Manifest.permission.POST_NOTIFICATIONS)
+            Manifest.permission.USE_EXACT_ALARM,Manifest.permission.FOREGROUND_SERVICE,Manifest.permission.POST_NOTIFICATIONS,
+            // Opt-in hub/radio roaming uses the approved connected-device foreground service.
+            Manifest.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE,Manifest.permission.CAMERA)
         if(Build.VERSION.SDK_INT<=32) expected+=Manifest.permission.SCHEDULE_EXACT_ALARM
         // Legacy radio permissions are declared with maxSdkVersion and only requested on old Android.
         if(Build.VERSION.SDK_INT<=30) expected+=listOf(Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,Manifest.permission.ACCESS_FINE_LOCATION)
         if(Build.VERSION.SDK_INT<=28) expected+=Manifest.permission.ACCESS_COARSE_LOCATION
         assertEquals(expected,requested)
+        // Negative controls: permissions the hub path was tempted to take but does not need at runtime.
+        for(refused in listOf("android.permission.NEARBY_WIFI_DEVICES",
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION,Manifest.permission.CHANGE_WIFI_MULTICAST_STATE,
+            Manifest.permission.ACCESS_MEDIA_LOCATION)) assertFalse("$refused is not needed",refused in requested)
         assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.INTERNET))
     }
 

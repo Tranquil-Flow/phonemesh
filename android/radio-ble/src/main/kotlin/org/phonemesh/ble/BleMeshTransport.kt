@@ -771,7 +771,7 @@ class BleMeshTransport(
                 val local = localNodeNum?.toLong()?.and(MeshtasticProtocol.BROADCAST_NUM)
                 val ownId = local?.let { MeshtasticProtocol.nodeId(it) }
                 if (local != null && event.to == local && event.sender != ownId) postData(event.sender, event.port, event.payload, event.channel, event.packetId)
-                else if (event.to == MeshtasticProtocol.BROADCAST_NUM && event.port == MeshtasticProtocol.ACCOUNT_PORT && event.sender != ownId) {
+                else if (event.to == MeshtasticProtocol.BROADCAST_NUM && event.port in MeshtasticProtocol.BROADCAST_PORTS && event.sender != ownId) {
                     val e = event
                     mainHandler.post { if (!closed.get()) listener.onBroadcastData(e.sender, e.port, e.payload, e.channel, e.packetId, e.signal) }
                 }

@@ -23,13 +23,16 @@ class HardeningUiTest {
         val radio = TestCore.radio
         // The one-time tips have been seen: a tip's large picture would leave room for fewer than these three messages.
         TestCore.onMain { core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() }
-        val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi")
         TestCore.onMain { listOf("Un", "Deux", "Trois").forEach { core.setDraft(chat, it); core.send(chat) } }
         val (one, two, three) = core.history.messages(chat)
-        val (p1, p2, p3) = radio.sent.map { it.packetId }
+        Views.waitUntil { radio.broadcasts.size == 3 }
+        // One reached the other phone and was receipted; Two gave up (every resend failed); Three is unconfirmed.
+        PersonFixture.acknowledge(bea, radio.broadcasts[0].payload)
         TestCore.onMain {
-            radio.deliver(p1, DeliveryState.QUEUED); radio.deliver(p2, DeliveryState.FAILED); radio.deliver(p1, DeliveryState.ACKNOWLEDGED)
-            radio.deliver(p3, DeliveryState.QUEUED); radio.deliver(p3, DeliveryState.UNCONFIRMED)
+            core.history.outbox(bea.account).filter { it.messageId == two.id }.forEach { core.history.setOutboxState(it.id, "FAILED") }
+            core.history.setStatus(two.id, org.phonemesh.core.DeliveryStatus.FAILED)
+            core.history.setStatus(three.id, org.phonemesh.core.DeliveryStatus.UNCONFIRMED)
         }
         val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chat))
         try {

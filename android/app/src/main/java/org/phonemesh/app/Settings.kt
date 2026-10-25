@@ -33,15 +33,33 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = ThemeMode.of(prefs.getString(THEME, null))
         set(value) { prefs.edit().putString(THEME, value.key).apply() }
 
-    /** True once any message was sent: setup step 3 is done and the "Hold to talk" hint stops. */
+    /** True once any message was sent: the hello step is done and the "Hold to talk" hint stops. */
     var firstMessageSent: Boolean
         get() = prefs.getBoolean(FIRST_MESSAGE_SENT, false)
         set(value) { prefs.edit().putBoolean(FIRST_MESSAGE_SENT, value).apply() }
+
+    /** The add-someone step was completed, even if its contact is later removed. */
+    var firstPersonAdded: Boolean
+        get() = prefs.getBoolean(FIRST_PERSON_ADDED, false)
+        set(value) { prefs.edit().putBoolean(FIRST_PERSON_ADDED, value).apply() }
 
     /** New messages are read aloud as they arrive while the app is open (Settings). Off: phones are often in public. */
     var readAloud: Boolean
         get() = prefs.getBoolean(READ_ALOUD, false)
         set(value) { prefs.edit().putBoolean(READ_ALOUD, value).apply() }
+
+    /** The hub QR scanned in person (HubCard text), or null. It holds the hub Wi-Fi's password, in this app's private storage. */
+    var hubCard: String?
+        get() = prefs.getString(HUB_CARD, null)
+        set(value) { prefs.edit().putString(HUB_CARD, value).apply() }
+
+    /**
+     * Accounts decision 9, opt-in: the person's wish to keep the hub when the app is closed. Off by default. The flag alone
+     * keeps nothing; only HubRoamingService running for the current epoch is roaming (AppCore.roamingActive).
+     */
+    var hubRoaming: Boolean
+        get() = prefs.getBoolean(HUB_ROAMING, false)
+        set(value) { prefs.edit().putBoolean(HUB_ROAMING, value).apply() }
 
     /** True once the setup guide folded away; it never returns. */
     var setupFinished: Boolean
@@ -123,8 +141,11 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val RADIO_NAME = "radioName"
         private const val THEME = "theme"
         private const val FIRST_MESSAGE_SENT = "firstMessageSent"
+        private const val FIRST_PERSON_ADDED = "firstPersonAdded"
         private const val SETUP_FINISHED = "setupFinished"
         private const val READ_ALOUD = "readAloud"
+        private const val HUB_CARD = "hubCard"
+        private const val HUB_ROAMING = "hubRoaming"
         private const val TIPS_SHOWN = "tipsShown"
         private const val TIP_SHOWINGS = "tipShowings"
         private const val KEPT = "keptRegions."

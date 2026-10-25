@@ -145,7 +145,8 @@ class RegionFlowTest {
         assertTrue(main { core.resend(failed.id) })
         assertEquals(1, radio.sent.size)
         assertEquals(DeliveryStatus.WAITING, status(failed.id))
-        assertEquals(radio.sent.single().packetId, main { core.history.message(failed.id)!!.packetId })
+        assertEquals("one shared post on port 303", listOf(303), radio.broadcasts.map { it.port })
+        assertTrue("the message keeps a shared reference, not the radio's packet id", main { core.history.message(failed.id)!!.packetId!! } >= (1L shl 40))
         assertEquals(listOf("EU_868"), radio.regionWrites)
     }
 

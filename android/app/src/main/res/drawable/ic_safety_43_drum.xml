@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Safety picture icon 43, "drum" / "tambour" (docs/specs/2026-10-18-safety-icons.py). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:pathData="M5 6.5c0 3 3.5 5 4.5 8.5l-1 6.5h7l-1-6.5c1-3.5 4.5-5.5 4.5-8.5z" android:fillColor="#FFA1887F" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M19,6.5A7,2.2 0 1,1 5,6.5A7,2.2 0 1,1 19,6.5Z" android:fillColor="#FFF5E6C8" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M6 8.5l3.5 6.5M9 9.5l2 5.5M12 9.5v5.5M15 9.5l-2 5.5M18 8.5l-3.5 6.5" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth=".9" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M9.5 15h5" android:fillColor="#00000000" android:strokeColor="#FF111111" android:strokeWidth="1.4" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

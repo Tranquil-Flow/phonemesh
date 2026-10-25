@@ -127,6 +127,7 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
         }
         observed = current
         current.activityStarted()
+        current.resumeRoaming()
         current.observe(this)
         onScreenStart()
         // A covering screen cancels the callback, not the note's original deadline.

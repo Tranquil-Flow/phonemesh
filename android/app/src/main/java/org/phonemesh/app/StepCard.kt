@@ -19,6 +19,7 @@ object StepCard {
         SetupStep.VOICE -> "card_voice"
         SetupStep.NAME -> "card_name"
         SetupStep.RADIO -> "card_radio"
+        SetupStep.ADD -> "card_add"
         SetupStep.HELLO -> "card_hello"
     }
 
@@ -28,12 +29,14 @@ object StepCard {
         // Holding the microphone and speaking, as for hello; a picture of its own waits for the how-to review (G4).
         SetupStep.NAME -> listOf("hello")
         SetupStep.RADIO -> listOf("power", "close", "search")
+        SetupStep.ADD -> listOf("add_qr", "add_link", "add_accept", "same_picture")
         SetupStep.HELLO -> listOf("hello")
     }
 
     fun problemScene(step: SetupStep): String = when (step) {
         SetupStep.RADIO -> "lost"
         SetupStep.NAME -> "hello"
+        SetupStep.ADD -> "add_qr"
         else -> "download"
     }
 

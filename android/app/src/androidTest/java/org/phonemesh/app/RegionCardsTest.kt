@@ -164,6 +164,24 @@ class RegionCardsTest {
         assertEquals("Bonjour", TestCore.onMain { TestCore.core.draft(TestCore.core.groupChatId()) })
     }
 
+    @Test fun blockedRegionDraftKeepsActualActionsFullyOnScreen() {
+        val screen = ScreenStates.regionBlockedSend().also { activity = it }
+        val controls = listOf("draft_clear", "draft_play", "draft_send").map { tag ->
+            tag to checkNotNull(Views.tagged(screen, tag))
+        }
+        Views.waitUntil { controls.all { (_, view) -> view.width > 0 && view.height > 0 } }
+        TestCore.onMain {
+            controls.forEach { (tag, view) ->
+                val visible = android.graphics.Rect()
+                assertTrue("$tag must remain visible beside the region explanation", view.getGlobalVisibleRect(visible))
+                assertEquals("$tag must not be vertically clipped", view.height, visible.height())
+                assertEquals("$tag must not be horizontally clipped", view.width, visible.width())
+            }
+        }
+        assertFalse(enabled(screen, "draft_send"))
+        assertTrue(radio.regionWrites.isEmpty())
+    }
+
     @Test fun conversationWithoutADraftShowsNoCardAndAReadyRadioNone() {
         radio("UNSET", "TG")
         assertNull(Views.tagged(conversation(null), "card_region"))

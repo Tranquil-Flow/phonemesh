@@ -104,5 +104,9 @@ interface MeshRadio : AutoCloseable {
 
         /** The private port accounts' packets travel on, as broadcasts (wire v2). */
         const val ACCOUNT_PORT = MeshtasticProtocol.ACCOUNT_PORT
+        /** A hub's "reached hub" acknowledgements (plan step 15). */
+        const val HUB_ACK_PORT = MeshtasticProtocol.HUB_ACK_PORT
+        /** The shared chat with names (plan step 14). */
+        const val SHARED_CHAT_PORT = MeshtasticProtocol.SHARED_CHAT_PORT
     }
 }

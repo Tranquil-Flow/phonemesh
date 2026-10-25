@@ -106,6 +106,8 @@ android {
 dependencies {
     implementation(project(":radio-ble"))
     implementation(project(":core"))
+    // QR codes for adding people (accounts plan step 11; the one new library, Apache-2.0). Camera through Camera2.
+    implementation("com.google.zxing:core:3.5.4")
     implementation(files("../libs/sherpa-onnx-1.13.8.aar"))
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
@@ -125,7 +127,7 @@ val checkApkSize by tasks.registering {
     }
 }
 
-// Networking APIs may appear in the release dex only inside PackDownloads (see scripts/check_network_boundary.py).
+// Networking APIs may appear in the release dex only inside PackDownloads, HubClient and WifiHubLink (see scripts/check_network_boundary.py).
 fun compareVersions(a: String, b: String): Int {
     val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
     val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
@@ -156,6 +158,12 @@ val checkNetworkBoundary by tasks.registering(Exec::class) {
             "--dexdump", dexdump.absolutePath,
             "--require-class", "Lorg/phonemesh/app/PackDownloads;",
             "--require-api-in", "Lorg/phonemesh/app/PackDownloads;",
+            "--require-class", "Lorg/phonemesh/core/hub/HubClient;",
+            "--require-api-in", "Lorg/phonemesh/core/hub/HubClient;",
+            "--require-class", "Lorg/phonemesh/core/hub/HubEngineTls;",
+            "--require-api-in", "Lorg/phonemesh/core/hub/HubEngineTls;",
+            "--require-class", "Lorg/phonemesh/app/WifiHubLink;",
+            "--require-api-in", "Lorg/phonemesh/app/WifiHubLink;",
         )
     }
 }

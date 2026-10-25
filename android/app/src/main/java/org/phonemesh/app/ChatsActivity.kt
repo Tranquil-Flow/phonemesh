@@ -14,7 +14,7 @@ import android.text.format.DateUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
+
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -54,7 +54,7 @@ class ChatsActivity : ScreenActivity() {
     private var pendingImport: Uri? = null
     /** First launch: a pack intent is waiting for the language to be chosen, so the recreate after it must replay it. */
     private var importWaitsForLanguage = false
-    private var peerDialog: AlertDialog? = null
+
     private var doneUntil = 0L
     /** One panel per step or problem, kept so renders never restart a picture. */
     private val panels = HashMap<String, HowToPanel>()
@@ -124,7 +124,7 @@ class ChatsActivity : ScreenActivity() {
             tag = "new_chat"
             background = Ui.circle(palette.text)
             elevation = Ui.dp(this@ChatsActivity, 4).toFloat()
-            setOnClickListener { pickPeer() }
+            setOnClickListener { startActivity(Intent(this@ChatsActivity, AddSomeoneActivity::class.java)) }
         }
         frame.addView(add, FrameLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 64), Gravity.END or Gravity.BOTTOM)
             .apply { setMargins(pad(), pad(), pad(), pad()) })
@@ -228,7 +228,7 @@ class ChatsActivity : ScreenActivity() {
         setOnClickListener { openRadio() }
     }
 
-    /** Three numbered steps, then two seconds of green; afterwards only lost-voice/radio cards. True while the steps show. */
+    /** Numbered steps, then two seconds of green; afterwards slim resource/new-step cards. True while the guide shows. */
     private fun renderCards(): Boolean {
         cards.removeAllViews()
         cards.removeCallbacks(rerender)
@@ -238,10 +238,10 @@ class ChatsActivity : ScreenActivity() {
         val voiceReady = missing.isEmpty() && core.readiness() is Readiness.Ready
         if (voiceReady) friendGuide = false
         val settings = core.settings
-        // The radio step is done only once the radio has its region; until then the region card takes the step's place.
+        // A direct radio needs its region settled; an authenticated hub provides the communal-radio route instead.
         val region = RegionCards.body(this, palette, core, regionPicture)
         var regionShown = false
-        val view = SetupSteps.of(voiceReady, core.account() != null, core.radioReady(), settings.firstMessageSent, settings.setupFinished)
+        val view = SetupSteps.of(voiceReady, core.account() != null, core.setupConnectionReady(), settings.firstMessageSent, settings.setupFinished, core.hasAddedSomeone())
         when (view) {
             is SetupView.Guide -> {
                 regionShown = view.current == SetupStep.RADIO && region != null
@@ -250,7 +250,7 @@ class ChatsActivity : ScreenActivity() {
                     else if (view.current == SetupStep.VOICE && friendGuide) StepCard.current(this, palette, view.current, view.done.size,
                         stepTitle(view.current), friendGuideView(numbered = true), null, friendGuideActions())
                     else StepCard.current(this, palette, view.current, view.done.size, stepTitle(view.current),
-                        panel(StepCard.scenes(view.current)), stepDetail(view.current, missing), stepActions(view.current, missing, numbered = true)))
+                        panel(StepCard.scenes(view.current), view.current), stepDetail(view.current, missing), stepActions(view.current, missing, numbered = true)))
                 SetupSteps.ORDER.filter { it != view.current }.forEach { step ->
                     val done = step in view.done
                     cards.addView(StepCard.row(this, palette, step, done, stepTitle(step), if (done) doneDetail(step) else stepHint(step, missing)))
@@ -272,7 +272,7 @@ class ChatsActivity : ScreenActivity() {
                     cards.addView(StepCard.problem(this, palette, step, stepTitle(step), friendGuideView(numbered = false), friendGuideActions()))
                 } else {
                     // One picture without numbered parts, so the two choices carry no numbers either.
-                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step))),
+                    cards.addView(StepCard.problem(this, palette, step, stepTitle(step), panel(listOf(StepCard.problemScene(step)), step),
                         stepActions(step, missing, numbered = false)))
                 }
             }
@@ -301,13 +301,18 @@ class ChatsActivity : ScreenActivity() {
     }
 
     /** Reuse each panel and refresh its speaker when a voice arrives. */
-    private fun panel(scenes: List<String>): HowToPanel =
-        panels.getOrPut(scenes.joinToString(",")) { howTo(*scenes.toTypedArray()) }.also { it.update() }
+    private fun panel(scenes: List<String>, step: SetupStep): HowToPanel =
+        panels.getOrPut("${step.name}:${scenes.joinToString(",")}") {
+            // NAME reuses the microphone picture, not HELLO's greeting instruction or recorded clip.
+            if (step == SetupStep.NAME) howTo(*scenes.toTypedArray(), sentence = { getString(R.string.name_say) })
+            else howTo(*scenes.toTypedArray())
+        }.also { it.update() }
 
     private fun stepTitle(step: SetupStep) = getString(when (step) {
         SetupStep.VOICE -> R.string.step_voice
         SetupStep.NAME -> R.string.step_name
         SetupStep.RADIO -> R.string.setup_radio_title
+        SetupStep.ADD -> R.string.add_title
         SetupStep.HELLO -> R.string.step_hello
     })
 
@@ -322,6 +327,7 @@ class ChatsActivity : ScreenActivity() {
         SetupStep.VOICE -> stepDetail(step, missing) ?: getString(R.string.setup_voice_title)
         SetupStep.NAME -> getString(R.string.name_say)
         SetupStep.RADIO -> getString(R.string.setup_radio_hint)
+        SetupStep.ADD -> getString(R.string.step_add_hint)
         SetupStep.HELLO -> getString(R.string.step_hello_hint)
     }
 
@@ -331,6 +337,7 @@ class ChatsActivity : ScreenActivity() {
             ?: getString(R.string.setup_voice_title)
         SetupStep.NAME -> core.account()?.first.orEmpty()
         SetupStep.RADIO -> getString(R.string.radio_connected)
+        SetupStep.ADD -> getString(R.string.step_add_done)
         SetupStep.HELLO -> getString(R.string.step_hello_done)
     }
 
@@ -343,6 +350,10 @@ class ChatsActivity : ScreenActivity() {
         SetupStep.RADIO -> Ui.button(this, palette, getString(R.string.setup_search), R.drawable.ic_search, filled = true).apply {
             tag = "radio_search"
             setOnClickListener { openRadio() }
+        }.let { padded(it) }
+        SetupStep.ADD -> Ui.button(this, palette, getString(R.string.add_title), R.drawable.ic_plus, filled = true).apply {
+            tag = "setup_add"
+            setOnClickListener { startActivity(Intent(this@ChatsActivity, AddSomeoneActivity::class.java)) }
         }.let { padded(it) }
         SetupStep.HELLO -> Ui.button(this, palette, getString(R.string.step_hello_button), R.drawable.ic_mic, filled = true).apply {
             tag = "hello_try"
@@ -447,7 +458,20 @@ class ChatsActivity : ScreenActivity() {
         override fun getCount() = items.size
         override fun getItem(position: Int) = items[position]
         override fun getItemId(position: Int) = items[position].chat.id
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = chatRow(items[position])
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+            val item = items[position]
+            val row = chatRow(item)
+            // Radio-addressed chats from before accounts come last, under their own heading (plan step 12).
+            if (!item.old || (position > 0 && items[position - 1].old)) return row
+            return LinearLayout(this@ChatsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(Ui.text(this@ChatsActivity, getString(R.string.old_chats), palette.muted, bold = true).apply {
+                    tag = "old_chats"
+                    setPadding(pad(), pad(), pad(), 0)
+                })
+                addView(row)
+            }
+        }
     }
 
     private fun chatRow(item: AppCore.ChatRow): View {
@@ -460,7 +484,7 @@ class ChatsActivity : ScreenActivity() {
             tag = "chat:${chat.id}"
             contentDescription = item.title
         }
-        row.addView(Looks.avatar(this, palette, chat.kind, 56))
+        row.addView(Looks.avatar(this, palette, chat.kind, 56, item.colour))
         val middle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad() / 2, 0)
@@ -483,6 +507,7 @@ class ChatsActivity : ScreenActivity() {
             })
         }
         middle.addView(titleLine)
+        if (item.met == false) middle.addView(Ui.text(this, getString(R.string.not_met), palette.muted).apply { tag = "not_met:${chat.id}" })
         item.last?.let { last ->
             val lastLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val hasIcon = last.status != null
@@ -527,24 +552,6 @@ class ChatsActivity : ScreenActivity() {
 
     private fun openRadio() = startActivity(Intent(this, RadioActivity::class.java))
 
-    /** ➕: the radios the mesh has heard, by name, or "Radio 4a2f" when unnamed. */
-    private fun pickPeer() {
-        val peers = core.peers()
-        if (peers.isEmpty()) { core.note(UiText(R.string.no_radio_heard)); return }
-        val names = peers.map { peer -> core.radioLabel(peer.name, peer.id) }
-        val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-                (super.getView(position, convertView, parent) as TextView).apply {
-                    textSize = 20f
-                    minHeight = Ui.dp(this@ChatsActivity, 56)
-                }
-        }
-        peerDialog?.dismiss()
-        peerDialog = AlertDialog.Builder(this).setTitle(R.string.radios_heard)
-            .setAdapter(adapter) { _, which -> openChat(core.startDirectChat(peers[which])) }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
 
     private fun pickFile() {
         @Suppress("DEPRECATION")
@@ -597,8 +604,20 @@ class ChatsActivity : ScreenActivity() {
         dialog.show()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // LinkActivity has finished: publish its result only after this screen can show it.
+        val notice = intent.getIntExtra(LinkActivity.EXTRA_NOTICE, 0)
+        intent.removeExtra(LinkActivity.EXTRA_NOTICE)
+        // This launcher is exported. Never treat arbitrary external integers as resource IDs.
+        if (notice in setOf(R.string.add_bad_code, R.string.add_name_first, R.string.add_own_code, R.string.mail_save_failed)) {
+            core.note(UiText(notice))
+        }
+    }
+
     public override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.hasExtra(LinkActivity.EXTRA_NOTICE)) setIntent(intent)
         if (core.settings.language == null) setIntent(intent) else openFromIntent(intent)
     }
 
@@ -633,15 +652,13 @@ class ChatsActivity : ScreenActivity() {
     override fun onDestroy() {
         chatDialog?.dismiss()
         importDialog?.dismiss() // a pending import is dropped, never installed
-        peerDialog?.dismiss()
+
         super.onDestroy()
     }
 
     // Test hook
     internal val importDialogForTest: AlertDialog? get() = importDialog?.takeIf { it.isShowing }
 
-    // Test hook
-    internal val peerDialogForTest: AlertDialog? get() = peerDialog?.takeIf { it.isShowing }
 
     private companion object {
         const val STATE_WAITS_FOR_LANGUAGE = "waits_for_language"

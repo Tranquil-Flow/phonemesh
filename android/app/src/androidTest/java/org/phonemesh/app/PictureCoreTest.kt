@@ -27,76 +27,82 @@ class PictureCoreTest {
         for (x in 0 until 300) for (y in 0 until 200) setPixel(x, y, Color.rgb((x * 7) % 256, (y * 5) % 256, (x + y) % 256))
     }
 
-    @Test fun aPictureGoesOutOnePacketAtATimeAndIsDeliveredWhenAllAreAcknowledged() {
+    @Test fun aPictureGoesOutOnePacketAtATimeAndIsDeliveredWhenAllAreReceived() {
         TestCore.install()
-        val chat = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi", accept = false)
         val picture = PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)
         assertTrue(picture.bytes.size <= PictureSize.MEDIUM.budget)
         assertTrue(main { core.sendPicture(chat, picture) })
         val message = checkNotNull(core.history.lastMessage(chat))
         assertEquals(MessageKind.PICTURE, message.kind)
         assertEquals(DeliveryStatus.WAITING, message.status)
-        val total = PictureWire.partsFor(picture.bytes.size) + 1
+        val total = PictureWire.partsForV2(picture.bytes.size) + 1
         for (i in 0 until total) {
-            assertEquals("only one packet in flight", i + 1, radio.sentData.size)
-            val packet = radio.sentData.last()
-            assertEquals(MeshRadio.PICTURE_PORT, packet.port)
-            assertEquals("!0000aaaa", packet.destinationId)
+            assertEquals("only one packet in flight", i + 1, radio.broadcasts.size)
+            val packet = radio.broadcasts.last()
+            assertEquals(MeshRadio.ACCOUNT_PORT, packet.port)
+            main { radio.deliver(packet.packetId, DeliveryState.SUBMITTING) }
+            assertEquals("being written is not enough", i + 1, radio.broadcasts.size)
             main { radio.deliver(packet.packetId, DeliveryState.QUEUED) }
-            assertEquals("queued is not enough", i + 1, radio.sentData.size)
-            main { radio.deliver(packet.packetId, DeliveryState.ACKNOWLEDGED) }
+            if (i < total - 1) Views.waitUntil { radio.broadcasts.size == i + 2 }
         }
-        assertEquals(total, radio.sentData.size)
+        assertEquals(total, radio.broadcasts.size)
+        assertEquals("Sent once every packet is taken", DeliveryStatus.SENT, core.history.message(message.id)!!.status)
+        radio.broadcasts.forEach { bea.postman.receive(it.payload, 1_000) }
+        PersonFixture.deliver(bea.postman.due(60_000).first().packet)
         assertEquals(DeliveryStatus.DELIVERED, core.history.message(message.id)!!.status)
         assertEquals(total, core.history.picture(message.id)!!.have)
-        assertTrue(radio.sent.isEmpty())
+        assertTrue(radio.sent.isEmpty() && radio.sentData.isEmpty())
     }
 
-    @Test fun aPictureWithoutARadioWaitsVisiblyAndGoesWhenOneIsReady() {
+    @Test fun aPictureWithoutARadioWaitsKeptAndGoesWhenOneIsReady() {
         TestCore.install(connected = false)
-        val chat = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (_, chat) = PersonFixture.meet("Kofi", accept = false)
         assertTrue(main { core.sendPicture(chat, PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)) })
         val message = checkNotNull(core.history.lastMessage(chat))
-        assertTrue("the bubble can say it waits for a radio", core.pictureWaitsForRadio(message.id))
-        assertEquals(DeliveryStatus.QUEUED, message.status)
-        assertTrue(radio.sentData.isEmpty())
+        assertEquals("waiting for a radio, every packet kept on this phone", DeliveryStatus.WAITING, message.status)
+        assertTrue(radio.broadcasts.isEmpty())
         main { radio.connected(true) }
-        assertFalse(core.pictureWaitsForRadio(message.id))
-        assertEquals("the first packet goes once a radio is ready", 1, radio.sentData.size)
+        Views.waitUntil { radio.broadcasts.size == 1 }
+        assertEquals("the first packet goes once a radio is ready", 1, radio.broadcasts.size)
     }
 
-    @Test fun aPacketIsTriedThreeTimesThenThePictureFailsAndCanBeSentAgain() {
+    @Test fun aRejectedPictureWriteIsOfferedAgainUnchangedAndAFailedPictureCanBeSentAgain() {
         TestCore.install()
-        val chat = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi", accept = false)
         main { core.sendPicture(chat, PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)) }
         val message = checkNotNull(core.history.lastMessage(chat))
-        main { radio.deliver(radio.sentData.last().packetId, DeliveryState.UNCONFIRMED) }
-        main { radio.deliver(radio.sentData.last().packetId, DeliveryState.FAILED) }
-        assertEquals(3, radio.sentData.size)
-        assertEquals("each try is a new packet", 3, radio.sentData.map { it.packetId }.toSet().size)
-        assertTrue(radio.sentData.all { it.payload.contentEquals(radio.sentData[0].payload) })
-        main { radio.deliver(radio.sentData.last().packetId, DeliveryState.FAILED) }
-        assertEquals(3, radio.sentData.size)
-        assertEquals(DeliveryStatus.FAILED, core.history.message(message.id)!!.status)
+        val first = radio.broadcasts.single()
+        main { radio.deliver(first.packetId, DeliveryState.UNCONFIRMED) }
+        assertEquals("not lost: kept and waiting", DeliveryStatus.WAITING, core.history.message(message.id)!!.status)
+        assertEquals(1, radio.broadcasts.size)
+        main { radio.connected(false); radio.connected(true) }
+        Views.waitUntil { radio.broadcasts.size == 2 }
+        assertEquals("each try is a new write", 2, radio.broadcasts.map { it.packetId }.toSet().size)
+        assertArrayEquals("the same packet, the same bytes", first.payload, radio.broadcasts.last().payload)
+        // Every resend gave up: the picture failed, and sending it again offers the very same stored packets.
+        val kept = main { core.history.outbox(bea.account).map { it.packet.toList() } }
+        main {
+            core.history.outbox(bea.account).forEach { core.history.setOutboxState(it.id, "FAILED") }
+            core.history.setStatus(message.id, DeliveryStatus.FAILED)
+        }
         assertTrue(main { core.resend(message.id) })
-        assertEquals(4, radio.sentData.size)
-        assertArrayEquals("the same picture, same id", radio.sentData[0].payload, radio.sentData[3].payload)
+        assertEquals("the same picture, same id", kept, main { core.history.outbox(bea.account).map { it.packet.toList() } })
     }
 
     /** Our own radio going away is not the other radio's silence: the picture waits, then starts again. */
     @Test fun aLostRadioMakesThePictureWaitThenItStartsAgain() {
         TestCore.install()
-        val chat = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (_, chat) = PersonFixture.meet("Kofi", accept = false)
         main { core.sendPicture(chat, PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)) }
         val message = checkNotNull(core.history.lastMessage(chat))
-        val first = radio.sentData.single().payload
-        main { radio.connected(false); radio.deliver(radio.sentData.last().packetId, DeliveryState.UNCONFIRMED) }
-        assertEquals(1, radio.sentData.size)
-        assertEquals("waiting for a radio, not failed", DeliveryStatus.QUEUED, core.history.message(message.id)!!.status)
-        assertTrue(core.pictureWaitsForRadio(message.id))
+        val first = radio.broadcasts.single().payload
+        main { radio.connected(false); radio.deliver(radio.broadcasts.last().packetId, DeliveryState.UNCONFIRMED) }
+        assertEquals(1, radio.broadcasts.size)
+        assertEquals("waiting for a radio, not failed", DeliveryStatus.WAITING, core.history.message(message.id)!!.status)
         main { radio.connected(true) }
-        assertEquals(2, radio.sentData.size)
-        assertArrayEquals("the same picture, same id, from its start", first, radio.sentData.last().payload)
+        Views.waitUntil { radio.broadcasts.size == 2 }
+        assertArrayEquals("the same packet, from its start", first, radio.broadcasts.last().payload)
     }
 
     @Test fun everySizeFitsItsBudgetAndTheLargestFitsThePictureFormat() {
@@ -116,18 +122,30 @@ class PictureCoreTest {
         assertTrue(radio.sentData.isEmpty())
     }
 
-    /** Replies and reactions name a picture by its first piece's radio id, which both phones know. */
-    @Test fun aPictureTakesItsFirstPiecesRadioIdOnBothPhones() {
+    /** Replies and reactions name a picture by its head's reference, which both phones know; later pieces never change it. */
+    @Test fun aPictureTakesItsHeadsReferenceOnBothPhones() {
         TestCore.install()
-        val chat = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi")
         main { core.sendPicture(chat, PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)) }
         val mine = checkNotNull(core.history.lastMessage(chat))
-        assertNull("not before the other radio confirms it", core.history.message(mine.id)!!.packetId)
-        val head = radio.sentData.first().packetId
-        main { radio.deliver(head, DeliveryState.ACKNOWLEDGED) }
-        assertEquals(head, core.history.message(mine.id)!!.packetId)
-        main { radio.deliver(radio.sentData.last().packetId, DeliveryState.ACKNOWLEDGED) }
+        val head = checkNotNull(core.history.message(mine.id)!!.packetId)
+        Views.waitUntil(8_000) { core.history.message(mine.id)!!.status == DeliveryStatus.SENT }
         assertEquals("later pieces do not change it", head, core.history.message(mine.id)!!.packetId)
+        val theirsPicture = PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)
+        val sealed = bea.postman.sendPicture(bea.awa, null,
+            PictureWire.splitV2(91, PictureCodec.WEBP, theirsPicture.width, theirsPicture.height, theirsPicture.bytes, theirsPicture.sketch), 1_000)
+            .map { checkNotNull(it).packet }
+        sealed.forEach { PersonFixture.deliver(it) }
+        val theirsFromBea = main { core.history.messages(chat).last { it.direction == Direction.IN } }
+        assertEquals(AppMailStore.refNumber(org.phonemesh.core.session.Ratchet.reference(sealed[0].copyOfRange(1, 9))), theirsFromBea.packetId)
+        assertNotNull(core.history.picture(theirsFromBea.id)!!.file)
+        assertTrue("so it can be answered", main { core.react(theirsFromBea.id, "\uD83D\uDC4D") })
+        assertEquals(MeshRadio.ACCOUNT_PORT, radio.broadcasts.last().port)
+    }
+
+    /** An old chat's picture (port 300) is received, keeps its first piece's radio id, and cannot be answered: the chat is read only. */
+    @Test fun anOldChatPictureTakesItsFirstPiecesRadioIdAndCannotBeAnswered() {
+        TestCore.install()
 
         val picture = PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)
         val packets = PictureWire.split(91, PictureCodec.WEBP, picture.width, picture.height, picture.bytes, picture.sketch).map { PictureWire.encode(it) }
@@ -139,14 +157,14 @@ class PictureCoreTest {
         packets.drop(2).forEachIndexed { i, p -> main { radio.receiveData("!0000bbbb", MeshRadio.PICTURE_PORT, p, packetId = 5002L + i) } }
         assertNotNull(core.history.picture(theirs.id)!!.file)
         assertEquals(5000L, core.history.message(theirs.id)!!.packetId)
-        assertTrue("so it can be answered", main { core.react(theirs.id, "👍") })
-        assertEquals(5000L, radio.sent.last().replyTo)
+        assertFalse("an old chat is read only: no reaction goes out", main { core.react(theirs.id, "👍") })
+        assertTrue(radio.sent.isEmpty() && radio.broadcasts.isEmpty())
     }
 
     @Test fun aWholePictureCanBeForwardedAsItIs() {
         TestCore.install()
-        val first = main { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
-        val second = main { core.startDirectChat(RadioPeer("!0000bbbb", "Ama")) }
+        val (_, first) = PersonFixture.meet("Kofi")
+        val (_, second) = PersonFixture.meet("Ama")
         val original = PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)
         main { core.sendPicture(first, original) }
         val message = checkNotNull(core.history.lastMessage(first))

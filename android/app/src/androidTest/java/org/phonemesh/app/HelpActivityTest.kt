@@ -71,6 +71,7 @@ class HelpActivityTest {
             listOf("hold", "reply", "react", "forward", "delete", "pin", "later", "later_pick"),
             listOf("lost", "bt", "short", "notheard", "mic"),
             listOf("allow", "dlfail", "damaged", "refused", "older", "space", "wait", "toolong", "playfail"),
+            listOf("add_qr", "add_link", "add_accept", "same_picture"),
         )
         assertEquals(groups, HelpActivity.GROUPS.map { it.second })
         val order = TestCore.onMain {

@@ -10,6 +10,7 @@ class FakeSpeech : Speech {
         private set
     var nextTranscript: String? = "Bonjour à tous"
     val spoken = mutableListOf<String>()
+    val spokenVoices = mutableListOf<String>()
     val clips = mutableListOf<Int>()
     @Volatile var releases = 0
         private set
@@ -54,6 +55,7 @@ class FakeSpeech : Speech {
     override fun speak(pack: Readiness.Ready, text: String, onEnd: (Boolean) -> Unit) {
         stopPlayback()
         spoken += text
+        spokenVoices += pack.voice.id
         playEnd = onEnd
     }
 

@@ -32,7 +32,7 @@ object MeshtasticProtocol {
     const val ACCOUNT_PORT = 301
     const val HUB_ACK_PORT = 302
     const val SHARED_CHAT_PORT = 303
-    val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT, ACCOUNT_PORT)
+    val PRIVATE_DATA_PORTS = setOf(PICTURE_PORT, ACCOUNT_PORT, HUB_ACK_PORT, SHARED_CHAT_PORT)
     val BROADCAST_PORTS = setOf(ACCOUNT_PORT, HUB_ACK_PORT, SHARED_CHAT_PORT)
     const val BROADCAST_NUM: Long = 0xffffffffL
     const val FIRST_HEARTBEAT_NONCE = 2

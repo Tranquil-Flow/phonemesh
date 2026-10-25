@@ -8,7 +8,7 @@ import org.phonemesh.ble.RegionResult
 
 /** Test radio: records what the app asks for and lets a test play the radio's side. Main thread only. */
 class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
-    data class Sent(val text: String, val destinationId: String, val channel: Int, val packetId: Long, val replyTo: Long = 0, val reaction: Boolean = false)
+    data class Sent(val text: String, val destinationId: String, val channel: Int, val packetId: Long, val replyTo: Long = 0, val reaction: Boolean = false, val port: Int? = null, val projected: Boolean = false)
     class SentData(val port: Int, val payload: ByteArray, val destinationId: String, val channel: Int, val packetId: Long)
 
     val sent = mutableListOf<Sent>()
@@ -50,6 +50,28 @@ class FakeRadio(private val listener: MeshRadio.Listener) : MeshRadio {
         check(ready) { "Meshtastic radio is not ready" }
         val id = nextPacket++
         sentData += SentData(port, payload.copyOf(), destinationId, channel, id)
+        return id
+    }
+    /** Broadcasts on the accounts ports (wire v2, hub acks, shared chat). */
+    val broadcasts = mutableListOf<SentData>()
+    var acceptBroadcasts = false
+    override fun sendBroadcastData(port: Int, payload: ByteArray, channel: Int): Long {
+        check(ready) { "Meshtastic radio is not ready" }
+        val id = nextPacket++
+        broadcasts += SentData(port, payload.copyOf(), "^all", channel, id)
+        // TEST PROJECTION ONLY. A shared post is also listed in `sent` as the group text or reaction it stands for, tagged
+        // `projected = true`, so generic status and screen tests keep their meaning. It is not evidence about the wire:
+        // transport assertions read `broadcasts` (the raw bytes) and check `sent.all { it.projected }` to prove no old text went out.
+        if (port == MeshRadio.SHARED_CHAT_PORT) org.phonemesh.core.wire.SharedPost.decode(payload)?.let { post ->
+            val reaction = post.kind == org.phonemesh.core.wire.SharedPost.Kind.REACTION
+            sent += Sent(
+                if (reaction) post.text else "[pm1:${post.language}] ${post.text}", "^all", channel, id,
+                replyTo = post.ref?.let { AppMailStore.refNumber(it) } ?: 0L, reaction = reaction, port = port, projected = true,
+            )
+        }
+        if (acceptBroadcasts) android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (ready && !closed) listener.onDelivery(id, DeliveryState.QUEUED, "radio queue accepted")
+        }
         return id
     }
     var modemPreset: String? = "LONG_FAST"

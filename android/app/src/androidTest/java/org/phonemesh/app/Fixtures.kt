@@ -30,14 +30,15 @@ object Fixtures {
         "whisper/encoder.int8.onnx" to "fixture", "whisper/decoder.int8.onnx" to "fixture",
         "whisper/tokens.txt" to "<|en|> 1\n<|fr|> 2\n"))
 
-    fun voice(tag: String = "fr"): ByteArrayInputStream {
-        val (id, whisper, espeak) = when (tag) {
+    fun voice(tag: String = "fr", alternateId: String? = null): ByteArrayInputStream {
+        val (defaultId, whisper, espeak) = when (tag) {
             "fr" -> Triple("voice-fr-siwis", "fr", "roa/fr")
             "en-US" -> Triple("voice-en-US-ljspeech", "en", "gmw/en")
             else -> error("No fixture voice for $tag")
         }
+        val id = alternateId ?: defaultId
         return archive(linkedMapOf(
-            "pack.properties" to "format=2\nkind=voice\nid=$id\nversion=1\nlabel=Fixture $tag\nlanguageTag=$tag\nwhisperLanguage=$whisper\n",
+            "pack.properties" to "format=2\nkind=voice\nid=$id\nversion=1\nlabel=Fixture ${alternateId ?: tag}\nlanguageTag=$tag\nwhisperLanguage=$whisper\n",
             "tts/model.onnx" to "fixture", "tts/tokens.txt" to "fixture", "tts/espeak-ng-data/phontab" to "fixture",
             "tts/espeak-ng-data/phondata" to "fixture", "tts/espeak-ng-data/phonindex" to "fixture",
             "tts/espeak-ng-data/intonations" to "fixture", "tts/espeak-ng-data/lang/$espeak" to "fixture"))

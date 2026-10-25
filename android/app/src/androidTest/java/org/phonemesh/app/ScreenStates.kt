@@ -74,6 +74,19 @@ object ScreenStates {
         return screen
     }
 
+    /** The new accounts step, or its unnumbered card on a phone that finished the old guide. */
+    fun chatsStepAdd(finished: Boolean = false): Activity {
+        TestCore.install(language = "en-US", voices = listOf("en-US"), added = false)
+        TestCore.onMain {
+            TestCore.core.settings.setupFinished = finished
+            TestCore.core.settings.firstMessageSent = finished
+        }
+        val screen = Views.start(ChatsActivity::class.java)
+        expect(Views.tagged(screen, "card_add") != null && Views.tagged(screen, "setup_add") != null, "add-someone card and action")
+        expect((Views.tagged(screen, "step_of") == null) == finished, "only new users see step numbers")
+        return screen
+    }
+
     /** The name screen: empty, or with a heard name and a colour picked. */
     fun nameScreen(filled: Boolean): Activity {
         TestCore.install(named = false)
@@ -86,6 +99,80 @@ object ScreenStates {
             expect(TestCore.onMain { save.isEnabled }, "Save is on")
         }
         return screen
+    }
+
+    /** Accounts step 11: Add someone, with or without a waiting request from Aminata. */
+    fun addSomeone(request: Boolean): Activity {
+        TestCore.install()
+        val screen = Views.start(AddSomeoneActivity::class.java)
+        if (request) {
+            val mine = TestCore.onMain { TestCore.core.accounts.card() }
+            val hello = org.phonemesh.core.session.Start.link(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4, mine,
+                org.phonemesh.core.session.KeyPairBytes.generate())!!.hello
+            TestCore.onMain { TestCore.core.onBroadcastData("!0000a111", org.phonemesh.ble.MeshRadio.ACCOUNT_PORT, hello, 0, 1L, "") }
+            Views.waitUntil { screen.window.decorView.findViewWithTag<android.view.View>("request") != null }
+        }
+        return screen
+    }
+
+    /** Accounts step 11: the six safety pictures for Aminata, added by link. */
+    fun safety(mismatch: Boolean = false): Activity {
+        TestCore.install(language = if (mismatch) "en-US" else "fr")
+        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4)
+        val added = TestCore.onMain { TestCore.core.accountsFlow.openLink(card) } as Accounts.Added.Contact
+        val screen: SafetyActivity = Views.launch(SafetyActivity.intent(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext, added.account))
+        Views.waitUntil(10_000) { screen.window.decorView.findViewWithTag<android.widget.GridLayout>("safety_icons")?.childCount == 6 }
+        if (mismatch) {
+            Views.tap(screen, "safety_differ")
+            expect(!TestCore.onMain { screen.isFinishing }, "mismatch warning stays on screen")
+            expect(Views.withText(screen, screen.getString(R.string.safety_differ_note)) != null, "visible mismatch warning")
+        }
+        return screen
+    }
+
+    /** Hub UI only: controlled links/service, no Bluetooth, network request, or audible output. */
+    fun hub(saved: Boolean = true, roaming: Boolean = false): Activity {
+        TestCore.install(language = "fr")
+        val core = TestCore.core
+        var epoch = -1
+        TestCore.onMain {
+            fun link() = object : HubLink {
+                override fun wire(): org.phonemesh.core.hub.HubWire? = null
+                override fun join(card: org.phonemesh.core.hub.HubCard, changed: () -> Unit) = Unit
+                override fun leave() = Unit
+            }
+            core.hub = link()
+            core.bluetoothHub = link()
+            if (saved) core.settings.hubCard = org.phonemesh.core.hub.HubCard(
+                "Village", "password1", 8443,
+                org.phonemesh.core.hub.HubCard.pinOf(ByteArray(91) { it.toByte() })).encode()
+            core.roamingHost = object : RoamingHost {
+                override fun start(value: Int): Boolean { epoch = value; return true }
+                override fun stop() = Unit
+            }
+        }
+        val screen = Views.start(HubActivity::class.java)
+        if (roaming) TestCore.onMain {
+            check(core.setHubRoaming(true))
+            check(core.roamingAttach(epoch))
+        }
+        return screen
+    }
+
+    /** Real person-chat header and local voice controls, using silent fixture speech. */
+    fun contactDetails(missing: Boolean = false, conversation: Boolean = false): Activity {
+        TestCore.install(language = if (missing) "en-US" else "fr", voices = listOf("fr", "en-US"))
+        val core = TestCore.core
+        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4)
+        val added = TestCore.onMain { core.accountsFlow.openLink(card) } as Accounts.Added.Contact
+        TestCore.onMain {
+            check(core.setContactVoice(added.account.toString(), "voice-fr-siwis"))
+            if (missing) core.store.remove("voice-fr-siwis")
+            if (conversation) core.history.addIncoming(added.chatId, added.account.toString(), "Bonjour !", "fr", System.currentTimeMillis(), false)
+        }
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        return if (conversation) Views.launch<ConversationActivity>(ConversationActivity.intent(context, added.chatId))
+            else Views.launch<ContactActivity>(ContactActivity.intent(context, added.chatId))
     }
 
     fun chatsStepOneOffline(): Activity {
@@ -176,7 +263,17 @@ object ScreenStates {
         expect(Views.tagged(screen, "help:power") != null, "the Help rows")
         if (group > 0) {
             val title = checkNotNull(Views.tagged(screen, "help_group:$group"))
-            TestCore.onMain { (screen.window.decorView.let { Views.descendants(it) }.first { it is android.widget.ScrollView } as android.widget.ScrollView).scrollTo(0, title.top) }
+            val scroll = TestCore.onMain { Views.descendants(screen.window.decorView).first { it is android.widget.ScrollView } as android.widget.ScrollView }
+            Views.waitUntil { title.height > 0 && title.top > 0 && !title.isLayoutRequested }
+            val target = TestCore.onMain {
+                // A short final group cannot align with the viewport's top: ScrollView clamps at its bottom.
+                val extent = scroll.getChildAt(0).height - (scroll.height - scroll.paddingTop - scroll.paddingBottom)
+                minOf(title.top, extent.coerceAtLeast(0)).also { scroll.scrollTo(0, it) }
+            }
+            Views.waitUntil {
+                val visible = android.graphics.Rect()
+                scroll.scrollY == target && title.getGlobalVisibleRect(visible) && visible.height() == title.height
+            }
             inst.waitForIdleSync()
         }
         return screen
@@ -289,6 +386,8 @@ object ScreenStates {
     fun forwardTo(): Activity {
         TestCore.install()
         val group = seedChats()
+        // Old radio-addressed chats cannot receive forwards; add a real accounts destination.
+        PersonFixture.meet(name = "Bea")
         TestCore.onMain { TestCore.core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet() }
         val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, group))
         val heard = TestCore.onMain { TestCore.core.history.messages(group).first { it.direction == Direction.IN } }
@@ -319,7 +418,7 @@ object ScreenStates {
     fun pictureScreen(withPhoto: Boolean): Activity {
         TestCore.install()
         seedChats()
-        val chat = TestCore.onMain { TestCore.core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (_, chat) = PersonFixture.meet("Kofi")
         val photo = if (withPhoto) {
             val file = java.io.File(context.cacheDir, "screen-photo.jpg")
             file.outputStream().use { scenePhoto().compress(Bitmap.CompressFormat.JPEG, 90, it) }
@@ -338,7 +437,7 @@ object ScreenStates {
     fun pictureBubbles(): Activity {
         TestCore.install()
         seedChats()
-        val chat = TestCore.onMain { TestCore.core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
+        val (bea, chat) = PersonFixture.meet("Kofi", accept = false)
         val whole = PictureMaker.prepare(scenePhoto(), PictureSize.MEDIUM, grey = false)
         val coming = PictureMaker.prepare(scenePhoto(Color.rgb(240, 160, 90), Color.rgb(90, 140, 60)), PictureSize.MEDIUM, grey = false)
         val mine = PictureMaker.prepare(scenePhoto(Color.rgb(150, 150, 200)), PictureSize.MEDIUM, grey = false)
@@ -346,21 +445,23 @@ object ScreenStates {
             val radio = TestCore.radio
             val core = TestCore.core
             core.settings.tipsShown = org.phonemesh.core.Tip.entries.map { it.key }.toSet()
-            org.phonemesh.core.PictureWire.split(41, org.phonemesh.core.PictureCodec.WEBP, whole.width, whole.height, whole.bytes, whole.sketch)
-                .forEach { radio.receiveData("!0000aaaa", org.phonemesh.ble.MeshRadio.PICTURE_PORT, org.phonemesh.core.PictureWire.encode(it)) }
-            org.phonemesh.core.PictureWire.split(42, org.phonemesh.core.PictureCodec.WEBP, coming.width, coming.height, coming.bytes, coming.sketch)
-                .take(2).forEach { radio.receiveData("!0000aaaa", org.phonemesh.ble.MeshRadio.PICTURE_PORT, org.phonemesh.core.PictureWire.encode(it)) }
+            // Kofi's pictures arrive as a real person's would: sealed by his phone, a whole one and one still arriving.
+            fun sealed(id: Int, p: PreparedPicture) = bea.postman.sendPicture(bea.awa, null,
+                org.phonemesh.core.PictureWire.splitV2(id, org.phonemesh.core.PictureCodec.WEBP, p.width, p.height, p.bytes, p.sketch), 1_000)
+                .map { checkNotNull(it).packet }
+            sealed(41, whole).forEach { PersonFixture.deliverNow(it) }
+            sealed(42, coming).take(2).forEach { PersonFixture.deliverNow(it) }
             radio.connected(false)
             core.sendPicture(chat, mine)
             core.setDraft(chat, "Je t'envoie la mienne.")
             core.send(chat)
-            radio.receive("!0000aaaa", "[pm1:fr] Bravo, elle est belle !", true, org.phonemesh.ble.TextMark(packetId = 900))
-            val news = core.history.messages(chat).first { it.packetId == 900L }
+            PersonFixture.deliverNow(PersonFixture.send(bea, org.phonemesh.core.wire.Body.Text("fr", "Bravo, elle est belle !"), 2_000))
+            val news = core.history.messages(chat).first { it.text == "Bravo, elle est belle !" }
             core.react(news.id, "👍")
         }
         val screen = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chat))
         expect(tagsOf(screen, "picture:").size >= 2, "picture bubbles")
-        expect(tagsOf(screen, "reaction_waiting:").isNotEmpty(), "a reaction waiting for a radio")
+        expect(tagsOf(screen, "status:").isNotEmpty(), "messages and a picture waiting for a radio")
         return screen
     }
 
@@ -699,6 +800,8 @@ object ScreenStates {
         "02-chats-step1-offline" to { chatsStepOneOffline() },
         "02-chats-friend-guide" to { chatsFriendGuide() },
         "02-chats-step-name" to { chatsStepName() },
+        "02-chats-step-add" to { chatsStepAdd() },
+        "02-chats-add-upgrade" to { chatsStepAdd(finished = true) },
         "02-chats-step2" to { chatsStep(2) },
         "02-chats-step3" to { chatsStep(3) },
         "02-chats-radio-lost" to { chatsRadioLost() },
@@ -727,8 +830,19 @@ object ScreenStates {
         "09-settings" to { settings() },
         "09-name" to { nameScreen(filled = false) },
         "09-name-filled" to { nameScreen(filled = true) },
+        "09-add-someone" to { addSomeone(request = false) },
+        "09-add-request" to { addSomeone(request = true) },
+        "09-safety" to { safety() },
+        "09-safety-mismatch" to { safety(mismatch = true) },
+        "09-contact" to { contactDetails() },
+        "09-contact-missing" to { contactDetails(missing = true) },
+        "09-person-chat" to { contactDetails(conversation = true) },
+        "09-hub-none" to { hub(saved = false) },
+        "09-hub-searching" to { hub() },
+        "09-hub-roaming" to { hub(roaming = true) },
         "10-help" to { help() },
         "10-help-more" to { help(group = 2) },
+        "10-help-accounts" to { help(group = 5) },
         "11-note-picture" to { noteWithPicture() },
     )
 

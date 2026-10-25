@@ -89,4 +89,4 @@ On Android < 14, receive callbacks are disabled because dynamic receivers cannot
 
 The vendored AIDL/Parcelable compatibility surface is adapted from Meshtastic Android GPL-3.0 source. Keep this module's Meshtastic-derived files and provenance together if redistributed.
 
-Full research notes: `.local/android-mesh-research.md`.
+Full research notes: `private-operator-record:android-mesh-research.md`.

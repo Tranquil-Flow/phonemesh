@@ -102,4 +102,4 @@ the output WAV requested by the user.
 
 No commit, push, PR, staging, radio transmission, microphone capture or model training
 is part of this skeleton build. Proposed AGPL-3.0 needs confirmation before public release.
-The design belongs in eventual version control; `.local/plan.md` stays local.
+The design belongs in eventual version control; `private-operator-record:plan.md` stays local.

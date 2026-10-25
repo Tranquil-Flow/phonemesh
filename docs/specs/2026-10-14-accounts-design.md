@@ -29,8 +29,9 @@ From handover 3 and the owner on 2026-10-14:
 12. No account recovery in the first build; recovery is required in a later build (owner, 2026-10-14).
 13. The hub keeps mail for 30 days by default; the hub's admin can change it (owner, 2026-10-14).
 14. "Delivered to their phone" receipts are on, batched as described (owner, 2026-10-14).
-15. Links use GitHub Pages (`tranquil-flow.github.io/phonemesh`) for testing; a domain is bought before release, once
-    the project name is settled (owner, 2026-10-14). Moving then breaks test links only.
+15. Links use GitHub Pages (`tranquil-flow.github.io/phonemesh`). The owner approved retaining this address for
+    v0.1 on 2026-10-23, superseding the earlier requirement to buy a domain before release. A later move must address
+    compatibility with existing invitations; website publication remains owner-only.
 16. The router hub's language is chosen after the field test, with the hardware; the Mac prototype is Kotlin
     (owner, 2026-10-14).
 17. People pick their own display name: said and written by the app, or typed, and changeable later. Full account
@@ -48,6 +49,23 @@ From handover 3 and the owner on 2026-10-14:
     for them work without reading (owner, 2026-10-19).
 23. The safety picture screen also has a red ✕ "Pas les mêmes" (Not the same): it warns that this may not be the
     person and keeps the contact "Pas rencontré" (owner, 2026-10-19).
+24. A hub must not strand a message at "Reached the hub" because its one radio airing was missed or the receipt was
+    lost (owner, 2026-10-25, before v0.1). The sender's normal retries (2, 10, 30, then every 30 minutes, up to three
+    days) go to the same pinned hub as the exact stored bytes; the hub airs them again only on that request, at most
+    once a minute per packet, and never past three days from first storage. Only the recipient's receipt is Delivered.
+25. TalkBack spoken control is deferred to after v0.1 and listed as a known limitation (owner, 2026-10-25): with
+    TalkBack on, recording captured TalkBack's own speech and the send status was not announced.
+26. Hub Wi-Fi must be WPA2-Personal (or open) for v0.1; documented, no code change (owner, 2026-10-25). Android 10
+    phones cannot join a WPA2/WPA3 mixed-mode network through the app's Wi-Fi request.
+27. The "village hub" is renamed **local hub** (French *Relais local*), because hubs will not only serve villages
+    (owner, 2026-10-25). The documentation uses the new name from v0.1.0; the app's two strings per language
+    (`hub_title`, `roaming_notification`) change in the next version, so the v0.1.0 app still shows "Village hub" /
+    "Relais du village" and the docs say so where they name that screen.
+28. Private group chats (a group of chosen contacts, encrypted for its members only) are not in v0.1.0 and are
+    planned for the next version (owner, 2026-10-25). v0.1.0 has one shared chat per radio channel and private
+    one-to-one chats. Group keys and membership need their own design before building.
+29. Reactions offer the phone's own emoji keyboard in the next version, not only the six fixed pictures
+    (owner, 2026-10-25). A reaction stays one emoji within the 32-byte reaction limit.
 
 ## What an outsider can and cannot learn
 
@@ -293,7 +311,7 @@ Every account packet goes to the broadcast address on the shared chat's channel,
   hub acknowledgement and the receipts above.
 - **The channel key wraps it again.** Outsiders on the public key cannot even see the port.
 - **Relays must keep rebroadcast mode ALL** (the default). Nodes set to "core ports only" drop our ports, and nodes
-  set to "local only" or "known only" drop channels they cannot read (`.local/accounts-t1.md`, F3). The setup script
+  set to "local only" or "known only" drop channels they cannot read (`private-operator-record:accounts-t1.md`, F3). The setup script
   and the hub check the village radios' mode.
 
 ### Stage 1: stock radio over Bluetooth
@@ -306,7 +324,7 @@ Every account packet goes to the broadcast address on the shared chat's channel,
 - **Use:** this works for "we are both here now", and as the fallback when no hub is in reach.
 - **Firmware question.** The current app ignores broadcasts on private ports.
   - **Desk check (2026-10-14, firmware 2.7.26):** stock firmware does pass private-port broadcasts to the connected
-    phone (`.local/accounts-t1.md`, finding F1).
+    phone (`private-operator-record:accounts-t1.md`, finding F1).
   - **Hardware T1 (2026-10-14, both phones, both radios):** confirmed. 15 of 15 full-size broadcasts on port 301
     arrived intact in both directions; a radio with no phone kept packets and handed them over on reconnect at about
     5 a second.
@@ -414,6 +432,8 @@ Each step is gated as now: the full suite, screenshots, and the verification not
 - Signed names in the shared chat
 - Several accounts on one phone
 - Planned messages sent by the hub (scheduled version c)
+- Private group chats (next version; decision 28)
+- Any emoji as a reaction, from the phone's emoji keyboard (next version; decision 29)
 - One-time prekeys held by the hub
 
 ## Open questions for the owner
@@ -423,7 +443,7 @@ the domain.
 
 ## Changes after the crypto review (step 7)
 
-An independent review (`.local/accounts-crypto-review.md`, 2026-10-14) found 4 high, 8 medium, 10 low and 4 info
+An independent review (`private-operator-record:accounts-crypto-review.md`, 2026-10-14) found 4 high, 8 medium, 10 low and 4 info
 issues. Fixed in the core, each with a test that runs the attack:
 
 | Finding | Fix |
@@ -453,7 +473,8 @@ Rules for the screens and outbox (steps 9 and later):
 - **F13:** two sessions for one contact: keep the newer QR session; between link sessions, keep the one whose opener
   has the smaller account id.
 - **F16:** held packets are not authenticated: at most 10 per contact, dropped after a day.
-- **F17:** a hub ack only stops resending to the hub; it never shows "Reçu".
+- **F17:** a hub ack never shows "Reçu". Superseded in part by decision 24 (2026-10-25): it no longer stops the
+  sender's scheduled resends to the same hub, because the hub airs each packet once.
 - **F19:** receipts wait 15-60 s at random, and ride on a reply when there is one.
 - **F25:** the phone-to-hub link uses TLS pinned to the hub key from the hub QR (before step 15).
 - **F4, decided (owner, 2026-10-14):** six icons out of 64 over a slow hash, replacing four out of 16. The screens
@@ -472,6 +493,12 @@ Rules for the screens and outbox (steps 9 and later):
 - **Radio:** phones' packets go in turn, one sender after another, within the duty cycle, with half a second after
   each; the hub acknowledges what it hears on port 302, 25 codes at once or after 30 s. Hellos and shared-chat posts
   are kept but not acknowledged (they carry no code).
+- **Retries (decision 24):** a phone resubmitting port-301 bytes the mailbox already holds asks for one more airing.
+  The hub answers "already" (custody unchanged), keeps one durable intent per packet, forwards it at most once a
+  minute per packet across all phones and restarts (digest and time only, no sender address), and never later than
+  three days after the packet was first stored. The mailbox row, its time and retention never change. Nothing is
+  re-aired without a request; shared-chat posts keep single forwarding. The outbox journal is version 2 and still
+  reads version 1, whose already-forwarded mail gets one requested retry.
 
 ## Safety picture icons (owner approved 2026-10-18; drop and onion replaced the same day)
 
@@ -562,3 +589,66 @@ pork and alcohol, religious symbols, French homophones (ancre/encre), and a cres
 - **Moved to step 11, where the QR code exists:** "Montrer mon code" in Settings and the guide's "add someone" step.
 - **Picture:** the name step reuses the hello picture (hold the microphone and speak); its own picture goes to the
   how-to review (gate G4).
+
+## Adding someone as built (step 11)
+
+- **One screen, "Ajouter quelqu'un"** (Settings → "Montrer mon code"): this phone's QR code, then "Scanner un code"
+  and "Envoyer mon lien" (Android's share list). Requests from people who opened this phone's link show on top with
+  ✓ Accepter and ✕ Ignorer.
+- **Codes are links.** A QR code holds `https://tranquil-flow.github.io/phonemesh/add#` + the card and the one-time
+  key (`AddCode`), so a phone's own camera app also opens Phonemesh. A shown code keeps its one-time key for 10
+  minutes; scanning a code before showing your own says "show your code first", since a mutual start needs both.
+- **Scanning** (`ScanActivity`): Camera2 frames to ZXing; the camera permission is asked on the tap, with its own
+  sentence when refused (send your link instead). A mutual scan adds the person as met in person and sends nothing
+  over the air.
+- **Links** (`LinkActivity`): an App Link for `/phonemesh/add` (`autoVerify`), or the link page's button handing the
+  part after `#` as the extra `card`. Opening one adds the person (not met), sends one hello, and opens the safety
+  picture. A link that cannot be read adds nobody and says so.
+- **Hellos** arrive on port 301 as requests, once: a replay or a hello from someone already added is dropped. Requests
+  live in memory until answered or the app closes (the opener's phone repeats nothing yet; step 13's outbox does).
+- **Safety picture** (`SafetyActivity`): six icons computed off the main thread, ✓ "Ce sont les mêmes" (met) and
+  ✕ "Pas les mêmes" (a warning; stays or becomes not met). No button reads the names aloud (decision 21).
+- **Person chats are listed** with their saved name and colour; link contacts show "Not met yet". After a successful
+  scan, a note names the person: a mutual QR scan returns to Chats, while a scanned link opens the safety picture.
+  A person chat can never send through the old radio-address path. Contact details remain step 12 work.
+- **The guide's "add someone" step** waits for step 12, where the contacts list it points to exists.
+- **Tests:** `AccountsFlowTest` (two phones: QR both ways, link → hello → request once → accept, ignore, refused
+  scans, met/not met, a hello the radio cannot take), `AddSomeoneScreensTest` (code shown, the drawn QR read back by
+  the scanner's decoder, request → accept → safety picture, the two buttons, an App Link, a damaged link, Settings),
+  `AddCodeTest` in `core`, and screen checks for the new screens. The camera itself, and refusing its permission, are checked by hand on the phones.
+
+## No-internet Wi-Fi probe, T2 (2026-10-19)
+
+- **Verified direction:** Pixel (Android 16/API 36) joined the Fairphone (Android 10/API 29) hotspot; the Fairphone
+  served the local ping. This is not evidence that the Fairphone's app can join a hub as a client.
+- The Pixel log records a successful join in 3,079 ms, a local ping in 95 ms, and HTTP 204 over the still-default
+  cellular internet connection. A second join took 26,037 ms, with a 43 ms local ping and cellular internet intact.
+  Do not promise every join takes three seconds. Receipts: `private-receipt:t2/t2-<pixel-serial>.log` and
+  `t2-<fairphone-serial>.log`.
+- The phone-test handover reports one Connect tap, a local-only second interface (`wlan1`, absent from Settings),
+  and background requests refused; foreground joins are the supported path. It also reports that Data Saver made
+  the Fairphone hotspot switch unavailable. These UI/system observations were not re-exercised during resumption.
+
+## Person messaging as built so far (steps 12–13)
+
+- `Postman` seals private text, replies and reactions; `AppMailStore` persists session/outbox updates in History v9.
+  References use the code hash, stored above the radio packet-id range. Broadcast ports 301–303 reach the app.
+- Incoming content, peer acknowledgement effects, session advancement and exact authenticated-packet replay records
+  commit together. Outgoing held bodies are consumed with their replacement ciphertext and reply reference.
+- Receipt deadlines survive restart, use randomized 15–60-second quiet periods, and are discharged only into a
+  durable outgoing packet. Unsent receipts retain their exact bytes; receipt duplicates never request receipts.
+  Replay records are bounded at 2,000, retained through the automatic retry horizon, and new receives fail closed
+  when unexpired capacity is exhausted. Old v7 receipts are conservatively reoffered once during migration.
+- Stored session format v2 retains skipped-key acknowledgement metadata, including old-chain identity. It still
+  reads v1. A v1 skipped key with no provable current-chain metadata cannot be acknowledged safely and is refused;
+  migration cannot recreate metadata the previous version never retained.
+- Receipts update message status and notify delivery observers. Durable queued messages retain WAITING on restart.
+  Manual person-message retry uses stored ciphertext, not resealing; person plans promote atomically into their
+  message plus outbox/held work before transmission. Actual Bluetooth acceptance and shared pacing remain unqualified.
+- Explicit fresh mutual-QR scans atomically replace a session. A persisted start digest makes repeated scans of
+  the same showing idempotent. Old retry packets are marked superseded, held/receipt work is retired, and pending
+  bubbles remain as failed rather than being silently sent into the new session. An explicit manual retry can
+  reseal a superseded bubble under the new keys. Ordinary state advancement names its exact predecessor, so a
+  stale prepared state from the previous session cannot win merely by carrying a higher serial.
+- **Not complete:** pictures over v2, persisted incoming requests, reliable hello retries, the distinct Reached hub
+  display, and complete Bluetooth write pacing. Old DIRECT chats remain sendable until pictures move to v2.

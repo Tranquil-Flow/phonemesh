@@ -169,7 +169,7 @@ Each pack's `NOTICE.txt` and the app's about information list Whisper (MIT), the
 
 - `uv run ruff check src tests scripts android/scripts` and `ruff format --check` on the same paths; `uv run pytest`.
 - From `android/`: `:core:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleDebugAndroidTest`.
-- Emulator instrumentation (`Phonemesh_API_35`) via `.local/run_android_instrumentation.py`, judged by the instrumentation result, never by the adb exit code. After R8 is enabled, instrumentation runs against the `minifiedDebug` build.
+- Emulator instrumentation (`Phonemesh_API_35`) via `private-operator-record:run_android_instrumentation.py`, judged by the instrumentation result, never by the adb exit code. After R8 is enabled, instrumentation runs against the `minifiedDebug` build.
 
 ### New tests
 

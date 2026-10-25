@@ -16,7 +16,7 @@ describes that earlier milestone only.
 - `uv run --no-sync ruff format --check src tests`: all source/test files formatted.
 - `uv lock --check`: resolved lock accepted.
 - `uv build`: source distribution and wheel produced.
-- Wheel installed without dependencies into a separate `.local/wheel-venv`; its CLI
+- Wheel installed without dependencies into a separate `private-operator-record:wheel-venv`; its CLI
   round-tripped French and Mandarin text through the in-memory simulator.
 - Source archive inspected: no `.local`, `.venv`, model files, recordings or WAVs included.
 - Meshtastic 2.7.11's real `sendText → sendData → _sendPacket → ToRadio` path exercised,
@@ -27,7 +27,7 @@ describes that earlier milestone only.
   CPU inference and pre-existing local model/voice assets; no downloads/playback.
   Initial measured RMS was approximately **−21.72 dBFS**. The peak-limited normalizer
   deliberately allows a high-crest-factor clip to remain below the nominal RMS target.
-  No listening-quality score is implied. Local artifact: `.local/kokoro-en-smoke.wav`.
+  No listening-quality score is implied. Local artifact: `private-operator-record:kokoro-en-smoke.wav`.
 
 Test-first history: the initial core contract suite produced 44 intended
 NotImplemented failures before implementation; the initial speech contract suite

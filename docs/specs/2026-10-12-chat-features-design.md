@@ -82,11 +82,11 @@ The three preset choices above are replaced: the owner does not want preset time
 - **The planned row:** "Envoi à 18:15", "Envoi demain à 08:00", or for a later day "Envoi le jeudi 15 octobre à 08:00".
 - **New icons:** calendar, sun, moon.
 - **`PlanTimes`:** gives way to rules for the window's default time, the − floor, the past check and the one-year limit. These stay JVM-tested across midnight, month ends and the clock change.
-- **Reference:** `.local/visual-guide-mockups/phonemesh-howto-chat-r10.html`, section A, a working mockup.
+- **Reference:** `private-operator-record:visual-guide-mockups/phonemesh-howto-chat-r10.html`, section A, a working mockup.
 
 ## How-to pictures (owner approved 2026-10-12; to build)
 
-Eight talking pictures, approved in round 10: `.local/visual-guide-mockups/phonemesh-howto-chat-r10.html`.
+Eight talking pictures, approved in round 10: `private-operator-record:visual-guide-mockups/phonemesh-howto-chat-r10.html`.
 
 - **Conventions:** the same kit as the visual guide (`HowToKit`, the finger, the wax band, 220 × 110 units). Every picture must match the real screens exactly: the app's own icons, its menus and their words.
 - **Port as before:** timings into `HowToScenes`, drawings into `HowToDrawings`, sentences into `HowTo` and the strings, then screenshots for review.
@@ -119,3 +119,5 @@ These were weighed against the radio's capacity and the privacy goal. They stay 
 - **Edit, and delete for everyone:** neither can be guaranteed over the radio, and both cost radio time.
 - **Location sharing:** needs a new permission and raises privacy questions.
 - **Delete messages after a while (disappearing messages):** offered, not chosen this time.
+- **More reactions:** the six fixed pictures become a choice from the phone's own emoji keyboard in the next version
+  (owner, 2026-10-25; accounts spec decision 29).

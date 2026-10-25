@@ -1,6 +1,32 @@
 # Dependency intake
 
-## Exact pins
+## Android release components
+
+The application is AGPL-3.0; dependency licences and notices remain applicable.
+Checked-in texts are in [licenses/](licenses/) with source URLs and integrity hashes in
+[provenance.json](licenses/provenance.json). These records are not an independent
+rebuild of the distributed native binaries or a completed legal/source audit.
+
+| Component | Pin / source | Licence and distribution boundary |
+|---|---|---|
+| sherpa-onnx | [v1.13.8](https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8) | Apache-2.0; Android AAR acquired by `android/scripts/fetch-runtime.py`, which verifies its pinned size and SHA-256. |
+| eSpeak NG for Piper | [fork revision ed530aa113046142eb5115cf2fc9157854d0ffe1](https://github.com/csukuangfj/espeak-ng/tree/ed530aa113046142eb5115cf2fc9157854d0ffe1) | GPL-3.0-family component; retain `licenses/espeak-piper-COPYING` and corresponding source/build information. |
+| piper-phonemize | [fork revision f3ff95afc03640bc1399e113e83361192a2fafb4](https://github.com/csukuangfj/piper-phonemize/tree/f3ff95afc03640bc1399e113e83361192a2fafb4) | MIT; retain `licenses/piper-phonemize-LICENSE.md`. Its bundled uni-algo includes the Unlicense/public-domain dedication and alternative MIT text in `licenses/uni-algo-LICENSE.md`. |
+| ONNX Runtime Android | [1.28.2](https://github.com/microsoft/onnxruntime/tree/v1.28.2) | MIT; retain `licenses/onnx-LICENSE` and `licenses/onnx-ThirdPartyNotices.txt`. |
+| Meshtastic definitions | Vendored in `android/mesh-protocol` | GPL-3.0 text retained; exact vendored revision remains a provenance gate. See [Meshtastic provenance](third-party-meshtastic.md). |
+| protobuf-javalite / protoc | 3.25.5 | BSD-style protobuf licence; runtime packaged, compiler is a build tool. |
+
+The native revision pins above come from sherpa-onnx v1.13.8's upstream
+[eSpeak recipe](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/cmake/espeak-ng-for-piper.cmake),
+[Piper recipe](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/cmake/piper-phonemize.cmake), and
+[Android ONNX recipe](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/cmake/onnxruntime-android-aarch64.cmake).
+They establish recipe provenance, **not independent verification of the embedded AAR's
+source revision or a reproducible binary rebuild**. The separate upstream eSpeak 1.52.0
+COPYING reference in the licence directory must not be mistaken for the fork's revision.
+Complete the corresponding-source/notices review before public distribution; URLs and
+licence copies alone do not close that gate.
+
+## Legacy Python CLI pins
 
 `pyproject.toml` pins Meshtastic **2.7.11**, faster-whisper **1.2.1**, Kokoro **0.9.4**,
 and Misaki **0.9.4**. `uv.lock` contains exact resolutions and package integrity hashes.
@@ -30,29 +56,28 @@ Sources:
 
 The source-backed language registry does not establish equal intelligibility or installed
 asset coverage. Test doubles exercise speech adapter call shape and WAV handling only.
-The real Kokoro smoke reuses an existing, unmodified local Kokoro-82M snapshot
-`f3ff3571791e39611d31c381e3a41a3af07b4987` and `af_heart.pt`, using the existing
-language-tutor Python environment with Kokoro/Misaki 0.9.4. Only Phonemesh source runs;
-no sibling source/config changes, no model downloads and no audio playback.
+A historical local Kokoro smoke used Kokoro-82M snapshot
+`f3ff3571791e39611d31c381e3a41a3af07b4987` and `af_heart.pt` with Kokoro/Misaki 0.9.4.
+That observation does not qualify Android speech packs or all advertised CLI voices.
 
 The SDK spike captures real ToRadio protobufs instead of writing to a serial device.
 It is not proof of device handshake, RF delivery, peer ACK or stock-client display.
-See `tests/test_radio.py` for the rerunnable spike. Android service integration and
-mobile inference are deferred rather than presumed compatible.
+See `tests/test_radio.py` for the rerunnable CLI spike. Android uses its own direct
+BLE/protobuf transport and sherpa-onnx inference; this CLI spike does not qualify them.
 
 ## Licences
 
 Original Whisper/faster-whisper code is MIT; Kokoro weights/code are Apache-2.0.
 Meshtastic's SDK and eSpeak bring GPL-family components. Voice/model/dictionary assets
-can carry additional attribution or distribution requirements. Confirm the proposed
-AGPL-3.0 project licence and audit the exact redistributed assets before release.
+can carry additional attribution or distribution requirements. Audit the exact
+redistributed assets and their corresponding-source obligations before release.
 No XTTS or non-commercial-only model dependency is included in v1.
 
 ## Code ported into the Android app
 
 | Code | Where | Licence | Notes |
 |---|---|---|---|
-| ThumbHash (Evan Wallace, <https://github.com/evanw/thumbhash>) | `android/core/src/main/kotlin/org/phonemesh/core/ThumbHash.kt` | MIT | Line-for-line Kotlin port; the MIT notice is kept in the file. The reference Java is test-only (`android/core/src/test/java`) and checks bytes and pixels against the port. |
+| ThumbHash (<https://github.com/evanw/thumbhash>) | `android/core/src/main/kotlin/org/phonemesh/core/ThumbHash.kt` | MIT | Line-for-line Kotlin port; the MIT notice is kept in the file. The reference Java is test-only (`android/core/src/test/java`) and checks bytes and pixels against the port. |
 | ONNX Runtime C API headers 1.28.2 (Microsoft) | `android/app/src/main/cpp/include/` | MIT | Headers only, unchanged. The picture upscaling bridge (`upscale_jni.c`, about 7 KB per ABI) uses the `libonnxruntime.so` that sherpa-onnx already ships, found at run time; nothing new is linked. |
 | ncnn 20260526, Android Vulkan shared build (Tencent, <https://github.com/Tencent/ncnn>) | `android/app/src/main/cpp/ncnn/<abi>/` (`libncnn.so` and headers, unchanged from the release zip; each file's CRC checked on download) | BSD-3-Clause | Runs the upscaling models on the graphics chip through Vulkan (`upscale_gpu.cpp`, bridge `libphonemesh_gpu.so`). `libncnn.so` is 10.0 MB (arm64) / 6.5 MB (armeabi-v7a), about 4.0 / 2.8 MB compressed in the APK. Needs only system libraries; Vulkan is loaded at run time. |
 
@@ -61,9 +86,9 @@ WebP encoder).
 
 ## Picture upscaling models (not in the app)
 
-Test phones get these files copied into the app's own folder (`Android/data/org.phonemesh.app/files/upscalers/`); the
-app works without them and shows the AI views as unavailable. Exported to ONNX by `.local/upscalers/export.py`
-(the export matches PyTorch to within 3e-6).
+**Optional upscaling weights are not distributed with v0.1.** The app works without
+them and shows the AI views as unavailable. The following research inventory is not
+a download offer, redistribution clearance or a release qualification claim.
 
 | Model | File | Size | Licence | Source |
 |---|---|---|---|---|
@@ -87,3 +112,9 @@ No libraries beyond the app's own modules (`core`, `mesh-protocol` with protobuf
 through macOS `stty` and the device file, HTTPS through the JDK's `HttpsServer`, and the hub's TLS key is made once
 with the JDK's `keytool`. jSerialComm (LGPL-3.0 / Apache-2.0) stays the fallback if `stty` proves unreliable on the
 radio.
+
+## Android libraries from Maven
+
+| Library | Where | Licence | Notes |
+|---|---|---|---|
+| ZXing `core` 3.5.4 (`com.google.zxing:core`, <https://github.com/zxing/zxing>) | `android/app` only | Apache-2.0 | Accounts step 11: draws the add-me QR code (`AddSomeoneActivity.qr`) and reads camera frames (`ScanActivity.decode`). Pure Java, no AndroidX; the camera is Android's own Camera2. The one new library the accounts plan allows; `core` stays dependency-free. |

@@ -1,7 +1,7 @@
 # Picture messages over the radio (test branch)
 
 Branch `feat/image-messages`, kept apart from the voice-only line so it can be dropped, kept separate, or merged.
-Research behind every number: `.local/research_notes/lora-image-transfer/` in the main checkout (firmware v2.7.26.54e0d8d).
+Research behind every number: `private-operator-record:research_notes/lora-image-transfer/` in the main checkout (firmware v2.7.26.54e0d8d).
 
 ## Owner decisions (2026-10-12)
 
@@ -37,7 +37,7 @@ Research behind every number: `.local/research_notes/lora-image-transfer/` in th
 - **Methods on the phone for now:** WebP at three sizes (64 / 96 / 128 px) and colour or grey, plus "sketch only"
   (the 21-byte blurred colour sketch, ThumbHash). All use what Android already has, so there are no new libraries.
 - **Methods compared on the laptop first:** WebP, AVIF, header-less JPEG and CompressAI (learned) on the owner's own
-  photos, using `.local/image-lab/`. A method moves to the phone only after it wins there; CompressAI on the phone needs a
+  photos, using `private-operator-record:image-lab/`. A method moves to the phone only after it wins there; CompressAI on the phone needs a
   new runtime dependency and an approved pack, which is a separate decision.
 - **Not in this branch:** pictures in the shared chat, AI upscaling (a later, opt-in "enhanced" view), and captions.
 

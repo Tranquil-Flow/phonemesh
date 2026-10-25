@@ -16,6 +16,10 @@ interface Radio {
     fun broadcast(port: Int, payload: ByteArray)
 }
 
+/** Only throw this when no byte of this packet was offered to the serial writer.
+ * Ordinary I/O exceptions are ambiguous and must NOT be retried automatically in the same process. */
+class RadioNotSubmittedException(message: String) : java.io.IOException(message)
+
 /** What the radio tells the hub. */
 interface RadioListener {
     fun onData(port: Int, payload: ByteArray, signal: String)
@@ -50,6 +54,7 @@ class SerialRadio(private val input: InputStream, private val output: OutputStre
     fun stop() { running = false }
 
     override fun broadcast(port: Int, payload: ByteArray) {
+        if (!running) throw RadioNotSubmittedException("radio stopped before submission")
         write(MeshtasticProtocol.buildBroadcastDataToRadio(port, payload, channel = 0))
     }
 

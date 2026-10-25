@@ -3,6 +3,7 @@ package org.phonemesh.hub
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import org.phonemesh.core.hub.HubCard
 import java.util.Locale
 import kotlin.concurrent.thread
 
@@ -12,6 +13,7 @@ fun main(args: Array<String>) {
     val clock = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
     val log: (String) -> Unit = { println("${clock.format(Date())} $it") }
     val mailbox = Mailbox(File(config.dir, "mail"), config.days)
+    val outbox = Outbox(File(config.dir, "outbox.bin"))
     val tls = Tls(File(config.dir, "keys"))
     require(config.serial.isNotEmpty()) { "set serial = /dev/cu.<the radio> in the config" }
     val (input, output) = SerialRadio.openTty(config.serial)
@@ -22,7 +24,7 @@ fun main(args: Array<String>) {
         override fun onReady(nodeNum: Long) = log("radio ready: !%08x".format(nodeNum))
         override fun onLog(line: String) = hub.onLog(line)
     })
-    hub = Hub(mailbox, radio, duty = DutyCycle(config.duty), log = log)
+    hub = Hub(mailbox, radio, duty = DutyCycle(config.duty), log = log, outbox = outbox)
     radio.start()
     val server = HubServer(hub, mailbox, config.name, tls, config.port)
     server.start()
@@ -39,11 +41,4 @@ fun main(args: Array<String>) {
     }
 }
 
-/**
- * What the hub QR will carry (step 16 draws it): the Wi-Fi to join, the hub's port on it (the address is the Wi-Fi's
- * gateway) and the TLS pin.
- */
-data class HubCard(val wifi: String, val password: String, val port: Int, val pin: String) {
-    fun encode(): String = "phonemesh-hub:1;wifi=${esc(wifi)};pass=${esc(password)};port=$port;pin=$pin"
-    private fun esc(s: String) = s.replace("\\", "\\\\").replace(";", "\\;")
-}
+// The hub QR text is HubCard in core (org.phonemesh.core.hub), so the phone parses exactly what the hub prints.

@@ -24,7 +24,7 @@ class Airtime(private val sf: Int = 11, private val bandwidthHz: Int = 250_000, 
 }
 
 /** Radio time used in the last hour, against [percent] of it (EU 868: 10 %). */
-class DutyCycle(percent: Int, private val windowMillis: Long = 3_600_000) {
+class DutyCycle(percent: Int, val windowMillis: Long = 3_600_000) {
     private val budget = windowMillis * percent / 100.0
     private val sent = ArrayDeque<Pair<Long, Double>>()
 

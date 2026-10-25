@@ -3,12 +3,12 @@ package org.phonemesh.hub
 import org.phonemesh.core.crypto.Bytes
 import org.phonemesh.core.session.Start
 import org.phonemesh.core.wire.SharedChatWire
+import org.phonemesh.core.wire.SharedPost
 import org.phonemesh.core.wire.WireV2
-import java.io.DataInputStream
-import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.File
-import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.io.IOException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -26,9 +26,13 @@ class Mailbox(private val dir: File, private val days: Int) {
     }
 
     private val records = ArrayList<Record>()
-    private val seen = HashSet<String>()
+    /** Stored packet digest -> its first stored time (retention and the retry horizon count from it). */
+    private val seen = HashMap<String, Long>()
     private val lock = Object()
     private var nextSeq = 1L
+    private var appendBroken = false
+    /** Real-file failure injection; production leaves this unset. No packet data enters diagnostics. */
+    internal var appendCheckpoint: (String) -> Unit = {}
 
     init {
         require(days >= 1) { "keep mail at least a day" }
@@ -42,7 +46,7 @@ class Mailbox(private val dir: File, private val days: Int) {
         bytes.isEmpty() || bytes.size > WireV2.MAX_PACKET -> null
         port == WireV2.PORT && Start.isHello(bytes) -> Kind.HELLO to null
         port == WireV2.PORT -> WireV2.parse(bytes)?.let { Kind.CODE to hex(it.header.code) }
-        port == SharedChatWire.PORT -> if (SharedChatWire.decode(bytes) != null) Kind.SHARED to null else null
+        port == SharedChatWire.PORT -> if (SharedPost.read(bytes) != null) Kind.SHARED to null else null
         else -> null
     }
 
@@ -50,13 +54,32 @@ class Mailbox(private val dir: File, private val days: Int) {
     fun put(port: Int, bytes: ByteArray, now: Long): Record? {
         val (kind, code) = classify(port, bytes) ?: return null
         synchronized(lock) {
-            if (!seen.add(key(port, bytes))) return null
-            val record = Record(nextSeq++, now, port, bytes, kind, code)
-            records += record
+            checkAppendHealthy()
+            val digest = key(port, bytes)
+            if (digest in seen) return null
+            val record = Record(nextSeq, now, port, bytes, kind, code)
             append(record)
+            seen[digest] = record.at
+            records += record
+            nextSeq++
             lock.notifyAll()
             return record
         }
+    }
+
+    fun contains(port: Int, bytes: ByteArray): Boolean = synchronized(lock) {
+        checkAppendHealthy()
+        key(port, bytes) in seen
+    }
+
+    /** When exactly these bytes were first stored, or null. A duplicate never refreshes this time. */
+    fun storedAt(port: Int, bytes: ByteArray): Long? = synchronized(lock) {
+        checkAppendHealthy()
+        seen[key(port, bytes)]
+    }
+
+    private fun checkAppendHealthy() {
+        if (appendBroken) throw IOException("mailbox rollback failed; restart required")
     }
 
     /** Mail after [since] (a seq) for [codes], hellos and shared-chat posts if asked; at most [limit], oldest first. */
@@ -106,21 +129,47 @@ class Mailbox(private val dir: File, private val days: Int) {
     }
 
     private fun append(r: Record) {
-        DataOutputStream(FileOutputStream(File(dir, day(r.at) + SUFFIX), true).buffered()).use {
-            it.writeLong(r.seq); it.writeLong(r.at); it.writeShort(r.port); it.writeShort(r.bytes.size); it.write(r.bytes)
+        val file = File(dir, day(r.at) + SUFFIX)
+        // Obtain the old length from the opened file, not from File.length() after an open failure.
+        var before: Long? = null
+        try {
+            RandomAccessFile(file, "rw").use { out ->
+                before = out.length()
+                out.seek(before!!)
+                appendCheckpoint("opened")
+                out.writeLong(r.seq); out.writeLong(r.at); out.writeShort(r.port); out.writeShort(r.bytes.size)
+                appendCheckpoint("header")
+                out.write(r.bytes)
+                appendCheckpoint("body")
+                out.fd.sync()
+                appendCheckpoint("synced")
+            }
+        } catch (failure: Exception) {
+            if (before != null) try {
+                RandomAccessFile(file, "rw").use { it.setLength(before!!); it.fd.sync() }
+            } catch (rollback: Exception) {
+                appendBroken = true
+                failure.addSuppressed(rollback)
+            }
+            throw failure
         }
+        // File sync + close, not directory fsync: process-restart guarantee, not power-loss atomicity.
     }
 
     private fun load(file: File) {
-        DataInputStream(file.inputStream().buffered()).use { input ->
-            while (true) {
+        RandomAccessFile(file, "rw").use { input ->
+            while (input.filePointer < input.length()) {
+                val start = input.filePointer
                 try {
                     val seq = input.readLong(); val at = input.readLong(); val port = input.readUnsignedShort()
                     val bytes = ByteArray(input.readUnsignedShort()).also { input.readFully(it) }
                     val (kind, code) = classify(port, bytes) ?: continue
-                    if (seen.add(key(port, bytes))) records += Record(seq, at, port, bytes, kind, code)
+                    if (seen.putIfAbsent(key(port, bytes), at) == null) records += Record(seq, at, port, bytes, kind, code)
                 } catch (_: EOFException) {
-                    break // a record cut short by a crash: the rest of the file is lost, the file stays usable
+                    // Otherwise a later successful append lands behind the torn record and is unreadable.
+                    input.setLength(start)
+                    input.fd.sync()
+                    break
                 }
             }
         }

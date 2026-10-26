@@ -4,8 +4,9 @@ The local hub was called the *village hub* before v0.1.0, and the v0.1.0 app lab
 screen **Village hub** (*Relais du village*). From v0.1.1 the app says **Local hub** (*Relais local*).
 
 A JVM mailbox/relay with a Meshtastic radio on USB. It runs on macOS, Linux (including a
-Raspberry Pi) and Windows. Phones reach its pinned HTTPS API by local Wi-Fi, or on a Mac also
-through the optional [native Mac BLE bridge](../../hub-ble-bridge/README.md). Linux and
+Raspberry Pi) and Windows. Phones reach its pinned HTTPS API by local Wi-Fi, or over
+Bluetooth through an optional bridge on the same computer: the
+[Mac bridge](../../hub-ble-bridge/README.md) or the [Linux bridge](../../hub-ble-bridge-linux/README.md).
 Windows hubs are Wi-Fi only for now.
 It cannot decrypt private account-message bodies. Shared-channel messages are not
 end-to-end private, and packet metadata remains visible to the hub.
@@ -16,7 +17,7 @@ final-candidate voice/restart recovery remain unqualified. See [project status](
 
 ## Choose the topology first
 
-- **BLE (macOS only):** phone → Mac BLE bridge → `127.0.0.1:<port>` JVM hub → USB radio → mesh.
+- **BLE (macOS, or Linux with the [Linux bridge](../../hub-ble-bridge-linux/README.md), one phone at a time):** phone → BLE bridge → `127.0.0.1:<port>` JVM hub → USB radio → mesh.
   The Mac needs BLE peripheral support and Bluetooth permission. The JVM process alone
   does not advertise Bluetooth; both processes must run on the same Mac.
 - **Wi-Fi:** phone → hub Wi-Fi's **IPv4 default gateway** at the card's port → JVM hub
@@ -115,6 +116,8 @@ HTTPS. Not yet tried with a real radio or real phones on Linux.
   WPA2-Personal network with this computer as gateway (usually `10.42.0.1`). Put the same
   name and password in `hub.conf`.
 - **Firewall:** allow the hub's port on that network, for example `sudo ufw allow 8443/tcp`.
+- **Bluetooth:** the [Linux bridge](../../hub-ble-bridge-linux/README.md) lets phones reach
+  the hub over Bluetooth, one phone at a time. Not yet tried with real hardware.
 - **Keep it running:** run `bin/phonemesh-hub /path/to/hub.conf` as an ordinary user, for
   example from a systemd service (not yet tried), and keep `dir` on storage that survives
   reboots.

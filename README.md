@@ -297,9 +297,10 @@ Planned for later: TalkBack support and quantum-safe keys.
 
 The hub is a Kotlin/JVM program driving a Meshtastic radio on USB. It runs on macOS,
 Linux (including a Raspberry Pi) and Windows with Java 17. Phones reach it through its
-Wi-Fi network, or on a Mac also through a small Bluetooth bridge. Setup, configuration
-and enrolment are in the [hub guide](android/hub/README.md); the Bluetooth bridge is in
-[hub-ble-bridge](hub-ble-bridge/README.md).
+Wi-Fi network, or on a Mac or Linux also through a small Bluetooth bridge. Setup,
+configuration and enrolment are in the [hub guide](android/hub/README.md); the Bluetooth
+bridges are in [hub-ble-bridge](hub-ble-bridge/README.md) (Mac) and
+[hub-ble-bridge-linux](hub-ble-bridge-linux/README.md) (Linux).
 
 ## Build Android from source
 

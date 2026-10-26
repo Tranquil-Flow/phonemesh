@@ -81,6 +81,9 @@ From handover 3 and the owner on 2026-10-14:
     [the airtime meter](2026-10-26-airtime-meter-design.md) (AM) and
     [updates through the local hub](2026-10-26-hub-updates-design.md) (UP). Each owner pick is recorded here as a
     numbered decision from 32 on, naming its batch item (for example "32. GC1: pairwise fan-out").
+32. The local hub runs on Linux and Windows as well as macOS (owner, 2026-10-26). Bluetooth for those hubs comes as a
+    Linux bridge first (BlueZ; one phone at a time, because BlueZ notifies every connected phone), then Windows.
+33. Windows support is tested on a real Windows machine before the hub is called supported there (owner, 2026-10-26).
 
 ## What an outsider can and cannot learn
 

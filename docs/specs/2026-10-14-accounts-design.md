@@ -108,6 +108,21 @@ From handover 3 and the owner on 2026-10-14:
     serves one phone at a time), and UP6, where USB imports come first (owner, 2026-10-26).
 46. Voice imprints: laboratory stages A and B only, with no real voices; VI2-VI6 wait for their results
     (owner, 2026-10-26).
+47. Private groups use one shared group secret, renewed whenever someone joins or leaves, with each member's own
+    sending chain derived from it and every message signed: one radio packet per group text. Membership works like
+    ordinary messaging apps (admins, members need not know each other, last admin leaving promotes someone), with a
+    per-group "New members see recent messages" setting (off by default), a small group photo and full pictures.
+    Groups start at 20 people. A thorough review of everything sent over the radio comes first (owner, 2026-10-26).
+48. Profile colour is chosen on a free colour wheel (three bytes); the app picks a readable letter colour
+    (owner, 2026-10-26).
+49. Avatar emoji: any single emoji that every supported phone can draw (Android 8.0's emoji); emoji newer than that,
+    with the initial as a fallback, are considered later (owner, 2026-10-26).
+50. Photo avatars: about 64 by 64 pixels, end-to-end encrypted to contacts, never in the shared chat; over hub Wi-Fi
+    when possible, otherwise slowly over radio with the next message to each contact, at most one change a day
+    (owner, 2026-10-26).
+51. No pronouns or "about" line (owner, 2026-10-26).
+52. The designer demo targets the Mac first; an iPhone version is skipped for now, since iPhones cannot run the
+    Android app (owner, 2026-10-26).
 
 ## What an outsider can and cannot learn
 

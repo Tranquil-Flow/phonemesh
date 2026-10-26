@@ -66,6 +66,21 @@ From handover 3 and the owner on 2026-10-14:
     one-to-one chats. Group keys and membership need their own design before building.
 29. Reactions offer the phone's own emoji keyboard in the next version, not only the six fixed pictures
     (owner, 2026-10-25). A reaction stays one emoji within the 32-byte reaction limit.
+30. Quantum-safe keys are shelved: not in the next version (owner, 2026-10-26). They stay in "Later" with the size
+    problem written down (an ML-KEM-768 public key is 1,184 bytes and a ciphertext 1,088, against 228-byte packets).
+31. The next version's plan also covers, each with its own spec before any code (owner, 2026-10-26): local languages
+    for the Togo pilot, encrypted chat backup, an airtime meter, and signed app and voice-pack updates passed on
+    through the local hub. Account recovery (decision 12), private group chats (28) and more profile choices than a
+    colour get specs too. A demo build (`docs/specs/2026-10-25-demo-build-design.md`) ships with every release.
+    The specs, each ending with its own lettered decision batch, are
+    [private group chats](2026-10-26-private-group-chats-design.md) (GC),
+    [account recovery](2026-10-26-account-recovery-design.md) (RC),
+    [encrypted chat backup](2026-10-26-encrypted-chat-backup-design.md) (BK),
+    [profile flexibility](2026-10-26-profile-flexibility-design.md) (PF),
+    [local languages for the Togo pilot](2026-10-26-togo-local-languages-design.md) (LG),
+    [the airtime meter](2026-10-26-airtime-meter-design.md) (AM) and
+    [updates through the local hub](2026-10-26-hub-updates-design.md) (UP). Each owner pick is recorded here as a
+    numbered decision from 32 on, naming its batch item (for example "32. GC1: pairwise fan-out").
 
 ## What an outsider can and cannot learn
 
@@ -428,7 +443,7 @@ Each step is gated as now: the full suite, screenshots, and the verification not
 
 - Username search or an account list (by the hub)
 - Account recovery (required; decision 12)
-- Quantum-safe keys at contact setup
+- Quantum-safe keys at contact setup (shelved; decision 30)
 - Signed names in the shared chat
 - Several accounts on one phone
 - Planned messages sent by the hub (scheduled version c)

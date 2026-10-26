@@ -1,0 +1,347 @@
+{
+  "palette": [
+    {
+      "index": 0,
+      "hex": "E53935",
+      "white": 4.227,
+      "ink": 4.467,
+      "pick": "black"
+    },
+    {
+      "index": 1,
+      "hex": "FB8C00",
+      "white": 2.372,
+      "ink": 7.961,
+      "pick": "ink"
+    },
+    {
+      "index": 2,
+      "hex": "FDD835",
+      "white": 1.395,
+      "ink": 13.533,
+      "pick": "ink"
+    },
+    {
+      "index": 3,
+      "hex": "43A047",
+      "white": 3.303,
+      "ink": 5.717,
+      "pick": "ink"
+    },
+    {
+      "index": 4,
+      "hex": "1E88E5",
+      "white": 3.679,
+      "ink": 5.133,
+      "pick": "ink"
+    },
+    {
+      "index": 5,
+      "hex": "8E24AA",
+      "white": 7.04,
+      "ink": 2.682,
+      "pick": "white"
+    },
+    {
+      "index": 6,
+      "hex": "EC407A",
+      "white": 3.763,
+      "ink": 5.018,
+      "pick": "ink"
+    },
+    {
+      "index": 7,
+      "hex": "6D4C41",
+      "white": 7.608,
+      "ink": 2.482,
+      "pick": "white"
+    },
+    {
+      "index": 8,
+      "hex": "00796B",
+      "white": 5.32,
+      "ink": 3.549,
+      "pick": "white"
+    },
+    {
+      "index": 9,
+      "hex": "00ACC1",
+      "white": 2.738,
+      "ink": 6.898,
+      "pick": "ink"
+    },
+    {
+      "index": 10,
+      "hex": "3949AB",
+      "white": 7.735,
+      "ink": 2.441,
+      "pick": "white"
+    },
+    {
+      "index": 11,
+      "hex": "C0CA33",
+      "white": 1.789,
+      "ink": 10.554,
+      "pick": "ink"
+    },
+    {
+      "index": 12,
+      "hex": "FFB74D",
+      "white": 1.731,
+      "ink": 10.91,
+      "pick": "ink"
+    },
+    {
+      "index": 13,
+      "hex": "B39DDB",
+      "white": 2.397,
+      "ink": 7.879,
+      "pick": "ink"
+    },
+    {
+      "index": 14,
+      "hex": "546E7A",
+      "white": 5.401,
+      "ink": 3.496,
+      "pick": "white"
+    },
+    {
+      "index": 15,
+      "hex": "9E9E9E",
+      "white": 2.679,
+      "ink": 7.048,
+      "pick": "ink"
+    }
+  ],
+  "webp": [
+    {
+      "side": 48,
+      "fixture": "flat",
+      "quality": 60,
+      "webp_bytes": 82
+    },
+    {
+      "side": 48,
+      "fixture": "flat",
+      "quality": 80,
+      "webp_bytes": 78
+    },
+    {
+      "side": 48,
+      "fixture": "drawn-symbol",
+      "quality": 60,
+      "webp_bytes": 318
+    },
+    {
+      "side": 48,
+      "fixture": "drawn-symbol",
+      "quality": 80,
+      "webp_bytes": 392
+    },
+    {
+      "side": 48,
+      "fixture": "seeded-noise",
+      "quality": 60,
+      "webp_bytes": 1524
+    },
+    {
+      "side": 48,
+      "fixture": "seeded-noise",
+      "quality": 80,
+      "webp_bytes": 1866
+    },
+    {
+      "side": 64,
+      "fixture": "flat",
+      "quality": 60,
+      "webp_bytes": 90
+    },
+    {
+      "side": 64,
+      "fixture": "flat",
+      "quality": 80,
+      "webp_bytes": 82
+    },
+    {
+      "side": 64,
+      "fixture": "drawn-symbol",
+      "quality": 60,
+      "webp_bytes": 366
+    },
+    {
+      "side": 64,
+      "fixture": "drawn-symbol",
+      "quality": 80,
+      "webp_bytes": 446
+    },
+    {
+      "side": 64,
+      "fixture": "seeded-noise",
+      "quality": 60,
+      "webp_bytes": 2570
+    },
+    {
+      "side": 64,
+      "fixture": "seeded-noise",
+      "quality": 80,
+      "webp_bytes": 3150
+    }
+  ],
+  "webp_lib": "1.5.0",
+  "thumbhash": {
+    "opaque_square": 24,
+    "alpha_square": 25
+  },
+  "rgba": {
+    "48": 9216,
+    "64": 16384
+  },
+  "rows": [
+    {
+      "N": 24,
+      "A": 0,
+      "card": 164,
+      "qr": 197,
+      "qr_text": 309,
+      "link_text": 265,
+      "hello": 132,
+      "update_plain": 58,
+      "update_keyed": 93,
+      "update_keyed_ack": 103
+    },
+    {
+      "N": 24,
+      "A": 4,
+      "card": 168,
+      "qr": 201,
+      "qr_text": 314,
+      "link_text": 270,
+      "hello": 136,
+      "update_plain": 62,
+      "update_keyed": 97,
+      "update_keyed_ack": 107
+    },
+    {
+      "N": 24,
+      "A": 32,
+      "card": 196,
+      "qr": 229,
+      "qr_text": 352,
+      "link_text": 308,
+      "hello": 164,
+      "update_plain": 90,
+      "update_keyed": 125,
+      "update_keyed_ack": 135
+    },
+    {
+      "N": 40,
+      "A": 0,
+      "card": 180,
+      "qr": 213,
+      "qr_text": 330,
+      "link_text": 286,
+      "hello": 148,
+      "update_plain": 74,
+      "update_keyed": 109,
+      "update_keyed_ack": 119
+    },
+    {
+      "N": 40,
+      "A": 4,
+      "card": 184,
+      "qr": 217,
+      "qr_text": 336,
+      "link_text": 292,
+      "hello": 152,
+      "update_plain": 78,
+      "update_keyed": 113,
+      "update_keyed_ack": 123
+    },
+    {
+      "N": 40,
+      "A": 32,
+      "card": 212,
+      "qr": 245,
+      "qr_text": 373,
+      "link_text": 329,
+      "hello": 180,
+      "update_plain": 106,
+      "update_keyed": 141,
+      "update_keyed_ack": 151
+    }
+  ],
+  "prefix_bytes": 46,
+  "airtime": {
+    "36": 0.681984,
+    "58": 0.845824,
+    "62": 0.886784,
+    "68": 0.927744,
+    "72": 0.968704,
+    "93": 1.091584,
+    "97": 1.132544,
+    "103": 1.173504,
+    "107": 1.214464,
+    "126": 1.337344,
+    "136": 1.419264,
+    "142": 1.460224,
+    "152": 1.542144,
+    "164": 1.624064,
+    "180": 1.746944,
+    "226": 2.115584,
+    "228": 2.115584
+  },
+  "legacy": {
+    "24": {
+      "card": 158,
+      "qr": 191,
+      "hello": 126,
+      "link_text": 257,
+      "qr_text": 301
+    },
+    "40": {
+      "card": 174,
+      "qr": 207,
+      "hello": 142,
+      "link_text": 278,
+      "qr_text": 322
+    }
+  },
+  "hypothetical_photo": {
+    "24": {
+      "card_delta": 30,
+      "card_n24": 188,
+      "qr_n24": 221,
+      "hello_n24": 156,
+      "shared_delta": 27,
+      "qr_text": 341,
+      "lower_bound_packets": 1
+    },
+    "25": {
+      "card_delta": 31,
+      "card_n24": 189,
+      "qr_n24": 222,
+      "hello_n24": 157,
+      "shared_delta": 28,
+      "qr_text": 342,
+      "lower_bound_packets": 1
+    },
+    "512": {
+      "card_delta": 519,
+      "card_n24": 677,
+      "qr_n24": 710,
+      "hello_n24": 645,
+      "shared_delta": 516,
+      "qr_text": 993,
+      "lower_bound_packets": 3
+    },
+    "1024": {
+      "card_delta": 1031,
+      "card_n24": 1189,
+      "qr_n24": 1222,
+      "hello_n24": 1157,
+      "shared_delta": 1028,
+      "qr_text": 1676,
+      "lower_bound_packets": 6
+    }
+  }
+}

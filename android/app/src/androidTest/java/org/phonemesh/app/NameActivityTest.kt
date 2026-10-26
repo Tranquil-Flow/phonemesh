@@ -91,6 +91,16 @@ class NameActivityTest {
         assertEquals(listOf("Awa Traoré"), TestCore.speech.spoken)
     }
 
+    @Test fun theKeyboardIsAskedNotToCorrectNames() {
+        // The emulator's keyboard turned "Esi" into "ESO" when focus moved: names like Esi, Afi or Kossi are not
+        // dictionary words, so the field asks for no suggestions (and so no autocorrect) as well as a person's name.
+        TestCore.install(named = false)
+        val screen = Views.start(NameActivity::class.java)
+        val type = TestCore.onMain { (Views.descendants(screen.window.decorView).first { it.tag == "name_field" } as android.widget.EditText).inputType }
+        assertTrue("no suggestions", type and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
+        assertEquals(android.text.InputType.TYPE_TEXT_VARIATION_PERSON_NAME, type and android.text.InputType.TYPE_MASK_VARIATION)
+    }
+
     @Test fun withoutAVoiceTheNameIsTyped() {
         TestCore.install(voices = emptyList(), named = false)
         val screen = Views.start(NameActivity::class.java)

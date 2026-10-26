@@ -88,7 +88,9 @@ class NameActivity : ScreenActivity() {
             setTextColor(palette.text)
             hint = getString(R.string.name_title)
             contentDescription = getString(R.string.name_title)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+            // No suggestions: keyboards otherwise "correct" names that are not dictionary words (Esi became ESO).
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS or
+                InputType.TYPE_TEXT_VARIATION_PERSON_NAME or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             imeOptions = EditorInfo.IME_ACTION_DONE
             maxLines = 1
             setSingleLine()

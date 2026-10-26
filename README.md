@@ -40,6 +40,12 @@ what was tested and what was not.
 This is a first release, tested on two phones and a small number of radios. It is not
 a finished product and makes no range, capacity or delivery guarantee.
 
+**Try it without a radio.** Phonemesh Demo is the real app with a pretend radio, pretend
+people and a pretend local hub. It runs on an Android phone, or in an emulator on a Mac.
+Downloads and step-by-step instructions are on the
+[v0.1.1-demo.1 pre-release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1-demo.1).
+It is a test build from work toward v0.1.1, not a release.
+
 ## How it works
 
 ```mermaid

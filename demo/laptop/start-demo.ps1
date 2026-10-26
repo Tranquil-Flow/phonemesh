@@ -165,9 +165,9 @@ if (-not (Test-Path $Apk)) { Stop-Demo "no such file: $Apk" }
 # ---- 4. Start, install, open ----
 $s = Serial
 if (-not $s) {
-  $opts = @('-avd', $AvdName, '-no-boot-anim', '-no-snapshot-save')
+  $opts = @('-avd', $AvdName, '-no-boot-anim', '-no-snapshot-save', '-no-metrics')  # no usage statistics to Google
   if ($Headless) { $opts += '-no-window' }
-  if ($NoMic) { $opts += '-no-audio' }
+  if ($NoMic) { $opts += '-no-audio' } else { $opts += '-allow-host-audio' }  # otherwise the emulator hears silence
   Say 'Starting the virtual phone (the first start takes a few minutes)...'
   Start-Process -FilePath $Emulator -ArgumentList $opts -WindowStyle Hidden -RedirectStandardOutput (Join-Path $HomeDir 'emulator.log') -RedirectStandardError (Join-Path $HomeDir 'emulator-err.log')
   & $Adb start-server 2>$null | Out-Null
@@ -176,6 +176,14 @@ if (-not $s) {
 }
 for ($i = 0; $i -lt 120; $i++) { if ((& $Adb -s $s shell getprop sys.boot_completed 2>$null) -match '1') { break }; Start-Sleep 3 }
 if (-not ((& $Adb -s $s shell getprop sys.boot_completed 2>$null) -match '1')) { Stop-Demo 'the virtual phone did not finish starting.' }
+# -allow-host-audio alone still sends zeros: the emulator's "Enable Host Microphone Access" switch starts off.
+if (-not $NoMic) {
+  & $Adb -s $s emu avd hostmicon | Out-Null
+  if ($LASTEXITCODE -ne 0) { Say 'Could not turn on the microphone; Talk will hear nothing.' }
+  # The switch can turn itself off while the emulator runs: a hidden keeper turns it back on every few seconds until it stops.
+  $keep = "while ((& '$Adb' -s $s get-state 2>`$null) -eq 'device') { & '$Adb' -s $s emu avd hostmicon | Out-Null; Start-Sleep 5 }"
+  Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', $keep | Out-Null
+}
 Say 'Installing the demo app...'
 & $Adb -s $s install -r $Apk | Out-Null
 if ($LASTEXITCODE -ne 0) {

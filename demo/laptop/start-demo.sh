@@ -3,6 +3,8 @@
 #
 #   ./start-demo.sh                 set up if needed (asks before downloading), start, install, open the demo
 #   ./start-demo.sh --apk FILE      use a demo APK you already have instead of downloading the latest release
+#                                   (a demo APK in this script's folder is used without asking, checked
+#                                   against a SHA256SUMS file next to it when there is one)
 #   ./start-demo.sh stop            stop the emulator
 #   ./start-demo.sh remove          delete everything this script made
 #
@@ -71,6 +73,7 @@ serial() { "$ADB" devices 2>/dev/null | awk '/^emulator-/{print $1}' | while rea
 
 if [ "$COMMAND" = stop ]; then
   s="$(serial || true)"; [ -n "$s" ] || { say "The demo emulator is not running."; exit 0; }
+  [ -f "$HOME_DIR/mic-keeper.pid" ] && kill "$(cat "$HOME_DIR/mic-keeper.pid")" 2>/dev/null; rm -f "$HOME_DIR/mic-keeper.pid"
   "$ADB" -s "$s" emu kill >/dev/null && say "Stopped."; exit 0
 fi
 if [ "$COMMAND" = remove ]; then
@@ -147,6 +150,20 @@ EOF
 fi
 
 # ---- 3. The demo app ----
+HERE="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "$APK" ] && [ "$VERSION" = latest ]; then
+  local_apk="$(find "$HERE" -maxdepth 1 -name "*-demo-$ABI.apk" 2>/dev/null | sort | tail -1)"
+  if [ -n "$local_apk" ]; then
+    APK="$local_apk"
+    if [ -f "$HERE/SHA256SUMS" ]; then
+      want="$(awk -v f="$(basename "$APK")" '$2==f || $2=="*"f {print $1}' "$HERE/SHA256SUMS")"
+      [ -n "$want" ] && [ "$(sha 256 "$APK")" = "$want" ] || die "$(basename "$APK") does not match the SHA256SUMS next to it."
+      say "Using $(basename "$APK") from this folder (matches its SHA256SUMS)."
+    else
+      say "Using $(basename "$APK") from this folder."
+    fi
+  fi
+fi
 if [ -z "$APK" ]; then
   if [ "$VERSION" = latest ]; then api="https://api.github.com/repos/$REPO/releases/latest"; else api="https://api.github.com/repos/$REPO/releases/tags/$VERSION"; fi
   json="$(curl -fsSL "$api")" || die "could not reach GitHub for the release."
@@ -166,9 +183,10 @@ fi
 # ---- 4. Start, install, open ----
 s="$(serial || true)"
 if [ -z "$s" ]; then
-  opts=(-avd "$AVD_NAME" -no-boot-anim -no-snapshot-save)
+  opts=(-avd "$AVD_NAME" -no-boot-anim -no-snapshot-save -no-metrics) # no usage statistics to Google, and no question about them
   [ "$WINDOW" = 1 ] || opts+=(-no-window)
-  [ "$MIC" = 1 ] || opts+=(-no-audio)
+  # Without -allow-host-audio the emulator hears silence: Talk and "Say your name" need the computer's microphone.
+  if [ "$MIC" = 1 ]; then opts+=(-allow-host-audio); else opts+=(-no-audio); fi
   say "Starting the virtual phone (the first start takes a few minutes)..."
   nohup "$EMULATOR" "${opts[@]}" > "$HOME_DIR/emulator.log" 2>&1 &
   "$ADB" start-server >/dev/null 2>&1
@@ -177,6 +195,18 @@ if [ -z "$s" ]; then
 fi
 for _ in $(seq 1 120); do [ "$("$ADB" -s "$s" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 3; done
 [ "$("$ADB" -s "$s" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] || die "the virtual phone did not finish starting."
+# -allow-host-audio alone still sends zeros: the emulator's "Enable Host Microphone Access" switch starts off, and it
+# can turn itself off again while the emulator runs. A small keeper turns it back on every few seconds until the
+# emulator stops (one keeper at a time; "stop" ends it).
+KEEPER="$HOME_DIR/mic-keeper.pid"
+[ -f "$KEEPER" ] && kill "$(cat "$KEEPER")" 2>/dev/null; rm -f "$KEEPER"
+if [ "$MIC" = 1 ]; then
+  "$ADB" -s "$s" emu avd hostmicon >/dev/null 2>&1 || say "Could not turn on the microphone; Talk will hear nothing."
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  nohup bash -c 'while [ "$("$0" -s "$1" get-state 2>/dev/null)" = device ]; do "$0" -s "$1" emu avd hostmicon >/dev/null 2>&1; sleep 5; done' \
+    "$ADB" "$s" >/dev/null 2>&1 &
+  echo $! > "$KEEPER"
+fi
 say "Installing the demo app..."
 "$ADB" -s "$s" install -r "$APK" >/dev/null || {
   say "The installed demo was signed on another computer: removing it first (its data goes too)."

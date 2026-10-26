@@ -13,9 +13,25 @@ What the demo is and what you can try in it: [docs/demo.md](../../docs/demo.md).
 - Linux: `/dev/kvm` (hardware virtualisation on, and your user in the `kvm` group).
 - Windows: the "Windows Hypervisor Platform" feature turned on.
 
-## Start
+## Start on a Mac
 
-macOS or Linux, in a terminal:
+1. Put the folder with these files somewhere you keep things, such as Documents. If someone gave you a demo app file
+   (it ends in `-demo-arm64-v8a.apk`), keep it in the same folder, with its `SHA256SUMS` file.
+2. Double-click **Start Phonemesh Demo.command**. A Terminal window opens and tells you what it is doing.
+   - If macOS says it cannot check the file: click **Done**, open **System Settings**, then **Privacy & Security**,
+     scroll down and click **Open Anyway** next to "Start Phonemesh Demo.command", then confirm. You only do this once.
+3. The first start asks before downloading, about 2.3 GB from Google. Type `y` and press Return. It takes 5 to 30
+   minutes, depending on your connection. Later starts take a minute or two.
+4. When macOS asks whether Terminal may use the microphone, click **Allow** if you want to try **Talk** and **Say your
+   name**. Everything you say stays on your Mac.
+5. The virtual phone opens in its own window, with Phonemesh Demo on it.
+
+To stop, double-click **Stop Phonemesh Demo.command**, or close the virtual phone's window. Your demo chats are kept
+for next time.
+
+## Start from a terminal
+
+macOS or Linux:
 
 ```sh
 ./start-demo.sh
@@ -28,13 +44,15 @@ powershell -ExecutionPolicy Bypass -File .\start-demo.ps1
 ```
 
 The first start asks before it downloads the emulator and Android 15 from Google, and checks them against pinned
-checksums. Then it downloads the demo app from the latest Phonemesh release and checks it against the release's
-`SHA256SUMS`. Later starts take a minute or two.
+checksums. A demo app file in the same folder is used first, checked against the `SHA256SUMS` next to it. Otherwise
+the script downloads the demo app from the latest Phonemesh release and checks it against the release's `SHA256SUMS`.
+Later starts take a minute or two.
 
 To use a demo app file you already have: `./start-demo.sh --apk phonemesh-0.1.1-demo-arm64-v8a.apk` (Windows:
 `-Apk`).
 
-The virtual phone uses your laptop's microphone for **Talk**. To start without the microphone or sound, add
+The virtual phone uses your laptop's microphone for **Talk** and **Say your name**, and plays sound through its
+speakers. To start without the microphone or sound, add
 `--no-mic` (Windows: `-NoMic`).
 
 ## Use

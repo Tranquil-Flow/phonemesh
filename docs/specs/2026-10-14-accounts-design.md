@@ -84,6 +84,30 @@ From handover 3 and the owner on 2026-10-14:
 32. The local hub runs on Linux and Windows as well as macOS (owner, 2026-10-26). Bluetooth for those hubs comes as a
     Linux bridge first (BlueZ; one phone at a time, because BlueZ notifies every connected phone), then Windows.
 33. Windows support is tested on a real Windows machine before the hub is called supported there (owner, 2026-10-26).
+34. Release scope (owner, 2026-10-26): v0.1.1 brings profile choices, the airtime meter and account recovery with a
+    contacts-only backup; v0.1.2 brings private group chats, full chat backup and hub updates. Togo languages start with
+    reviewed text once the pilot village and its languages are named.
+35. App size: each feature's signed growth is measured, then the ceiling is raised for that feature; the v0.1.1 total
+    stays within +256 KB per ABI (owner, 2026-10-26).
+36. No phone runs v0.1.0 (owner, 2026-10-26), so new versions need no compatibility with it: reactions use the full
+    32 bytes of decision 29, and profiles use the new contact card and hello everywhere.
+37. Releases carry an x86_64 demo APK for laptops; no browser-streamed demo (owner, 2026-10-26).
+38. The `v0.1.1` branch may be pushed to the public repo, without a tag or release (owner, 2026-10-26).
+39. Replies to old chats with people on the stock Meshtastic app come in v0.1.2; the hub screen says Bluetooth is not
+    needed while Wi-Fi works (owner, 2026-10-26).
+40. Group chats (owner, 2026-10-26): GC4 (with close-and-recreate as the way out), GC7, GC11, GC12 and GC13 as
+    recommended; GC9 is moot (decision 36). GC1, GC2, GC3, GC5, GC6, GC8 and GC10 are reopened: the owner wants groups
+    larger than five, membership like ordinary messaging apps, history for new members, a group photo and full pictures.
+41. Account recovery and chat backup: RC1-RC8 and BK1-BK8 as recommended, plus an independent cryptography review of
+    the backup format before release (owner, 2026-10-26).
+42. Profiles (owner, 2026-10-26): PF1, PF5, PF6 and PF7 as recommended; PF4 uses the new card everywhere (decision 36).
+    PF2, PF3 and PF8-PF10 are reopened: more colours, many more emoji and photo avatars are wanted.
+43. Togo languages: LG1-LG11 as recommended, once the village and its languages are named (owner, 2026-10-26).
+44. Airtime meter: AM1-AM9 as recommended (owner, 2026-10-26).
+45. Hub updates: as recommended except UP3, where bulk updates go over hub Wi-Fi only (the Linux Bluetooth bridge
+    serves one phone at a time), and UP6, where USB imports come first (owner, 2026-10-26).
+46. Voice imprints: laboratory stages A and B only, with no real voices; VI2-VI6 wait for their results
+    (owner, 2026-10-26).
 
 ## What an outsider can and cannot learn
 

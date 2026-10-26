@@ -7,16 +7,24 @@ import org.phonemesh.core.hub.HubCard
 import java.util.Locale
 import kotlin.concurrent.thread
 
-/** `./gradlew :hub:run --args="/path/to/hub.conf"`: the hub prototype on the Mac. */
+/**
+ * `phonemesh-hub hub.conf` (or `./gradlew :hub:run --args="/path/to/hub.conf"`): the local hub on macOS, Linux or
+ * Windows. `phonemesh-hub --ports` lists the serial ports, to find the radio's.
+ */
 fun main(args: Array<String>) {
+    if (args.firstOrNull() == "--ports") {
+        SerialPorts.describe(SerialPorts.list()).forEach(::println)
+        return
+    }
     val config = HubConfig.read(File(args.firstOrNull() ?: "hub.conf"))
     val clock = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
     val log: (String) -> Unit = { println("${clock.format(Date())} $it") }
     val mailbox = Mailbox(File(config.dir, "mail"), config.days)
     val outbox = Outbox(File(config.dir, "outbox.bin"))
     val tls = Tls(File(config.dir, "keys"))
-    require(config.serial.isNotEmpty()) { "set serial = /dev/cu.<the radio> in the config" }
-    val (input, output) = SerialRadio.openTty(config.serial)
+    val os = System.getProperty("os.name")
+    require(config.serial.isNotEmpty()) { "set serial = <the radio's port> in the config, for example ${SerialPorts.example(os)} (list them with --ports)" }
+    val (input, output) = SerialPorts.open(config.serial, os)
     lateinit var hub: Hub
     val radio = SerialRadio(input, output, object : RadioListener {
         override fun onData(port: Int, payload: ByteArray, signal: String) = hub.onData(port, payload, signal)

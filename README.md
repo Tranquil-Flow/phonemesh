@@ -295,10 +295,11 @@ Planned for later: TalkBack support and quantum-safe keys.
 
 ## Run a local hub
 
-The hub is a Kotlin/JVM program driving a Meshtastic radio on USB. Phones reach it
-through its Wi-Fi network or through a small Bluetooth bridge on the same Mac. Setup,
-configuration and enrolment are in the [hub guide](android/hub/README.md); the Bluetooth
-bridge is in [hub-ble-bridge](hub-ble-bridge/README.md).
+The hub is a Kotlin/JVM program driving a Meshtastic radio on USB. It runs on macOS,
+Linux (including a Raspberry Pi) and Windows with Java 17. Phones reach it through its
+Wi-Fi network, or on a Mac also through a small Bluetooth bridge. Setup, configuration
+and enrolment are in the [hub guide](android/hub/README.md); the Bluetooth bridge is in
+[hub-ble-bridge](hub-ble-bridge/README.md).
 
 ## Build Android from source
 

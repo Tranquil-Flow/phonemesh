@@ -113,7 +113,7 @@ class Tls(dir: File) {
             val pass = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(24).also { SecureRandom().nextBytes(it) })
             passFile.writeText(pass)
             passFile.setReadable(false, false); passFile.setReadable(true, true)
-            val keytool = File(System.getProperty("java.home"), "bin/keytool").path
+            val keytool = File(File(System.getProperty("java.home"), "bin"), keytoolName(System.getProperty("os.name"))).path
             val process = ProcessBuilder(keytool, "-genkeypair", "-alias", "hub", "-keyalg", "EC", "-groupname", "secp256r1",
                 "-sigalg", "SHA256withECDSA", "-dname", "CN=phonemesh-hub", "-validity", "36500", "-storetype", "PKCS12",
                 "-keystore", store.path, "-storepass", pass).redirectErrorStream(true).start()
@@ -128,6 +128,8 @@ class Tls(dir: File) {
     }
 
     companion object {
+        fun keytoolName(os: String): String = if (os.startsWith("Windows")) "keytool.exe" else "keytool"
+
         fun pinOf(publicKey: ByteArray): String =
             Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(publicKey))
     }

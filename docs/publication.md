@@ -73,6 +73,10 @@ all release gates close. See [candidate notes](releases/v0.1.0.md).
    empty crash log, and update its Verified column. The laptop launchers in `demo/laptop`
    download the `-demo-arm64-v8a.apk` asset and check it against `SHA256SUMS`.
 
+8. **Ship the hub (from v0.1.1).** Attach `android/hub/build/distributions/phonemesh-hub.zip`
+   (built by `:hub:distZip` from the release commit) as `phonemesh-hub-<version>.zip`, with
+   its line in `SHA256SUMS`. It runs on macOS, Linux and Windows with Java 17.
+
 ## Git and release actions — owner only, after the gates
 
 The owner chose a **fresh public history** on 2026-10-25: create the future public

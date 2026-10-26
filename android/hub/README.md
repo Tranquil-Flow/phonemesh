@@ -1,10 +1,12 @@
-# Phonemesh local hub (Mac prototype)
+# Phonemesh local hub
 
 The local hub was called the *village hub* before v0.1.0, and the v0.1.0 app labels its
 screen **Village hub** (*Relais du village*). From v0.1.1 the app says **Local hub** (*Relais local*).
 
-A JVM mailbox/relay with a Meshtastic radio on USB. Phones reach its pinned HTTPS API
-by local Wi-Fi or through the optional [native Mac BLE bridge](../../hub-ble-bridge/README.md).
+A JVM mailbox/relay with a Meshtastic radio on USB. It runs on macOS, Linux (including a
+Raspberry Pi) and Windows. Phones reach its pinned HTTPS API by local Wi-Fi, or on a Mac also
+through the optional [native Mac BLE bridge](../../hub-ble-bridge/README.md). Linux and
+Windows hubs are Wi-Fi only for now.
 It cannot decrypt private account-message bodies. Shared-channel messages are not
 end-to-end private, and packet metadata remains visible to the hub.
 
@@ -14,12 +16,12 @@ final-candidate voice/restart recovery remain unqualified. See [project status](
 
 ## Choose the topology first
 
-- **BLE:** phone → Mac BLE bridge → `127.0.0.1:<port>` JVM hub → USB radio → mesh.
+- **BLE (macOS only):** phone → Mac BLE bridge → `127.0.0.1:<port>` JVM hub → USB radio → mesh.
   The Mac needs BLE peripheral support and Bluetooth permission. The JVM process alone
   does not advertise Bluetooth; both processes must run on the same Mac.
 - **Wi-Fi:** phone → hub Wi-Fi's **IPv4 default gateway** at the card's port → JVM hub
-  → USB radio. The Mac must be that gateway (or the topology must explicitly route the
-  gateway endpoint to the hub). An ordinary Mac client on the same access point is
+  → USB radio. The hub computer must be that gateway (or the topology must explicitly route the
+  gateway endpoint to the hub). An ordinary client on the same access point is
   **not** the endpoint the Android app looks up. There is no arbitrary-host field.
   Android's in-app Wi-Fi join requires API 29+ and binds hub traffic to that local
   network, not mobile data. Configure the AP/gateway separately with the network owner.
@@ -32,9 +34,15 @@ If no hub AP exists, cancel that chooser rather than joining an unrelated networ
 
 ## Configure and start
 
-Install JDK 17 and set `JAVA_HOME` (see [Android build prerequisites](../../README.md#build-android-from-source)).
-Choose a compatible, legally configured radio and identify its current serial path
-with `ls /dev/cu.usb*` on the Mac. Do not copy another machine's serial endpoint.
+Install Java 17 (a JDK, for its `keytool`) and set `JAVA_HOME`. Get the hub either as
+`phonemesh-hub-<version>.zip` from a release (from v0.1.1), or build it from `android/` with
+`./gradlew :hub:distZip` (it lands in `hub/build/distributions/`). Unzip it anywhere; it
+holds `bin/phonemesh-hub` (macOS, Linux) and `bin/phonemesh-hub.bat` (Windows).
+
+Choose a compatible, legally configured radio, plug it in, and find its port with
+`bin/phonemesh-hub --ports`. It is usually `/dev/cu.usbmodem…` on a Mac, `/dev/ttyACM0`
+or `/dev/ttyUSB0` on Linux, and `COM3` or similar on Windows. Do not copy another
+machine's serial endpoint.
 Opening USB serial can reset some boards; do not share an in-use port. The hub does
 not flash firmware or configure channel/region settings. Its warning about rebroadcast
 mode requires operator review in the stock radio tools, not an automatic setting change.
@@ -44,7 +52,7 @@ the placeholders; this is a template, not credentials for an existing hub:
 
 ```ini
 name = Local hub
-serial = /dev/cu.REPLACE_WITH_YOUR_RADIO
+serial = REPLACE_WITH_YOUR_RADIO_PORT
 wifi = YOUR_HUB_SSID
 wifi_password = REPLACE_WITH_YOUR_WIFI_PASSWORD
 days = 30
@@ -76,6 +84,9 @@ From `android/`:
 ./gradlew --no-daemon --console plain :hub:run --args="/absolute/private/path/to/hub.conf"
 ```
 
+Or, from the unzipped hub: `bin/phonemesh-hub /absolute/private/path/to/hub.conf` (Windows:
+`bin\phonemesh-hub.bat C:\path\to\hub.conf`).
+
 The second command opens hardware/network services. On first start it creates a TLS
 identity using JDK `keytool`; later starts reuse it. Mail lives under `dir/mail`, keys
 under `dir/keys`. Startup prints the radio identity, any rebroadcast warning and an
@@ -89,6 +100,42 @@ contains the Wi-Fi password; the hub logs it even though `HubCard.toString()` re
 Never commit, publish or attach real operator data/logs to bug reports. Keep the data
 folder across restarts: replacing its TLS identity changes the pin and requires
 trusted re-enrollment. Do not delete it as a connectivity workaround.
+
+## On Linux
+
+Checked on 2026-10-26 in Linux containers (arm64 and x86_64) with a pretend radio on a
+pseudo-terminal: the hub opened the port, woke the radio, read its answer and served
+HTTPS. Not yet tried with a real radio or real phones on Linux.
+
+- **Port access:** add yourself to the group that owns the port (`ls -l /dev/ttyACM0`;
+  usually `dialout`, or `uucp` on Arch), then log in again. Prefer the stable name under
+  `/dev/serial/by-id/` in `hub.conf`, since `ttyACM0` can change after a replug.
+- **Wi-Fi:** the hub computer must be the phones' gateway. With NetworkManager:
+  `nmcli device wifi hotspot ifname <wifi device> ssid <name> password <password>` makes a
+  WPA2-Personal network with this computer as gateway (usually `10.42.0.1`). Put the same
+  name and password in `hub.conf`.
+- **Firewall:** allow the hub's port on that network, for example `sudo ufw allow 8443/tcp`.
+- **Keep it running:** run `bin/phonemesh-hub /path/to/hub.conf` as an ordinary user, for
+  example from a systemd service (not yet tried), and keep `dir` on storage that survives
+  reboots.
+
+## On Windows
+
+**Not yet tested on Windows.** The hub uses the same portable serial library as on Linux,
+and Gradle's Windows start script.
+
+- **Port:** `bin\phonemesh-hub.bat --ports` lists them (for example `COM4  USB Serial Device`).
+  Use that name, such as `serial = COM4`. Some radios need the USB driver for their chip
+  (CP210x or CH340).
+- **Wi-Fi:** the hub computer must be the phones' gateway. Windows **Mobile hotspot** does
+  this (the computer is usually `192.168.137.1`). Choose WPA2 if Windows offers a security
+  type, and put the hotspot's name and password in `hub.conf`. Windows may require an
+  internet connection to share before it turns the hotspot on; if so, use a separate
+  router that forwards the hub's port to this computer instead.
+- **Firewall:** allow the port once, in an administrator PowerShell:
+  `New-NetFirewallRule -DisplayName "Phonemesh hub" -Direction Inbound -Protocol TCP -LocalPort 8443 -Action Allow`.
+- **File permissions:** on Windows the hub cannot restrict its key files to your user the
+  way it does on macOS and Linux. Keep `dir` inside your own user folder.
 
 ## Enroll and use a phone
 

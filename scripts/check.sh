@@ -13,5 +13,5 @@ cd android
 ./gradlew --no-daemon --max-workers=1 --console plain \
   :core:test :hub:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest :app:testReleaseUnitTest \
   :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest :app:checkApkSize :app:checkNetworkBoundary \
-  :app:testDemoUnitTest :app:assembleDemo
+  :app:testDemoUnitTest :app:assembleDemo :hub:distZip
 echo CHECK_OK

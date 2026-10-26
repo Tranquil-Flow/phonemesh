@@ -108,10 +108,14 @@ any of them. Non-commercial models (4x-UltraSharp, Remacri, CodeFormer) are left
 
 ## Hub prototype (`android/hub`, not in the app)
 
-No libraries beyond the app's own modules (`core`, `mesh-protocol` with protobuf-javalite). The serial port is driven
-through macOS `stty` and the device file, HTTPS through the JDK's `HttpsServer`, and the hub's TLS key is made once
-with the JDK's `keytool`. jSerialComm (LGPL-3.0 / Apache-2.0) stays the fallback if `stty` proves unreliable on the
-radio.
+Besides the app's own modules (`core`, `mesh-protocol` with protobuf-javalite), one library:
+
+| Library | Version | Licence | Use |
+| --- | --- | --- | --- |
+| jSerialComm (`com.fazecast:jSerialComm`, <https://github.com/Fazecast/jSerialComm>) | 2.11.4 (jar SHA-256 `b5f7ec40d622864b92dc679159cdbaa3030d37884f0af2deef45b56c16bda7a6`) | Apache-2.0, dual-licensed with LGPL-3.0; used under Apache-2.0 | Opens the radio's serial port on Linux and Windows. No dependencies; its jar carries native code for each system. |
+
+On macOS the serial port is still driven through `stty` and the device file, as qualified with real radios. HTTPS
+uses the JDK's `HttpsServer`, and the hub's TLS key is made once with the JDK's `keytool`.
 
 ## Android libraries from Maven
 

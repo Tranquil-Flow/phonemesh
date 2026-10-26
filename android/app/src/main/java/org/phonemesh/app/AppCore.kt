@@ -1599,6 +1599,8 @@ class AppCore private constructor(
         val target = message.packetId ?: return false
         val chat = history.chat(message.chatId) ?: return false
         if (chat.kind == ChatKind.DIRECT) return false
+        // One emoji (decision 29), not just anything within the 32-byte limit: three thumbs fit the bytes too.
+        if (org.phonemesh.core.wire.Reactions.single(emoji) != emoji) return false
         val now = System.currentTimeMillis()
         if (chat.kind == ChatKind.PERSON) {
             if (target < REF_FLOOR) return false

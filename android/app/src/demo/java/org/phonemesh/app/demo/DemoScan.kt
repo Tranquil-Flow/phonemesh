@@ -2,6 +2,8 @@ package org.phonemesh.app.demo
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
 import org.phonemesh.app.AppCore
 import org.phonemesh.app.R
 import org.phonemesh.app.ScanActivity
@@ -22,7 +24,13 @@ object DemoScan {
             .setTitle(R.string.demo_scan_title)
             .setItems(choices.map { activity.getString(it.first) }.toTypedArray()) { _, which ->
                 val text = choices[which].second()
-                if (!ScanActivity.handleRead(activity, core, text)) finish(activity)
+                if (!ScanActivity.handleRead(activity, core, text)) {
+                    // A real scan screen stays open on its camera and shows why the code failed. This one closes, so
+                    // the screen beneath repeats that note once it is back in front; otherwise the failure is silent.
+                    val why = core.lastNote
+                    finish(activity)
+                    if (why != null) Handler(Looper.getMainLooper()).postDelayed({ core.note(why) }, NOTE_AFTER_CLOSE_MS)
+                }
             }
             .setNegativeButton(android.R.string.cancel) { _, _ -> finish(activity) }
             .setOnCancelListener { finish(activity) }
@@ -38,4 +46,6 @@ object DemoScan {
     }
 
     private fun finish(activity: Activity) { if (!activity.isFinishing) activity.finish() }
+
+    private const val NOTE_AFTER_CLOSE_MS = 600L
 }

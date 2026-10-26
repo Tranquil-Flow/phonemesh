@@ -195,6 +195,11 @@ class DemoWorld(private val app: Context) {
         get() = state.string(KEY_ASKED) != null
         set(value) = state.put(KEY_ASKED, if (value) "1" else null)
 
+    /** The country the phone pretends to be in ([DemoCountry]); null for the phone's own. */
+    var country: String?
+        get() = state.string(KEY_COUNTRY)
+        set(value) = state.put(KEY_COUNTRY, value)
+
     var bandShown: Boolean
         get() = state.string(KEY_BAND_HIDDEN) == null
         set(value) = state.put(KEY_BAND_HIDDEN, if (value) null else "1")
@@ -217,6 +222,7 @@ class DemoWorld(private val app: Context) {
         private const val KEY_HUB_OFF = "hub.off"
         private const val KEY_HUB_WIFI_OFF = "hub.wifi.off"
         private const val KEY_HUB_BT_OFF = "hub.bluetooth.off"
+        private const val KEY_COUNTRY = "country"
         private const val KEY_BAND_HIDDEN = "band.hidden"
         private const val KEY_ASKED = "asked.notifications"
         private const val AMA_AFTER_MS = 90_000L

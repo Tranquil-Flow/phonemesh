@@ -23,6 +23,9 @@
     <string name="demo_not_added">%1$s has not added you yet.</string>
     <string name="demo_section_radio">Your radio</string>
     <string name="demo_radio_off">Switch the radio off</string>
+    <string name="demo_country">Pretend country: %1$s</string>
+    <string name="demo_country_own">this phone\'s own</string>
+    <string name="demo_country_hint">The app picks the radio rules from the country. A laptop says United States, which has no rules in the app yet: pick Togo to see the flag screen. Then switch the radio off and on.</string>
     <string name="demo_radio_on">Switch the radio on</string>
     <string name="demo_section_hub">Local hub</string>
     <string name="demo_hub_hint">To use the hub: Settings, then Local hub, then Scan hub code, and pick the local hub.</string>

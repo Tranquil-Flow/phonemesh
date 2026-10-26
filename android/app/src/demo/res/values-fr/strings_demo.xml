@@ -21,6 +21,9 @@
     <string name="demo_not_added">%1$s ne vous a pas encore ajouté.</string>
     <string name="demo_section_radio">Votre radio</string>
     <string name="demo_radio_off">Éteindre la radio</string>
+    <string name="demo_country">Pays simulé : %1$s</string>
+    <string name="demo_country_own">celui du téléphone</string>
+    <string name="demo_country_hint">L\'appli choisit les règles radio selon le pays. Un ordinateur dit États-Unis, sans règles dans l\'appli pour l\'instant : choisissez Togo pour voir l\'écran du drapeau. Puis éteignez et rallumez la radio.</string>
     <string name="demo_radio_on">Allumer la radio</string>
     <string name="demo_section_hub">Relais local</string>
     <string name="demo_hub_hint">Pour utiliser le relais : Réglages, puis Relais local, puis Scanner le code du relais, et choisissez le relais local.</string>

@@ -30,7 +30,7 @@ class DemoApp : Application() {
     override fun onCreate() {
         super.onCreate()
         world = DemoWorld(this)
-        val core = AppCore.create(this, radioFactory = world::radioFor, access = DemoAccess(PhoneAccess(this)))
+        val core = AppCore.create(this, radioFactory = world::radioFor, access = DemoAccess(PhoneAccess(this), world))
         core.hub = world.hub.wifiLink
         core.bluetoothHub = world.hub.bluetoothLink
         AppCore.replaceForTest(core)
@@ -45,10 +45,14 @@ class DemoApp : Application() {
     }
 }
 
-/** The phone as the demo needs it: the demo radio needs no Bluetooth permission and Bluetooth is always on. */
-class DemoAccess(private val phone: DeviceAccess) : DeviceAccess by phone {
+/**
+ * The phone as the demo needs it: the demo radio needs no Bluetooth permission, Bluetooth is always on, and the country
+ * can be pretended from the controls ([DemoCountry]).
+ */
+class DemoAccess(private val phone: DeviceAccess, private val world: DemoWorld) : DeviceAccess by phone {
     override fun radioPermissionsMissing(): List<String> = emptyList()
     override fun bluetoothOn(): Boolean = true
+    override fun countryCode(): String? = DemoCountry.effective(world.country, phone.countryCode())
 }
 
 /**

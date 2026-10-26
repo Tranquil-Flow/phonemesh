@@ -90,6 +90,12 @@ class DemoControlsActivity : Activity() {
 
         heading(R.string.demo_section_radio)
         flip(if (world.radioOn) R.string.demo_radio_off else R.string.demo_radio_on) { world.setRadioOn(!world.radioOn) }
+        val country = world.country?.let { java.util.Locale("", it).getDisplayCountry(resources.configuration.locales[0]) }
+        button(0, getString(R.string.demo_country, country ?: getString(R.string.demo_country_own))) {
+            world.country = DemoCountry.next(world.country)
+            build()
+        }
+        words(R.string.demo_country_hint, 15f)
 
         heading(R.string.demo_section_hub)
         words(R.string.demo_hub_hint, 15f)

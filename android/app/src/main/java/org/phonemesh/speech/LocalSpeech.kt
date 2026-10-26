@@ -14,6 +14,7 @@ import java.io.Closeable
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.sqrt
+import org.phonemesh.core.HeardText
 
 /**
  * Local, offline speech models: one engine pack (Whisper) and one voice pack (Piper).
@@ -90,8 +91,8 @@ class LocalSpeech(pack: SpeechPack) : Closeable {
                 stream = recognizer.createStream()
                 stream.acceptWaveform(samples = samples, sampleRate = sampleRate)
                 recognizer.decode(stream)
-                val text = recognizer.getResult(stream).text.trim()
-                require(text.isNotEmpty()) { "Offline recognizer returned an empty transcript" }
+                val text = HeardText.clean(recognizer.getResult(stream).text)
+                require(text.isNotEmpty()) { "Offline recognizer heard no words" }
                 text
             } finally {
                 stream?.release()

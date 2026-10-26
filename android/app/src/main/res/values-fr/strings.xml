@@ -312,6 +312,7 @@
     <string name="picture_choose">Choisir une photo</string>
     <string name="picture_start">Prenez une photo ou choisissez-en une.</string>
     <string name="picture_no_camera">Aucune appli photo sur ce téléphone.</string>
+    <string name="picture_camera_denied">Caméra refusée. Choisissez plutôt une photo.</string>
     <string name="picture_no_gallery">Aucune galerie sur ce téléphone.</string>
     <string name="picture_no_photo">Aucune photo reçue. Réessayez.</string>
     <string name="picture_failed">Impossible de réduire assez cette photo.</string>

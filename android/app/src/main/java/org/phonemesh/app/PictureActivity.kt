@@ -1,5 +1,7 @@
 package org.phonemesh.app
 
+import android.content.pm.PackageManager
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
@@ -73,6 +75,12 @@ class PictureActivity : ScreenActivity() {
 
     /** The camera app writes a new photo into this app's own file (CaptureProvider): nothing goes to the gallery. */
     private fun takePhoto() {
+        // The app declares CAMERA (for scanning codes); Android then refuses to start the camera app for a photo until
+        // the permission is granted, so ask first instead of claiming there is no camera app.
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), REQUEST_CAMERA_PERMISSION)
+            return
+        }
         CaptureProvider.fileIn(this).delete()
         val out = CaptureProvider.uri(this)
         val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
@@ -86,7 +94,7 @@ class PictureActivity : ScreenActivity() {
             say(R.string.picture_no_camera)
         } catch (e: SecurityException) {
             Log.w(TAG, "camera refused", e)
-            say(R.string.picture_no_camera)
+            say(R.string.picture_camera_denied)
         }
     }
 
@@ -205,6 +213,12 @@ class PictureActivity : ScreenActivity() {
         }
 
     @Deprecated("Framework-only app: no AndroidX activity result API")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_CAMERA_PERMISSION) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) takePhoto() else say(R.string.picture_camera_denied)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
@@ -314,6 +328,7 @@ class PictureActivity : ScreenActivity() {
         const val HEAVY_SECONDS = 36.0
         private const val REQUEST_PICK = 7
         private const val REQUEST_CAMERA = 8
+        private const val REQUEST_CAMERA_PERMISSION = 9
         private const val TAG = "PhonemeshPicture"
         private const val STATE_URI = "uri"
         private const val STATE_SIZE = "size"

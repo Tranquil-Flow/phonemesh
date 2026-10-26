@@ -316,6 +316,7 @@
     <string name="picture_choose">Choose a photo</string>
     <string name="picture_start">Take a photo or choose one.</string>
     <string name="picture_no_camera">No camera app on this phone.</string>
+    <string name="picture_camera_denied">Camera not allowed. Choose a photo instead.</string>
     <string name="picture_no_gallery">No photo app on this phone.</string>
     <string name="picture_no_photo">No photo came back. Try again.</string>
     <string name="picture_failed">This photo could not be made small enough.</string>

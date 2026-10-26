@@ -5,7 +5,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.annotation.TargetApi
 import org.phonemesh.core.account.AccountId
+import org.phonemesh.core.account.Avatar
 import org.phonemesh.core.account.ContactCard
+import org.phonemesh.core.account.Profile
 import org.phonemesh.core.crypto.P256
 import org.phonemesh.core.session.KeyPairBytes
 import org.phonemesh.core.session.OwnKeys
@@ -127,10 +129,28 @@ class AccountStore(
         return checkNotNull(P256.derToRaw(der)) { "unexpected signature encoding" }
     }
 
-    /** This phone's card, with its current prekey and the account's name and colour. */
-    fun card(): ContactCard = ContactCard.create(this, history.accountRow()!!.name.ifEmpty { "?" }, history.accountRow()!!.colour)
+    /**
+     * This phone's profile; null before a name is chosen. An account named before profiles (History version 15) has
+     * no saved profile yet and reads as revision 1 with a letter.
+     */
+    fun profile(): Profile? {
+        val row = history.accountRow() ?: return null
+        row.profile?.let { Profile.decode(it) }?.let { return it }
+        if (row.name.isEmpty()) return null
+        return runCatching { Profile(row.name, row.colour and 0xFFFFFF) }.getOrNull()
+    }
 
-    fun setName(name: String, colour: Int) = history.setAccountName(name, colour)
+    /** This phone's card, with its current prekey and profile. */
+    fun card(): ContactCard = ContactCard.create(this, profile() ?: Profile("?", UNKNOWN_COLOUR))
+
+    /** Saves [name], [colour] (RGB) and [avatar]: the same profile when nothing changed, else the next revision. */
+    fun setProfile(name: String, colour: Int, avatar: Avatar): Profile {
+        val next = profile()?.changed(name, colour, avatar) ?: Profile(name, colour, avatar)
+        history.setAccountProfile(next)
+        return next
+    }
+
+    fun setName(name: String, colour: Int): Profile = setProfile(name, colour, profile()?.avatar ?: Avatar.Letter)
 
     /** Makes a new prekey when the current one is [PREKEY_DAYS] old, and drops those retired as long ago. */
     fun rotateIfDue() {
@@ -216,6 +236,8 @@ class AccountStore(
     }
 
     companion object {
+        /** Grey: a colour not known. */
+        const val UNKNOWN_COLOUR = 0x9E9E9E
         const val STORE_KEYSTORE = "KEYSTORE"
         const val STORE_SEALED = "SEALED"
         const val PREKEY_DAYS = 30L

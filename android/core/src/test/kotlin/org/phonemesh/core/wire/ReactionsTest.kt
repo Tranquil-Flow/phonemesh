@@ -14,6 +14,12 @@ class ReactionsTest {
         for (emoji in listOf("👍🏽", "🙏🏿", "🇹🇬", "🇫🇷", "#️⃣", "7️⃣", "🎉", "🌧️", "⚽", "☕")) assertEquals(emoji, Reactions.single(emoji))
     }
 
+    /** Emoji whose first character is not a Unicode "other symbol" count only with the emoji selector. */
+    @Test fun emojiThatNeedTheSelectorAreOneEmojiWithIt() {
+        for (emoji in listOf("©️", "®️", "↔️", "ℹ️", "〰️", "〽️", "‼️", "™️", "◽", "⬛", "⭐", "⏩")) assertEquals(emoji, Reactions.single(emoji))
+        for (text in listOf("©", "↔", "ℹ", "〰")) assertNull("plain $text", Reactions.single(text))
+    }
+
     @Test fun spacesAroundTheEmojiAreDropped() {
         assertEquals("😂", Reactions.single("  😂 \n"))
     }

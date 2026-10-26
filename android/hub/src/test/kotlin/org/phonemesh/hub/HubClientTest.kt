@@ -170,7 +170,7 @@ class HubClientTest {
     @Test fun aRealMessageGoesThroughTheClientAndTheCursorMovesOn() {
         val a = SoftKeys.generate(); val b = SoftKeys.generate()
         val ka = KeyPairBytes.generate(); val kb = KeyPairBytes.generate()
-        val qa = QrCode(ContactCard.create(a, "Awa", 1), ka.public); val qb = QrCode(ContactCard.create(b, "Ben", 2), kb.public)
+        val qa = QrCode(ContactCard.create(a, org.phonemesh.core.account.Profile("Awa", 1)), ka.public); val qb = QrCode(ContactCard.create(b, org.phonemesh.core.account.Profile("Ben", 2)), kb.public)
         val sa = Start.qr(a, qa, ka, qb)!!; val sb = Start.qr(b, qb, kb, qa)!!
         val sealed = Ratchet.seal(sa, Body.encode(Body.Text("fr", "rendez-vous au puits")))
         val codes = Ratchet.codes(sb)

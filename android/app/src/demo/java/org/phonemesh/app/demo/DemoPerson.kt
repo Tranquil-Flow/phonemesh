@@ -27,11 +27,11 @@ import org.phonemesh.core.wire.WireV2
 class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private val clock: DemoClock) {
     enum class Who(val key: String, val label: String, val node: String, val colour: Int, val replies: Boolean) {
         /** Met in person (QR codes), writes back. */
-        KOFI("kofi", "Kofi", "!d0e1c0f1", 3, true),
+        KOFI("kofi", "Kofi", "!d0e1c0f1", 0x43A047, true),
         /** Sends you a request by link; sends receipts but never writes back. */
-        AMA("ama", "Ama", "!d0e1a3a1", 5, false),
+        AMA("ama", "Ama", "!d0e1a3a1", 0x8E24AA, false),
         /** You open his link; he accepts and writes back. */
-        YAW("yaw", "Yaw", "!d0e1ca01", 1, true),
+        YAW("yaw", "Yaw", "!d0e1ca01", 0xFB8C00, true),
     }
 
     private val history = History(app, "demo-${who.key}.db")

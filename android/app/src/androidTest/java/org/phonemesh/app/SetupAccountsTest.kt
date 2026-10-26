@@ -100,7 +100,7 @@ class SetupAccountsTest {
     @Test fun anExistingPersonCompletesTheAddStepAfterRestart() {
         TestCore.install(added = false)
         val keys = SoftKeys.generate()
-        val qr = QrCode(ContactCard.create(keys, "Bea", 5), KeyPairBytes.generate().public)
+        val qr = QrCode(ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), KeyPairBytes.generate().public)
         TestCore.onMain {
             core.accountsFlow.showCode()
             assertTrue(core.accountsFlow.scanned(AddCode.of(qr)) is Accounts.Added.Contact)

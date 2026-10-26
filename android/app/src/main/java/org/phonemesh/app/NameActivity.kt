@@ -48,7 +48,7 @@ class NameActivity : ScreenActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val saved = core.account()
-        colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second ?: -1
+        colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second?.let { AccountColours.indexOf(it) } ?: -1
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), pad())
@@ -197,7 +197,7 @@ class NameActivity : ScreenActivity() {
     private fun onSave() {
         val name = cleaned() ?: return
         if (!Names.valid(name) || name.toByteArray(Charsets.UTF_8).size > Names.MAX_BYTES || colour !in AccountColours.all.indices) return
-        core.saveAccount(name, colour)
+        core.saveAccount(name, AccountColours.all[colour].rgb)
         finish()
     }
 
@@ -248,9 +248,9 @@ class NameActivity : ScreenActivity() {
     }
 }
 
-/** The colours a person can pick for themselves; the card carries the index. Each has a spoken name for TalkBack. */
+/** Suggested colours, each with a spoken name for TalkBack; the card carries the colour itself (RGB, decision 48). */
 object AccountColours {
-    class Colour(val argb: Int, val on: Int, val name: Int)
+    class Colour(val argb: Int, val on: Int, val name: Int) { val rgb: Int get() = argb and 0xFFFFFF }
 
     private const val WHITE = 0xFFFFFFFF.toInt()
     private const val INK = 0xFF111111.toInt()
@@ -266,6 +266,9 @@ object AccountColours {
         Colour(0xFF6D4C41.toInt(), WHITE, R.string.colour_brown),
     )
 
-    /** A saved colour; an index from another phone's card outside the list shows as grey. */
-    fun argb(index: Int): Int = all.getOrNull(index)?.argb ?: 0xFF9E9E9E.toInt()
+    /** A saved RGB colour, opaque. */
+    fun argb(rgb: Int): Int = (rgb and 0xFFFFFF) or 0xFF000000.toInt()
+
+    /** The suggestion that is [rgb], or -1. */
+    fun indexOf(rgb: Int): Int = all.indexOfFirst { it.rgb == rgb }
 }

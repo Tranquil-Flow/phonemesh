@@ -25,6 +25,11 @@ Copyright 2023 Evan Wallace
 Licence: MIT
 https://github.com/evanw/thumbhash
 
+Unicode emoji list (Emoji 5.0), for profile pictures
+Copyright 2017 Unicode, Inc.
+Licence: Unicode License v3
+https://www.unicode.org/license.txt
+
 Licence texts: docs/licenses in the source code.
 
 sherpa-onnx 1.13.8
@@ -93,6 +98,11 @@ ThumbHash
 Copyright 2023 Evan Wallace
 Licence : MIT
 https://github.com/evanw/thumbhash
+
+Liste des emoji Unicode (Emoji 5.0), pour les images de profil
+Copyright 2017 Unicode, Inc.
+Licence : Unicode License v3
+https://www.unicode.org/license.txt
 
 Textes des licences : docs/licenses dans le code source.
 

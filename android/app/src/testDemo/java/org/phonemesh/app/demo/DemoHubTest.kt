@@ -25,7 +25,7 @@ class DemoHubTest {
     private val kofi = Ear().also { it.clock = clock; mesh.join("!kofi", it) }
 
     private fun hello(): ByteArray =
-        Start.link(SoftKeys.generate(), "Yaw", 3, ContactCard.create(SoftKeys.generate(), "Esi", 4), KeyPairBytes.generate())!!.hello
+        Start.link(SoftKeys.generate(), org.phonemesh.core.account.Profile("Yaw", 0x43A047), ContactCard.create(SoftKeys.generate(), org.phonemesh.core.account.Profile("Esi", 0x1E88E5)), KeyPairBytes.generate())!!.hello
 
     private fun joined(hub: DemoHub): Int {
         var changes = 0

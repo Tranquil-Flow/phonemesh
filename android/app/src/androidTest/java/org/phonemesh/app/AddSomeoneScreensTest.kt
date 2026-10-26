@@ -77,7 +77,7 @@ class AddSomeoneScreensTest {
         val keys = org.phonemesh.core.session.SoftKeys.generate()
         val pair = org.phonemesh.core.session.KeyPairBytes.generate()
         val qr = org.phonemesh.core.account.QrCode(
-            org.phonemesh.core.account.ContactCard.create(keys, "Bea", 5), pair.public)
+            org.phonemesh.core.account.ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), pair.public)
         val screen = Views.start(AddSomeoneActivity::class.java)
         TestCore.onMain { assertTrue(ScanActivity.handleRead(screen, core, AddCode.of(qr))) }
         waitFor(ChatsActivity::class.java)
@@ -88,7 +88,7 @@ class AddSomeoneScreensTest {
     @Test fun scanningALinkNamesThemAndOpensTheSafetyPicture() {
         TestCore.install()
         val keys = org.phonemesh.core.session.SoftKeys.generate()
-        val card = org.phonemesh.core.account.ContactCard.create(keys, "Bea", 5)
+        val card = org.phonemesh.core.account.ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA))
         val screen = Views.start(AddSomeoneActivity::class.java)
         TestCore.onMain { assertTrue(ScanActivity.handleRead(screen, core, AddCode.of(card))) }
         waitFor(SafetyActivity::class.java)
@@ -288,7 +288,7 @@ class AddSomeoneScreensTest {
     @Test fun aLinkStorageFailureShowsSaveFailureRatherThanDamagedCode() {
         TestCore.install(language = "en-US", connected = false)
         val keys = org.phonemesh.core.session.SoftKeys.generate()
-        val card = org.phonemesh.core.account.ContactCard.create(keys, "Bea", 5)
+        val card = org.phonemesh.core.account.ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA))
         TestCore.onMain {
             core.history.writableDatabase.execSQL("CREATE TRIGGER reject_link_save BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'injected link save failure'); END")
         }

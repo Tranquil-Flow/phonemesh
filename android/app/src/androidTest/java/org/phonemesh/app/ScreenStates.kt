@@ -107,7 +107,7 @@ object ScreenStates {
         val screen = Views.start(AddSomeoneActivity::class.java)
         if (request) {
             val mine = TestCore.onMain { TestCore.core.accounts.card() }
-            val hello = org.phonemesh.core.session.Start.link(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4, mine,
+            val hello = org.phonemesh.core.session.Start.link(org.phonemesh.core.session.SoftKeys.generate(), org.phonemesh.core.account.Profile("Aminata", 0x1E88E5), mine,
                 org.phonemesh.core.session.KeyPairBytes.generate())!!.hello
             TestCore.onMain { TestCore.core.onBroadcastData("!0000a111", org.phonemesh.ble.MeshRadio.ACCOUNT_PORT, hello, 0, 1L, "") }
             Views.waitUntil { screen.window.decorView.findViewWithTag<android.view.View>("request") != null }
@@ -118,7 +118,7 @@ object ScreenStates {
     /** Accounts step 11: the six safety pictures for Aminata, added by link. */
     fun safety(mismatch: Boolean = false): Activity {
         TestCore.install(language = if (mismatch) "en-US" else "fr")
-        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4)
+        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), org.phonemesh.core.account.Profile("Aminata", 0x1E88E5))
         val added = TestCore.onMain { TestCore.core.accountsFlow.openLink(card) } as Accounts.Added.Contact
         val screen: SafetyActivity = Views.launch(SafetyActivity.intent(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext, added.account))
         Views.waitUntil(10_000) { screen.window.decorView.findViewWithTag<android.widget.GridLayout>("safety_icons")?.childCount == 6 }
@@ -163,7 +163,7 @@ object ScreenStates {
     fun contactDetails(missing: Boolean = false, conversation: Boolean = false): Activity {
         TestCore.install(language = if (missing) "en-US" else "fr", voices = listOf("fr", "en-US"))
         val core = TestCore.core
-        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), "Aminata", 4)
+        val card = org.phonemesh.core.account.ContactCard.create(org.phonemesh.core.session.SoftKeys.generate(), org.phonemesh.core.account.Profile("Aminata", 0x1E88E5))
         val added = TestCore.onMain { core.accountsFlow.openLink(card) } as Accounts.Added.Contact
         TestCore.onMain {
             check(core.setContactVoice(added.account.toString(), "voice-fr-siwis"))

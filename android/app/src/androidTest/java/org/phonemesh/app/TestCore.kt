@@ -54,7 +54,7 @@ object TestCore {
             access.reset()
             build(language, realSpeech, nextTheme)
             core.settings.firstPersonAdded = added
-            if (named) core.saveAccount("Awa", 3)
+            if (named) core.saveAccount("Awa", 0x43A047)
             if (connected) radio.connected(true)
         }
         return core

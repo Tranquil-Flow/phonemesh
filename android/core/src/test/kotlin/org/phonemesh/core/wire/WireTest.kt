@@ -24,7 +24,8 @@ class WireTest {
         val part = PictureWire.encode(PictureWire.Part(9, 0, ByteArray(198) { it.toByte() }))
         val bodies = listOf(
             Body.Text("fr", "bonjour"), Body.Text("pt-BR", "é"), Body.Reply(ref, "en-US", "yes"), Body.Reaction(ref, "👍"),
-            Body.PictureHead(head), Body.PicturePart(part), Body.Receipt(Ack(byteArrayOf(1, 2), 0xfffffffeL, 5)), Body.Hello("Aïcha", 5),
+            Body.PictureHead(head), Body.PicturePart(part), Body.Receipt(Ack(byteArrayOf(1, 2), 0xfffffffeL, 5)), Body.Hello(org.phonemesh.core.account.Profile("Aïcha", 0xE53935)),
+            Body.ProfileUpdate(org.phonemesh.core.account.Profile("Aïcha", 0xE53935, org.phonemesh.core.account.Avatar.Emoji("🐟"), revision = 2)),
         )
         for (body in bodies) {
             val bytes = Body.encode(body)
@@ -37,7 +38,7 @@ class WireTest {
             assertEquals(ack, decoded.ack)
             assertArrayEquals(Body.encode(body), Body.encode(decoded.body))
         }
-        assertTrue("a hello carries no ack", runCatching { Body.encode(Body.Hello("x", 1), ack) }.isFailure)
+        assertTrue("a hello carries no ack", runCatching { Body.encode(Body.Hello(org.phonemesh.core.account.Profile("x", 1)), ack) }.isFailure)
     }
 
     @Test fun theLongestTextsFit() {

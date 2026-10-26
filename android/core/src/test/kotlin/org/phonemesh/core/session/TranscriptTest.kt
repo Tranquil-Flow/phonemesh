@@ -15,7 +15,7 @@ import org.phonemesh.core.wire.Body
 class TranscriptTest {
     private class Side(val keys: SoftKeys, val oneTime: KeyPairBytes, val pairs: ArrayDeque<KeyPairBytes>) {
         var state: SessionState? = null
-        val card get() = ContactCard.create(keys, "x", 0)
+        val card get() = ContactCard.create(keys, org.phonemesh.core.account.Profile("x", 0))
     }
 
     @Test fun kotlinAndPythonAgreeByteForByte() {
@@ -55,7 +55,7 @@ class TranscriptTest {
                 }
                 "link" -> {
                     val owner = sides.getValue(line[1]); val opener = sides.getValue(line[2])
-                    val opened = checkNotNull(Start.link(opener.keys, "Pélagie", 4, owner.card, opener.oneTime))
+                    val opened = checkNotNull(Start.link(opener.keys, org.phonemesh.core.account.Profile("Pélagie", 0x43A047), owner.card, opener.oneTime))
                     opener.state = opened.state
                     packets[-1] = opened.hello
                     val received = checkNotNull(Start.hello(owner.keys, opened.hello))

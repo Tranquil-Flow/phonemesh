@@ -60,7 +60,7 @@ class NameActivityTest {
         assertTrue(enabled(screen, "name_save"))
         Views.tap(screen, "name_save")
         Views.waitUntil { screen.isFinishing }
-        assertEquals("Aminata" to 4, TestCore.onMain { core.account() })
+        assertEquals("the card carries the colour itself" , "Aminata" to 0x1E88E5, TestCore.onMain { core.account() })
         assertTrue("the account's keys exist", TestCore.onMain { core.accounts.identity.size == 33 })
     }
 
@@ -110,7 +110,7 @@ class NameActivityTest {
         Views.tap(screen, "colour_7")
         Views.tap(screen, "name_save")
         Views.waitUntil { screen.isFinishing }
-        assertEquals("Ama" to 7, TestCore.onMain { core.account() })
+        assertEquals("Ama" to 0x6D4C41, TestCore.onMain { core.account() })
     }
 
     @Test fun settingsShowsTheNameAndChangesIt() {

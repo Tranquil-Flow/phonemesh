@@ -38,7 +38,7 @@ class ContactDetailsTest {
         TestCore.install(language = language, voices = listOf("fr", "en-US"), connected = false)
         Fixtures.store(context).install(Fixtures.voice("fr", ALTERNATE))
         val keys = SoftKeys.generate()
-        val qr = QrCode(ContactCard.create(keys, "Bea", 5), KeyPairBytes.generate().public)
+        val qr = QrCode(ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), KeyPairBytes.generate().public)
         account = qr.card.accountId
         TestCore.onMain {
             core.accountsFlow.showCode()

@@ -16,7 +16,7 @@ class PendingRequests(private val history: History, private val vault: Vault) {
             db.rawQuery("SELECT 1 FROM pending_requests WHERE account_id=?", arrayOf(account.toString())).use { it.moveToFirst() } ||
             db.rawQuery("SELECT count(*) FROM pending_requests", null).use { it.moveToFirst(); it.getInt(0) >= MAX_PENDING }) return@transaction false
         if (!history.firstHello(hello.id, at)) return@transaction false
-        val name = Body.encode(Body.Hello(hello.name, hello.colour))
+        val name = Body.encode(Body.Hello(hello.profile))
         val state = hello.state.encode()
         val plain = ByteBuffer.allocate(1 + 33 + 16 + 2 + name.size + state.size)
             .put(1.toByte()).put(hello.identity).put(hello.id).putShort(name.size.toShort()).put(name).put(state).array()
@@ -71,7 +71,7 @@ class PendingRequests(private val history: History, private val vault: Vault) {
         val body = Body.decode(ByteArray(size).also { b.get(it) }) as? Body.Hello ?: return null
         val state = SessionState.decode(ByteArray(b.remaining()).also { b.get(it) }) ?: return null
         require(state.serial == 1L && !state.iAmL && state.mayStep && state.heard && state.nr == 1L && state.ns == 0L)
-        Start.HelloReceived(state, identity, body.name, body.colour, id)
+        Start.HelloReceived(state, identity, body.profile, id)
     }.getOrNull()
 
     companion object {

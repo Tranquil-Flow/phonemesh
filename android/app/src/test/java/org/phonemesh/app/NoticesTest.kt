@@ -10,7 +10,7 @@ class NoticesTest {
     private val attributions = listOf(
         "ZXing", "Apache-2.0", "ncnn", "Tencent", "BSD-3-Clause", "ThumbHash", "Evan Wallace", "MIT", "sherpa-onnx",
         "ONNX Runtime", "espeak-ng", "GPL-3.0", "piper-phonemize", "Michael Hansen", "Unlicense", "protobuf",
-        "Meshtastic", "Whisper", "LJ Speech Dataset", "SIWIS", "CC-BY 4.0", "AGPL-3.0", "NOTICE.txt",
+        "Meshtastic", "Unicode License v3", "Emoji 5.0", "Whisper", "LJ Speech Dataset", "SIWIS", "CC-BY 4.0", "AGPL-3.0", "NOTICE.txt",
     )
 
     @Test fun bothLanguagesNameEveryComponentAndLicence() {

@@ -43,7 +43,7 @@ class PersonPictureRedTest {
     private class Bea {
         val keys = SoftKeys.generate()
         val pair = KeyPairBytes.generate()
-        val qr = QrCode(ContactCard.create(keys, "Bea", 5), pair.public)
+        val qr = QrCode(ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), pair.public)
         val rows = LinkedHashMap<Long, Postman.Outgoing>()
         val sessions = LinkedHashMap<AccountId, SessionState>()
         private val replays = LinkedHashMap<String, MailStore.Replay>()

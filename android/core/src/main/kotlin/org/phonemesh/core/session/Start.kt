@@ -2,6 +2,7 @@ package org.phonemesh.core.session
 
 import org.phonemesh.core.account.AccountId
 import org.phonemesh.core.account.ContactCard
+import org.phonemesh.core.account.Profile
 import org.phonemesh.core.account.QrCode
 import org.phonemesh.core.crypto.Aead
 import org.phonemesh.core.crypto.Bytes
@@ -57,7 +58,7 @@ object Start {
      * is made for this hello and kept in the session as A's first ratchet key. Send the same hello bytes again to
      * retry; to try again much later, start afresh with a new [ephemeral] (a new session, nothing reused).
      */
-    fun link(own: OwnKeys, name: String, colour: Int, owner: ContactCard, ephemeral: KeyPairBytes): LinkOpened? {
+    fun link(own: OwnKeys, profile: Profile, owner: ContactCard, ephemeral: KeyPairBytes): LinkOpened? {
         if (AccountId.of(own.identity) == owner.accountId) return null
         val ek = P256.privateKey(ephemeral.scalar)
         val first = byteArrayOf(WireV2.HELLO_BYTE)
@@ -68,12 +69,16 @@ object Start {
         val sk = secret(INFO_X3DH, own.identity, owner.identity, dh1, dh2, hide)
         val state = initial(sk, iAmL = true, firstStepper = false, mustStep = false, mine = ephemeral, theirs = null)
         val associated = first + ephemeral.public + sealedIdentity
-        val hello = associated + Ratchet.sealWith(Ratchet.messageKey(state.cks), associated, Body.encode(Body.Hello(name, colour)))
+        val hello = associated + Ratchet.sealWith(Ratchet.messageKey(state.cks), associated, Body.encode(Body.Hello(profile)))
+        check(hello.size <= WireV2.MAX_PACKET) { "a hello is one packet" }
         return LinkOpened(state.with(cks = Ratchet.nextChain(state.cks), ns = 1), hello)
     }
 
-    class HelloReceived(val state: SessionState, identity: ByteArray, val name: String, val colour: Int, id: ByteArray) {
+    class HelloReceived(val state: SessionState, identity: ByteArray, val profile: Profile, id: ByteArray) {
         val identity: ByteArray = identity.copyOf()
+        val name: String get() = profile.name
+        /** RGB. */
+        val colour: Int get() = profile.colour
         /** Remember it: a hello with an id already seen, or from an identity that has a session, is a replay (F2). */
         val id: ByteArray = id.copyOf()
     }
@@ -100,7 +105,7 @@ object Start {
             val plain = Ratchet.openWith(Ratchet.messageKey(state.ckr), associated, packet.copyOfRange(HELLO_FIXED, packet.size)) ?: return null
             val body = Body.decode(plain) as? Body.Hello ?: return null
             val received = state.with(ckr = Ratchet.nextChain(state.ckr), nr = 1, heard = true)
-            return HelloReceived(received, identity, body.name, body.colour, Bytes.sha256(ephemeral).copyOf(16))
+            return HelloReceived(received, identity, body.profile, Bytes.sha256(ephemeral).copyOf(16))
         }
         return null
     }

@@ -7,7 +7,7 @@ import org.phonemesh.core.wire.Body
 
 /** A phone in a conversation, for tests: it stores each new state the way the app must. */
 internal class Phone(val name: String, var keys: OwnKeys = SoftKeys.generate()) {
-    val card get() = ContactCard.create(keys, name, 1)
+    val card get() = ContactCard.create(keys, org.phonemesh.core.account.Profile(name, 0xFB8C00))
     lateinit var state: SessionState
     var newPair: () -> KeyPairBytes = KeyPairBytes::generate
     var now = 0L
@@ -40,7 +40,7 @@ internal class Phone(val name: String, var keys: OwnKeys = SoftKeys.generate()) 
         /** The opener, then the link's owner, after the hello arrived. */
         fun linkPair(): Pair<Phone, Phone> {
             val opener = Phone("Opener"); val owner = Phone("Owner")
-            val opened = checkNotNull(Start.link(opener.keys, "Opener", 3, owner.card, KeyPairBytes.generate()))
+            val opened = checkNotNull(Start.link(opener.keys, org.phonemesh.core.account.Profile("Opener", 0x43A047), owner.card, KeyPairBytes.generate()))
             opener.state = opened.state
             owner.state = checkNotNull(Start.hello(owner.keys, opened.hello)).state
             return opener to owner

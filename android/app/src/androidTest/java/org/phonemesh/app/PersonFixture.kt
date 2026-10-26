@@ -24,7 +24,7 @@ object PersonFixture {
     class Bea(val name: String, val colour: Int) {
         val keys = SoftKeys.generate()
         val pair = KeyPairBytes.generate()
-        val qr = QrCode(ContactCard.create(keys, name, colour), pair.public)
+        val qr = QrCode(ContactCard.create(keys, org.phonemesh.core.account.Profile(name, colour)), pair.public)
         val store = Memory()
         val postman = Postman(keys, store, quietDelay = { 20_000L })
         lateinit var awa: AccountId
@@ -93,7 +93,7 @@ object PersonFixture {
      * Awa shows her code, scans [name]'s: a met contact, a person chat (its id returned) and matching sessions. [accept]
      * makes the fake radio report each broadcast as taken by itself; false lets a test play the radio.
      */
-    fun meet(name: String = "Bea", colour: Int = 5, accept: Boolean = true): Pair<Bea, Long> {
+    fun meet(name: String = "Bea", colour: Int = 0x8E24AA, accept: Boolean = true): Pair<Bea, Long> {
         TestCore.radio.acceptBroadcasts = accept
         val core = TestCore.core
         val bea = Bea(name, colour)

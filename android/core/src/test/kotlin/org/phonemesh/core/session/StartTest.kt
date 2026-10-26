@@ -70,21 +70,33 @@ class StartTest {
 
     @Test fun aHelloOpensOnlyForTheLinksOwner() {
         val owner = Phone("Owner"); val opener = Phone("Opener"); val stranger = Phone("Stranger")
-        val opened = checkNotNull(Start.link(opener.keys, "Opener", 3, owner.card, KeyPairBytes.generate()))
-        assertTrue("one packet: ${opened.hello.size}", opened.hello.size <= 142)
+        val opened = checkNotNull(Start.link(opener.keys, org.phonemesh.core.account.Profile("Opener", 0x43A047, org.phonemesh.core.account.Avatar.Emoji("🐟")), owner.card, KeyPairBytes.generate()))
+        assertTrue("one packet: ${opened.hello.size}", opened.hello.size == 110 + "Opener".length + 4)
         assertTrue(Start.isHello(opened.hello))
         assertNull("another phone", Start.hello(stranger.keys, opened.hello))
         assertNull("damaged", Start.hello(owner.keys, opened.hello.copyOf().also { it[60] = (it[60] + 1).toByte() }))
         val got = checkNotNull(Start.hello(owner.keys, opened.hello))
         assertEquals("Opener", got.name)
-        assertEquals(3, got.colour)
+        assertEquals(0x43A047, got.colour)
+        assertEquals(org.phonemesh.core.account.Avatar.Emoji("🐟"), got.profile.avatar)
         assertArrayEquals(opener.keys.identity, got.identity)
     }
 
     /** Review F8: the hello does not carry the opener's identity key in the clear. */
+    /** The largest profile (40-byte name, 28-byte emoji) still makes a hello of one radio packet. */
+    @Test fun theLargestHelloFitsOnePacket() {
+        val owner = Phone("Owner"); val opener = Phone("Opener")
+        val longest = org.phonemesh.core.account.EmojiAvatars.all.maxBy { it.toByteArray().size }
+        val profile = org.phonemesh.core.account.Profile("é".repeat(20), 0xFFFFFF, org.phonemesh.core.account.Avatar.Emoji(longest))
+        val hello = checkNotNull(Start.link(opener.keys, profile, owner.card, KeyPairBytes.generate())).hello
+        assertEquals(110 + 40 + longest.toByteArray().size, hello.size)
+        assertTrue(hello.size <= org.phonemesh.core.wire.WireV2.MAX_PACKET)
+        assertEquals(profile, checkNotNull(Start.hello(owner.keys, hello)).profile)
+    }
+
     @Test fun theHelloHidesWhoSendsIt() {
         val owner = Phone("Owner"); val opener = Phone("Opener")
-        val hello = Start.link(opener.keys, "Opener", 3, owner.card, KeyPairBytes.generate())!!.hello
+        val hello = Start.link(opener.keys, org.phonemesh.core.account.Profile("Opener", 0x43A047, org.phonemesh.core.account.Avatar.Emoji("🐟")), owner.card, KeyPairBytes.generate())!!.hello
         val identity = opener.keys.identity
         assertFalse((0..hello.size - identity.size).any { at -> hello.copyOfRange(at, at + identity.size).contentEquals(identity) })
         assertFalse(Vectors.hex(hello).contains(AccountId.of(identity).toString()))
@@ -95,7 +107,7 @@ class StartTest {
         val owner = Phone("Owner"); val opener = Phone("Opener")
         val oldCard = owner.card
         owner.keys = (owner.keys as SoftKeys).rotated(keep = 1)
-        val hello = Start.link(opener.keys, "Opener", 3, oldCard, KeyPairBytes.generate())!!.hello
+        val hello = Start.link(opener.keys, org.phonemesh.core.account.Profile("Opener", 0x43A047, org.phonemesh.core.account.Avatar.Emoji("🐟")), oldCard, KeyPairBytes.generate())!!.hello
         assertEquals("Opener", Start.hello(owner.keys, hello)!!.name)
         owner.keys = (owner.keys as SoftKeys).rotated(keep = 1)
         assertNull("two rotations later the old prekey is gone", Start.hello(owner.keys, hello))
@@ -104,7 +116,7 @@ class StartTest {
     /** Review F2: a replayed hello rebuilds the owner's state, but the owner's first packet steps with a fresh key. */
     @Test fun aReplayedHelloNeverMakesTheOwnerReuseAKey() {
         val owner = Phone("Owner"); val opener = Phone("Opener")
-        val opened = Start.link(opener.keys, "Opener", 3, owner.card, KeyPairBytes.generate())!!
+        val opened = Start.link(opener.keys, org.phonemesh.core.account.Profile("Opener", 0x43A047, org.phonemesh.core.account.Avatar.Emoji("🐟")), owner.card, KeyPairBytes.generate())!!
         val first = Start.hello(owner.keys, opened.hello)!!
         val replay = Start.hello(owner.keys, opened.hello)!!
         assertArrayEquals("same id: the app refuses it", first.id, replay.id)

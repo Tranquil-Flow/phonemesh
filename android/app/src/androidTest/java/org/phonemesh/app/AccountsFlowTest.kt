@@ -480,7 +480,7 @@ class AccountsFlowTest {
         b.history.writableDatabase.apply { execSQL("DROP TABLE picture_pieces"); execSQL("DROP TABLE pending_requests"); execSQL("DROP TABLE picture_ids"); execSQL("DROP TABLE hub_custody"); execSQL("DROP TABLE hub_cursor"); version = 11 }
         b.history.close()
         val reopened = Phone(B, "Bea", 5)
-        assertEquals(15, reopened.history.readableDatabase.version)
+        assertEquals(16, reopened.history.readableDatabase.version)
         assertTrue(reopened.flow.requests().isEmpty())
         assertEquals("Awa", reopened.history.contactRow(a.store.accountId.toString())!!.name)
         assertArrayEquals(packet, reopened.history.outbox(a.store.accountId.toString()).single().packet)
@@ -499,7 +499,7 @@ class AccountsFlowTest {
         assertNotNull(lm.receive(response.packet, now))
         assertTrue(large.store.session(small.store.accountId)!!.heard)
         val before = large.history.sessionRow(small.store.accountId.toString())!!.second
-        val next = org.phonemesh.core.session.Start.link(small.store, "new claim", 2, large.store.card(),
+        val next = org.phonemesh.core.session.Start.link(small.store, org.phonemesh.core.account.Profile("new claim", 0xFDD835), large.store.card(),
             org.phonemesh.core.session.KeyPairBytes.generate())!!.hello
         assertNull(large.flow.onPacket(next))
         assertArrayEquals("F13 is only for crossed, unanswered starts", before,
@@ -513,7 +513,7 @@ class AccountsFlowTest {
         b.flow.scanned(a.flow.link())
         val first = a.flow.onPacket(b.sent.single())!!
         val c = org.phonemesh.core.session.SoftKeys.generate()
-        val hello = org.phonemesh.core.session.Start.link(c, "Cy", 2, a.store.card(),
+        val hello = org.phonemesh.core.session.Start.link(c, org.phonemesh.core.account.Profile("Cy", 0xFDD835), a.store.card(),
             org.phonemesh.core.session.KeyPairBytes.generate())!!.hello
         val second = a.flow.onPacket(hello)!!
         val db = a.history.writableDatabase

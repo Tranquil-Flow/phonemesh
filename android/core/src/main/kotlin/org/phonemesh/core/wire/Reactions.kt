@@ -1,11 +1,14 @@
 package org.phonemesh.core.wire
 
+import org.phonemesh.core.account.EmojiAvatars
+
 /**
  * Spec decision 29: a reaction can be any one emoji from the phone's keyboard, not only the six fixed ones, within the
  * reaction limit both wires share ([SharedPost.MAX_EMOJI], [Body.MAX_EMOJI]: 32 UTF-8 bytes). One emoji means one
  * element, or elements joined by zero-width joiners (families, ❤️‍🔥, 🧑🏽‍🌾). An element is a pictograph with an optional
  * emoji variation selector and skin tone, a flag (two regional letters, or a black flag with tag letters such as
- * Scotland's), or a keycap. The limit was 8 bytes until the owner noted no phone runs v0.1.0 (2026-10-26).
+ * Scotland's), a keycap, or another listed emoji start (©️ and ↔️ with the emoji selector, ◽ without:
+ * [EmojiAvatars.unusualStarts]). The limit was 8 bytes until the owner noted no phone runs v0.1.0 (2026-10-26).
  */
 object Reactions {
     const val MAX_BYTES = 32
@@ -34,7 +37,12 @@ object Reactions {
             if (i < cp.size && cp[i] == VARIATION) i++
             return if (i < cp.size && cp[i] == KEYCAP) i + 1 else null
         }
-        if (!pictograph(c)) return null
+        if (!pictograph(c)) {
+            val needsSelector = EmojiAvatars.unusualStarts[c] ?: return null
+            val selected = at + 1 < cp.size && cp[at + 1] == VARIATION
+            if (needsSelector && !selected) return null
+            return if (selected) at + 2 else at + 1
+        }
         var i = at + 1
         if (c == BLACK_FLAG && i < cp.size && cp[i] in TAG_LETTERS) {
             while (i < cp.size && cp[i] in TAG_LETTERS) i++

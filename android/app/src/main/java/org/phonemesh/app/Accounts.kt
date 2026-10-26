@@ -3,6 +3,7 @@ package org.phonemesh.app
 import org.phonemesh.core.account.AccountId
 import org.phonemesh.core.account.AddCode
 import org.phonemesh.core.account.ContactCard
+import org.phonemesh.core.account.Profile
 import org.phonemesh.core.account.QrCode
 import org.phonemesh.core.account.SafetyPicture
 import org.phonemesh.core.session.KeyPairBytes
@@ -78,7 +79,7 @@ class Accounts(
                 }
                 try {
                     history.transaction {
-                        keepContact(code.card.encode(), code.card.name, code.card.colour, met = true)
+                        keepContact(code.card.encode(), code.card.profile, met = true)
                         check(store.installQrSession(account, state))
                         store.pendingRequests.retire(account)
                         Added.Contact(account, history.personChat(account.toString(), code.card.name).id, met = true)
@@ -108,11 +109,11 @@ class Accounts(
                 failure !is org.phonemesh.core.mail.MailStore.Refused) throw failure
             return Added.NotSaved
         }
-        val (name, colour) = history.accountRow()!!.let { it.name to it.colour }
-        val opened = Start.link(store, name, colour, card, KeyPairBytes.generate()) ?: return Added.Bad
+        val profile = store.profile() ?: return Added.NotSaved
+        val opened = Start.link(store, profile, card, KeyPairBytes.generate()) ?: return Added.Bad
         val made = try {
             history.transaction {
-                keepContact(card.encode(), card.name, card.colour, met = false)
+                keepContact(card.encode(), card.profile, met = false)
                 val row = History.OutboxRow(0, account.toString(), null, WireV2.PORT, opened.hello, null, null,
                     now(), 0, now() + org.phonemesh.core.mail.Postman.RETRY_MS[0], "WAITING")
                 if (!store.storeSession(account, opened.state, row)) throw org.phonemesh.core.mail.MailStore.Refused()
@@ -162,7 +163,7 @@ class Accounts(
         val hello = store.pendingRequests.current(request.account, request.id)
             ?: throw org.phonemesh.core.mail.MailStore.Refused()
         if (history.contactRow(request.account.toString()) != null) throw org.phonemesh.core.mail.MailStore.Refused()
-        keepContact(hello.identity, hello.name, hello.colour, met = false)
+        keepContact(hello.identity, hello.profile, met = false)
         if (!store.storeSession(request.account, hello.state)) throw org.phonemesh.core.mail.MailStore.Refused()
         if (!store.pendingRequests.remove(request.account, hello.id)) throw org.phonemesh.core.mail.MailStore.Refused()
         Added.Contact(request.account, history.personChat(request.account.toString(), hello.name).id, met = false)
@@ -179,22 +180,30 @@ class Accounts(
     /** "Ce sont les mêmes" ([met] true) or "Pas les mêmes" (false: not, or no longer, met in person). */
     fun setMet(account: AccountId, met: Boolean) {
         val row = history.contactRow(account.toString()) ?: return
-        history.putContact(History.ContactRow(row.accountId, row.card, row.name, row.colour, met, row.voice, row.added))
+        history.putContact(History.ContactRow(row.accountId, row.card, row.name, row.colour, met, row.voice, row.added, row.profile))
     }
 
     fun isMet(account: AccountId): Boolean = history.contactRow(account.toString())?.met == true
 
-    private fun keepContact(card: ByteArray, name: String, colour: Int, met: Boolean) {
+    /** Keeps [profile] unless the contact already has a newer one (an old card scanned again). */
+    private fun keepContact(card: ByteArray, profile: Profile, met: Boolean) {
         val account = AccountId.of(identityOf(card)).toString()
         val old = history.contactRow(account)
-        history.putContact(History.ContactRow(account, card, name, colour, met || old?.met == true, old?.voice, old?.added ?: now()))
+        val known = old?.profile?.let { Profile.decode(it) }
+        val kept = if (known != null && known.revision > profile.revision) known else profile
+        history.putContact(History.ContactRow(account, card, kept.name, kept.colour, met || old?.met == true, old?.voice,
+            old?.added ?: now(), kept.encode()))
     }
 
     companion object {
         const val SHOWN_MS = 10 * 60_000L
         private const val MAX_SHOWING_STARTS = 128
 
-        /** A contact row holds a whole card (QR, link) or only the identity key (a hello): the identity either way. */
-        fun identityOf(card: ByteArray): ByteArray = if (card.size == 33) card else ContactCard.decode(card)!!.identity
+        /**
+         * A contact row holds a whole card (QR, link) or only the identity key (a hello): the identity either way. It
+         * sits at bytes 2..34 of every card version, so cards saved before version 2 still read (they were checked
+         * when saved).
+         */
+        fun identityOf(card: ByteArray): ByteArray = if (card.size == 33) card else card.copyOfRange(2, 35)
     }
 }

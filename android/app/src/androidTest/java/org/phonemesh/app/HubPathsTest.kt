@@ -157,7 +157,7 @@ class HubPathsTest {
         }
         TestCore.restart()
         TestCore.onMain {
-            assertEquals(15, core.history.readableDatabase.version)
+            assertEquals(16, core.history.readableDatabase.version)
             assertTrue(row.packet.contentEquals(core.history.outboxRow(row.id)!!.packet))
             assertEquals("HUB", core.history.outboxRow(row.id)!!.state)
             assertFalse("legacy HUB is not proof of a particular pinned hub", HubCustody(core.history).has(row.id, pin))
@@ -367,7 +367,7 @@ class HubPathsTest {
         TestCore.install()
         val owner = TestCore.onMain { AddCode.parse(core.accountsFlow.link())!!.card }
         val bea = PersonChatTest.Bea()
-        val hello = Start.link(bea.keys, "Bea", 3, owner, bea.pair)!!.hello
+        val hello = Start.link(bea.keys, org.phonemesh.core.account.Profile("Bea", 0x43A047), owner, bea.pair)!!.hello
         val link = FakeHubLink()
         val wire = ScriptedWire()
         wire.letters += HubClient.Mail(7, 301, hello)

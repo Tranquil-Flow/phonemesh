@@ -60,10 +60,10 @@ class SharedChatTest {
     private fun kinds() = radio.broadcasts.map { SharedPost.decode(it.payload)!!.kind }
 
     private class Bea {
-        val qr = QrCode(ContactCard.create(SoftKeys.generate(), "Bea", 5), KeyPairBytes.generate().public)
+        val qr = QrCode(ContactCard.create(SoftKeys.generate(), org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), KeyPairBytes.generate().public)
     }
 
-    /** Awa (the app) and Bea scan each other: a saved contact with colour 5 and a person chat. */
+    /** Awa (the app) and Bea scan each other: a saved contact in purple and a person chat. */
     private fun meetBea(): Pair<AccountId, Long> {
         val bea = Bea()
         main { core.accountsFlow.showCode() }
@@ -167,7 +167,7 @@ class SharedChatTest {
         assertEquals(before.met, after.met)
         val rows = main { core.chatRows() }
         assertNull("even the contact's own id and name stay uncoloured", rows.single { it.chat.id == group }.colour)
-        assertEquals("the colour stays on the contact's own chat", 5, rows.single { it.chat.id == personChat }.colour)
+        assertEquals("the colour stays on the contact's own chat", 0x8E24AA, rows.single { it.chat.id == personChat }.colour)
     }
 
     @Test fun theConversationScreenNamesTheClaimAndTheOldSenderApart() {
@@ -227,7 +227,7 @@ class SharedChatTest {
             core.history.setStatus(m.id, DeliveryStatus.FAILED)
             m
         }
-        main { core.history.setAccountName("x".repeat(30), 3) }
+        main { core.history.setAccountProfile(org.phonemesh.core.account.Profile("x".repeat(30), 0x43A047)) }
         assertTrue(main { core.resend(kept.id) })
         assertEquals(DeliveryStatus.FAILED, main { core.history.message(kept.id)!!.status })
         assertNull("it never went to a radio", main { core.history.message(kept.id)!!.packetId })

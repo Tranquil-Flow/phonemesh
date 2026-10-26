@@ -104,7 +104,7 @@ class SharedChatBehaviorRedTest {
     @Test fun aSavedNameThatCannotBePostedIsRefusedNotReplacedByOldText() {
         TestCore.install()
         val group = group()
-        main { core.history.setAccountName("x".repeat(30), 3) }
+        main { core.history.setAccountProfile(org.phonemesh.core.account.Profile("x".repeat(30), 0x43A047)) }
         assertFalse(say(group, "Salut"))
         assertEquals(UiText(R.string.add_name_first), core.lastNote)
         assertTrue(radio.sent.isEmpty())

@@ -184,13 +184,36 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         // Only a pinned /send response binds custody to a particular hub. Legacy HUB observations remain unbound.
         if (oldVersion < 15) db.execSQL("CREATE TABLE hub_custody (outbox_id INTEGER NOT NULL REFERENCES outbox(id), " +
             "pin TEXT NOT NULL CHECK(length(pin)=43), PRIMARY KEY(outbox_id,pin))")
+        // Profiles (spec decisions 36, 48-50): the encoded profile beside the name, and colours as RGB from the wheel
+        // instead of an index into the first eight. A contact's profile stays empty until their next card, hello or
+        // profile update, so any real one replaces it.
+        // A table that already has the column holds version 16 data (tests set the version back): leave it alone.
+        if (oldVersion < 16) for (table in listOf("account", "contacts")) {
+            if (hasColumn(db, table, "profile")) continue
+            db.execSQL("ALTER TABLE $table ADD COLUMN profile BLOB")
+            db.execSQL("UPDATE $table SET colour = $OLD_COLOURS")
+        }
     }
+
+    private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
+        db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+            val name = c.getColumnIndexOrThrow("name")
+            generateSequence { if (c.moveToNext()) c.getString(name) else null }.any { it == column }
+        }
 
     // ---- Accounts: raw rows; AccountStore seals and opens what they hold.
 
-    class AccountRow(val store: String, val identity: ByteArray, val sealed: ByteArray?, val name: String, val colour: Int, val created: Long)
+    /** [colour] is RGB; [profile] the encoded [org.phonemesh.core.account.Profile], null before one was saved. */
+    class AccountRow(
+        val store: String, val identity: ByteArray, val sealed: ByteArray?, val name: String, val colour: Int, val created: Long,
+        val profile: ByteArray? = null,
+    )
     class PrekeyRow(val public: ByteArray, val sealed: ByteArray, val created: Long, val retired: Long?)
-    class ContactRow(val accountId: String, val card: ByteArray, val name: String, val colour: Int, val met: Boolean, val voice: String?, val added: Long)
+    /** [colour] is RGB; [profile] the newest profile they sent (card, hello or update), null when not known. */
+    class ContactRow(
+        val accountId: String, val card: ByteArray, val name: String, val colour: Int, val met: Boolean, val voice: String?,
+        val added: Long, val profile: ByteArray? = null,
+    )
     class OutboxRow(
         val id: Long, val accountId: String, val messageId: Long?, val port: Int, val packet: ByteArray,
         val chainTag: ByteArray?, val counter: Long?, val created: Long, val tries: Int, val nextTry: Long, val state: String,
@@ -203,6 +226,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             c.getString(c.getColumnIndexOrThrow("store")), c.getBlob(c.getColumnIndexOrThrow("identity")),
             c.getColumnIndexOrThrow("sealed").let { if (c.isNull(it)) null else c.getBlob(it) },
             c.getString(c.getColumnIndexOrThrow("name")), c.getInt(c.getColumnIndexOrThrow("colour")), c.getLong(c.getColumnIndexOrThrow("created")),
+            c.getColumnIndexOrThrow("profile").let { if (c.isNull(it)) null else c.getBlob(it) },
         )
     }
 
@@ -212,8 +236,10 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             put("id", 1); put("store", store); put("identity", identity); put("sealed", sealed); put("created", created)
         }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
 
-    fun setAccountName(name: String, colour: Int) {
-        writableDatabase.update("account", ContentValues().apply { put("name", name); put("colour", colour) }, "id = 1", null)
+    fun setAccountProfile(profile: org.phonemesh.core.account.Profile) {
+        writableDatabase.update("account", ContentValues().apply {
+            put("name", profile.name); put("colour", profile.colour); put("profile", profile.encode())
+        }, "id = 1", null)
     }
 
     /** Prekeys not yet dropped, newest first. */
@@ -244,7 +270,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     fun putContact(row: ContactRow) {
         val values = ContentValues().apply {
             put("account_id", row.accountId); put("card", row.card); put("name", row.name); put("colour", row.colour)
-            put("met", if (row.met) 1 else 0); put("voice", row.voice); put("added", row.added)
+            put("met", if (row.met) 1 else 0); put("voice", row.voice); put("added", row.added); put("profile", row.profile)
         }
         // Replacing the row would erase transport-owned columns such as last_ack.
         val db = writableDatabase
@@ -274,6 +300,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         getString(getColumnIndexOrThrow("account_id")), getBlob(getColumnIndexOrThrow("card")), getString(getColumnIndexOrThrow("name")),
         getInt(getColumnIndexOrThrow("colour")), getInt(getColumnIndexOrThrow("met")) != 0,
         getColumnIndexOrThrow("voice").let { if (isNull(it)) null else getString(it) }, getLong(getColumnIndexOrThrow("added")),
+        getColumnIndexOrThrow("profile").let { if (isNull(it)) null else getBlob(it) },
     )
 
     /** The sealed session and its serial, or null. */
@@ -798,6 +825,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 15
+        const val VERSION = 16
+
+        /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */
+        private const val OLD_COLOURS = "CASE colour WHEN 0 THEN ${0xE53935} WHEN 1 THEN ${0xFB8C00} WHEN 2 THEN ${0xFDD835} " +
+            "WHEN 3 THEN ${0x43A047} WHEN 4 THEN ${0x1E88E5} WHEN 5 THEN ${0x8E24AA} WHEN 6 THEN ${0xEC407A} " +
+            "WHEN 7 THEN ${0x6D4C41} ELSE ${0x9E9E9E} END"
     }
 }

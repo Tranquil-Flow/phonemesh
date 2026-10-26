@@ -10,7 +10,7 @@ import org.phonemesh.core.session.SoftKeys
 
 class AddCodeTest {
     private val keys = SoftKeys.generate()
-    private val card = ContactCard.create(keys, "Aminata", 5)
+    private val card = ContactCard.create(keys, Profile("Aminata", 0x1E88E5))
 
     @Test fun aLinkAndAQrCodeAreBothAddMeLinks() {
         val link = AddCode.of(card)

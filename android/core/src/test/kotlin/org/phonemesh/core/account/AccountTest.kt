@@ -10,29 +10,29 @@ import org.phonemesh.core.session.SoftKeys
 
 class AccountTest {
     private val keys = SoftKeys.generate()
-    private val card = ContactCard.create(keys, "Aïcha", 7)
+    private val card = ContactCard.create(keys, Profile("Aïcha", 0x43A047))
 
     @Test fun aCardRoundTripsAndIsSigned() {
         val bytes = card.encode()
-        assertEquals(134 + "Aïcha".toByteArray().size, bytes.size)
+        assertEquals(142 + "Aïcha".toByteArray().size, bytes.size)
         val back = checkNotNull(ContactCard.decode(bytes))
         assertArrayEquals(keys.identity, back.identity)
         assertArrayEquals(keys.prekey, back.prekey)
         assertEquals("Aïcha", back.name)
-        assertEquals(7, back.colour)
+        assertEquals(0x43A047, back.colour)
         assertEquals(AccountId.of(keys.identity), back.accountId)
     }
 
     @Test fun aLongestNameFitsAndALongerOneIsRefused() {
-        assertNotNull(ContactCard.decode(ContactCard.create(keys, "x".repeat(40), 0).encode()))
-        assertEquals(174, ContactCard.MAX_BYTES)
-        assertTrue(runCatching { ContactCard.create(keys, "x".repeat(41), 0) }.isFailure)
-        assertTrue(runCatching { ContactCard.create(keys, "", 0) }.isFailure)
+        assertNotNull(ContactCard.decode(ContactCard.create(keys, Profile("x".repeat(40), 0)).encode()))
+        assertEquals(214, ContactCard.MAX_BYTES)
+        assertTrue(runCatching { Profile("x".repeat(41), 0) }.isFailure)
+        assertTrue(runCatching { Profile("", 0) }.isFailure)
     }
 
     @Test fun badCardsAreRefused() {
         val bytes = card.encode()
-        assertNull("version", ContactCard.decode(bytes.copyOf().also { it[0] = 2 }))
+        assertNull("version 1 (decision 36)", ContactCard.decode(bytes.copyOf().also { it[0] = 1 }))
         assertNull("key type", ContactCard.decode(bytes.copyOf().also { it[1] = 2 }))
         assertNull("signature", ContactCard.decode(bytes.copyOf().also { it[100] = (it[100] + 1).toByte() }))
         assertNull("prekey swapped", ContactCard.decode(bytes.copyOf().also { SoftKeys.generate().prekey.copyInto(it, 35) }))
@@ -48,7 +48,7 @@ class AccountTest {
     @Test fun namesRefuseHiddenCharacters() {
         for (bad in listOf("Ma\u202Ema", "Ma\u200Bma", "Ma\nma", "Ame\u0301lie", " ", "\u0000")) {
             assertTrue("refused: ${bad.map { it.code }}", !Names.valid(bad))
-            assertTrue(runCatching { ContactCard.create(keys, bad, 0) }.isFailure)
+            assertTrue(runCatching { Profile(bad, 0) }.isFailure)
         }
         assertTrue(Names.valid("Amélie") && Names.valid("Moussa 2") && Names.valid("আমিনা"))
         assertEquals("Amélie", Names.clean(" Ame\u0301lie\u200B "))
@@ -83,12 +83,10 @@ class AccountTest {
         val middle = InviteLink.PREFIX.length + 120 // inside the signature
         val damaged = link.substring(0, middle) + (if (link[middle] == 'A') 'B' else 'A') + link.substring(middle + 1)
         assertNull("damaged signature", InviteLink.parse(damaged))
-        // The name and colour are not signed: a changed colour still reads, with the same keys (the safety picture
-        // is the check).
-        val recoloured = card.encode().also { it[it.size - 1] = 99 }
-        val read = checkNotNull(ContactCard.decode(recoloured))
-        assertEquals(99, read.colour)
-        assertArrayEquals(card.identity, read.identity)
+        // Card v2 signs the name, colour and picture too: a changed colour is refused.
+        val nameLength = card.encode()[132].toInt()
+        val recoloured = card.encode().also { it[133 + nameLength] = 99 }
+        assertNull("recoloured", ContactCard.decode(recoloured))
         assertNull("empty", InviteLink.parse(InviteLink.PREFIX))
     }
 

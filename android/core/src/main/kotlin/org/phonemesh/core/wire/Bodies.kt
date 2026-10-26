@@ -3,7 +3,7 @@ package org.phonemesh.core.wire
 import org.phonemesh.core.MessageCodec
 import org.phonemesh.core.PictureWire
 import org.phonemesh.core.account.ContactCard
-import org.phonemesh.core.account.Names
+import org.phonemesh.core.account.Profile
 import java.nio.ByteBuffer
 
 /**
@@ -19,7 +19,10 @@ sealed class Body {
     class PictureHead(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
     class PicturePart(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
     data class Receipt(val ack: Ack) : Body()
-    data class Hello(val name: String, val colour: Int) : Body()
+    /** The first packet after opening a link: who sends it (spec decision 36). */
+    data class Hello(val profile: Profile) : Body()
+    /** A changed profile, sent once after the next message to each contact (profile spec, PF5). */
+    data class ProfileUpdate(val profile: Profile) : Body()
 
     companion object {
         const val TEXT = 1
@@ -29,6 +32,7 @@ sealed class Body {
         const val PICTURE_PART = 5
         const val RECEIPT = 6
         const val HELLO = 7
+        const val PROFILE = 8
         const val REF = 4
         const val MAX_EMOJI = 32
         private const val WITH_ACK = 0x80
@@ -72,12 +76,8 @@ sealed class Body {
                 byteArrayOf(PICTURE_PART.toByte()) + body.bytes
             }
             is Receipt -> byteArrayOf(RECEIPT.toByte()) + body.ack.encode()
-            is Hello -> {
-                val name = body.name.toByteArray(Charsets.UTF_8)
-                require(name.size in 1..ContactCard.MAX_NAME_BYTES && Names.valid(body.name)) { "a name is 1..${ContactCard.MAX_NAME_BYTES} bytes" }
-                require(body.colour in 0..255) { "colour is one byte" }
-                byteArrayOf(HELLO.toByte(), name.size.toByte()) + name + byteArrayOf(body.colour.toByte())
-            }
+            is Hello -> byteArrayOf(HELLO.toByte()) + body.profile.encode()
+            is ProfileUpdate -> byteArrayOf(PROFILE.toByte()) + body.profile.encode()
         }
 
         fun decode(bytes: ByteArray): Body? = try {
@@ -92,12 +92,8 @@ sealed class Body {
                 PICTURE_HEAD -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Head }?.let { PictureHead(it) }
                 PICTURE_PART -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Part }?.let { PicturePart(it) }
                 RECEIPT -> if (bytes.size != 1 + Ack.SIZE) null else Ack.decode(bytes.copyOfRange(1, bytes.size))?.let { Receipt(it) }
-                HELLO -> Reader(bytes).run {
-                    val length = byte()
-                    if (length !in 1..ContactCard.MAX_NAME_BYTES) return@run null
-                    val name = ContactCard.strictUtf8(take(length))?.takeIf { Names.valid(it) } ?: return@run null
-                    Hello(name, byte()).takeIf { done() }
-                }
+                HELLO -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { Hello(it) }
+                PROFILE -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { ProfileUpdate(it) }
                 else -> null
             }
         } catch (_: Refused) {

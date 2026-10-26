@@ -43,8 +43,8 @@ class AccountStoreTest {
     private fun talk(mine: OwnKeys) {
         val peer = SoftKeys.generate()
         val km = KeyPairBytes.generate(); val kp = KeyPairBytes.generate()
-        val qm = QrCode(ContactCard.create(mine, "Awa", 1), km.public)
-        val qp = QrCode(ContactCard.create(peer, "Ben", 2), kp.public)
+        val qm = QrCode(ContactCard.create(mine, org.phonemesh.core.account.Profile("Awa", 0xFB8C00)), km.public)
+        val qp = QrCode(ContactCard.create(peer, org.phonemesh.core.account.Profile("Ben", 0xFDD835)), kp.public)
         assertNotNull("our card's signature checks", ContactCard.decode(qm.card.encode()))
         val sm = checkNotNull(Start.qr(mine, qm, km, QrCode.decode(qp.encode())!!))
         val sp = checkNotNull(Start.qr(peer, qp, kp, QrCode.decode(qm.encode())!!))
@@ -106,15 +106,58 @@ class AccountStoreTest {
         }
     }
 
+    /**
+     * Profiles (decisions 36, 48): a version 15 history (no profile column, colours as indices into eight, a card of
+     * version 1) opens with RGB colours, the account's name as profile revision 1, and contacts that still work.
+     */
+    @Test fun aVersion15HistoryUpgradesToProfiles() {
+        val first = store(A, software = true)
+        first.setName("Awa", 0x43A047)
+        val contactIdentity = SoftKeys.generate().identity
+        val oldCard = byteArrayOf(1, 1) + contactIdentity + SoftKeys.generate().prekey + ByteArray(64) +
+            byteArrayOf(3) + "Ben".toByteArray() + byteArrayOf(5)
+        val db = opened.last().writableDatabase
+        db.insertOrThrow("contacts", null, android.content.ContentValues().apply {
+            put("account_id", AccountId.of(contactIdentity).toString()); put("card", oldCard); put("name", "Ben")
+            put("colour", 0); put("added", now)
+        })
+        for (table in listOf("account", "contacts")) {
+            val columns = db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                generateSequence { if (c.moveToNext()) c.getString(c.getColumnIndexOrThrow("name")) else null }.filter { it != "profile" }.toList()
+            }.joinToString(",")
+            db.execSQL("CREATE TABLE old_$table AS SELECT $columns FROM $table")
+            db.execSQL("DROP TABLE $table")
+            db.execSQL("ALTER TABLE old_$table RENAME TO $table")
+        }
+        db.execSQL("UPDATE account SET colour = 3")
+        db.execSQL("UPDATE contacts SET colour = 5")
+        db.version = 15
+        opened.forEach { it.close() }; opened.clear()
+
+        val again = store(A, software = true)
+        assertEquals(16, opened.last().readableDatabase.version)
+        assertEquals("green, index 3, as RGB", 0x43A047, opened.last().accountRow()!!.colour)
+        assertEquals(org.phonemesh.core.account.Profile("Awa", 0x43A047), again.profile())
+        assertEquals("Awa", checkNotNull(ContactCard.decode(again.card().encode())).name)
+        val ben = opened.last().contactRows().single()
+        assertEquals("purple, index 5, as RGB", 0x8E24AA, ben.colour)
+        assertNull("no profile until Ben sends one", ben.profile)
+        assertArrayEquals("a version 1 card still gives the identity", contactIdentity, Accounts.identityOf(ben.card))
+        val changed = again.setName("Awa", 0x1E88E5)
+        assertEquals("a change after the upgrade is revision 2", 2L, changed.revision)
+        opened.forEach { it.close() }; opened.clear()
+        fixture.deleteDatabase(A)
+    }
+
     @Test fun prekeysRotateAndTheOldOneWorksAMonthMore() {
         val owner = store(A, software = false)
         val opener = SoftKeys.generate()
-        val oldCard = ContactCard.create(owner, "Owner", 0)
+        val oldCard = ContactCard.create(owner, org.phonemesh.core.account.Profile("Owner", 0xE53935))
         now += 31 * day
         owner.rotateIfDue()
         assertEquals(2, owner.prekeys.size)
         assertFalse("a new current prekey", owner.prekeys[0].contentEquals(oldCard.prekey))
-        val hello = Start.link(opener, "Opener", 2, oldCard, KeyPairBytes.generate())!!.hello
+        val hello = Start.link(opener, org.phonemesh.core.account.Profile("Opener", 0xFDD835), oldCard, KeyPairBytes.generate())!!.hello
         assertEquals("Opener", Start.hello(owner, hello)!!.name)
         now += 31 * day
         owner.rotateIfDue()
@@ -128,7 +171,7 @@ class AccountStoreTest {
         val store = store(A, software = false)
         val peer = SoftKeys.generate()
         val km = KeyPairBytes.generate(); val kp = KeyPairBytes.generate()
-        val qm = QrCode(ContactCard.create(store, "Awa", 1), km.public); val qp = QrCode(ContactCard.create(peer, "Ben", 2), kp.public)
+        val qm = QrCode(ContactCard.create(store, org.phonemesh.core.account.Profile("Awa", 0xFB8C00)), km.public); val qp = QrCode(ContactCard.create(peer, org.phonemesh.core.account.Profile("Ben", 0xFDD835)), kp.public)
         val contact = AccountId.of(peer.identity)
         val start = Start.qr(store, qm, km, qp)!!
         assertTrue(store.storeSession(contact, start))

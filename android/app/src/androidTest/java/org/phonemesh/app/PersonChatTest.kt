@@ -37,7 +37,7 @@ class PersonChatTest {
     internal class Bea {
         val keys = SoftKeys.generate()
         val pair = KeyPairBytes.generate()
-        val qr = QrCode(ContactCard.create(keys, "Bea", 5), pair.public)
+        val qr = QrCode(ContactCard.create(keys, org.phonemesh.core.account.Profile("Bea", 0x8E24AA)), pair.public)
         val store = Memory()
         val postman = Postman(keys, store, quietDelay = { 20_000L })
         lateinit var awa: AccountId
@@ -506,7 +506,7 @@ class PersonChatTest {
         val row = TestCore.onMain { core.chatRows() }.single { it.chat.id == chatId }
         assertEquals(ChatKind.PERSON, row.chat.kind)
         assertEquals("Bea", row.title)
-        assertEquals(5, row.colour)
+        assertEquals(0x8E24AA, row.colour)
         assertEquals(true, row.met)
         TestCore.onMain { core.setDraft(chatId, "Bonjour Bea") }
         assertTrue(TestCore.onMain { core.send(chatId) })

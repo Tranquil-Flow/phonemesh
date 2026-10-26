@@ -123,6 +123,21 @@ From handover 3 and the owner on 2026-10-14:
 51. No pronouns or "about" line (owner, 2026-10-26).
 52. The designer demo targets the Mac first; an iPhone version is skipped for now, since iPhones cannot run the
     Android app (owner, 2026-10-26).
+53. Radio airtime (owner, 2026-10-26, review AE1-AE12): text and small delivery traffic come first on the radio, with
+    pictures, avatars and history sent over hub Wi-Fi first and a slow, budgeted radio fallback (AE1); bounded,
+    adaptive, jittered retries replace decision 24's timing once loss and offline tests pass (AE2); group "delivered"
+    receipts are combined, sent with other traffic or over Wi-Fi (AE3); a hub scheduler counts seconds on air, puts
+    receipts and texts before media, shares time fairly per person and starts at about 180 s per hour for app traffic,
+    with an in-app limit as a backstop on radios away from a hub (AE4); radio setting, hop limit and relays are chosen
+    by measuring coverage (AE5); radios get a settings profile with position, telemetry and unused modules off (AE6);
+    mail between two phones on the same hub goes over Wi-Fi first, the radio only as a fallback (AE7); every group text
+    is signed, and a signed manifest per picture is reviewed (AE8); codes and seals stay as they are and compression is
+    measured later on real messages (AE9); growth beyond one village uses separate radio areas linked hub to hub, after
+    asking ARCEP (AE10); avatar and history transfers are combined, fetched when needed and capped (AE11); no capacity
+    claim before a small measured test on real radios (AE12).
+54. Coverage measurement belongs in hub setup: whoever sets up hubs in an area runs a guided coverage check that
+    compares radio settings at the places people need to reach (owner, 2026-10-26).
+55. The demo folder is named for any tester ("Phonemesh Demo"), not only designers (owner, 2026-10-26).
 
 ## What an outsider can and cannot learn
 

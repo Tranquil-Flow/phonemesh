@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The demo build only (docs/specs/2026-10-25-demo-build-design.md). -->
+<resources>
+    <string name="demo_app_name" translatable="false">Phonemesh Demo</string>
+    <string name="demo_band">DEMO</string>
+    <string name="demo_notice_text">Tap for the demo controls</string>
+    <string name="demo_controls_title">Demo controls</string>
+    <string name="demo_about">This is the Phonemesh demo. The radio, Kofi, Ama, Yaw and the local hub are all simulated inside this app, so you can try every screen without a radio. Use these buttons to make things happen.</string>
+    <string name="demo_section_people">People</string>
+    <string name="demo_kofi_writes">Kofi writes to you</string>
+    <string name="demo_ama_adds">Ama adds you by link</string>
+    <string name="demo_someone_posts">Someone writes in the shared chat</string>
+    <string name="demo_kofi_picture">Kofi sends a picture</string>
+    <string name="demo_stock_writes">Sena (Meshtastic app) writes to everyone</string>
+    <string name="demo_stock_direct">Sena (Meshtastic app) writes to you</string>
+    <string name="demo_kofi_away">Kofi goes out of range</string>
+    <string name="demo_kofi_back">Kofi comes back in range</string>
+    <string name="demo_scan_hint">To add Kofi or Yaw: Add someone, then Scan a code, and pick them.</string>
+    <string name="demo_section_phones">Their phones</string>
+    <string name="demo_phones_hint">Adding someone asks: same six pictures on both phones? Here is what their phone shows.</string>
+    <string name="demo_their_pictures">%1$s\'s safety pictures</string>
+    <string name="demo_their_pictures_title">On %1$s\'s phone</string>
+    <string name="demo_not_added">%1$s has not added you yet.</string>
+    <string name="demo_section_radio">Your radio</string>
+    <string name="demo_radio_off">Switch the radio off</string>
+    <string name="demo_radio_on">Switch the radio on</string>
+    <string name="demo_section_hub">Local hub</string>
+    <string name="demo_hub_hint">To use the hub: Settings, then Local hub, then Scan hub code, and pick the local hub.</string>
+    <string name="demo_hub_off">Switch the hub off</string>
+    <string name="demo_hub_on">Switch the hub on</string>
+    <string name="demo_hub_wifi_off">Switch the hub\'s Wi-Fi off</string>
+    <string name="demo_hub_wifi_on">Switch the hub\'s Wi-Fi on</string>
+    <string name="demo_hub_bluetooth_off">Switch the hub\'s Bluetooth off</string>
+    <string name="demo_hub_bluetooth_on">Switch the hub\'s Bluetooth on</string>
+    <string name="demo_section_demo">Demo</string>
+    <string name="demo_band_hide">Hide the DEMO label</string>
+    <string name="demo_band_show">Show the DEMO label</string>
+    <string name="demo_start_over">Start over</string>
+    <string name="demo_start_over_message">This erases everything in the demo app: your name, chats, people and downloaded voices. The app closes; open it again to start.</string>
+    <string name="demo_need_name">First save your name in the app.</string>
+    <string name="demo_need_kofi">First add Kofi: Add someone, then Scan a code.</string>
+    <string name="demo_scan_title">What is in front of the camera?</string>
+    <string name="demo_scan_kofi">Kofi\'s code (you meet in person)</string>
+    <string name="demo_scan_yaw">Yaw\'s link</string>
+    <string name="demo_scan_hub">The local hub\'s code</string>
+    <string name="demo_scan_bad">Something that is not a Phonemesh code</string>
+</resources>

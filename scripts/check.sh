@@ -12,5 +12,6 @@ cd android
 "$JAVA_HOME/bin/java" -version
 ./gradlew --no-daemon --max-workers=1 --console plain \
   :core:test :hub:test :radio-ble:testDebugUnitTest :app:testDebugUnitTest :app:testReleaseUnitTest \
-  :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest :app:checkApkSize :app:checkNetworkBoundary
+  :app:assembleDebug :app:assembleRelease :app:lintDebug :app:assembleMinifiedDebug :app:assembleMinifiedDebugAndroidTest :app:checkApkSize :app:checkNetworkBoundary \
+  :app:testDemoUnitTest :app:assembleDemo
 echo CHECK_OK

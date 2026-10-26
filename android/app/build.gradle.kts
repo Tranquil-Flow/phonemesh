@@ -78,6 +78,21 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro", "proguard-minified-debug.pro")
             matchingFallbacks += listOf("debug")
         }
+        // The demo (docs/specs/2026-10-25-demo-build-design.md): a separate app, "Phonemesh Demo", with a simulated radio,
+        // people and local hub, for trying every screen without hardware. Its code lives only in src/demo, so release and
+        // debug builds carry none of it. Screenshots are allowed; packs come from the published catalog as in release.
+        create("demo") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".demo"
+            versionNameSuffix = "-demo"
+            buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
+            buildConfigField("boolean", "SECURE_SCREENS", "false")
+            buildConfigField("String", "FAKE_COUNTRY", "\"\"")
+            buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
+            buildConfigField("boolean", "T1_PROBE", "false")
+            buildConfigField("boolean", "T2_PROBE", "false")
+            matchingFallbacks += listOf("debug")
+        }
     }
     testBuildType = "minifiedDebug"
     // minifiedDebug does not inherit src/debug; the minified test build must reach the local test server.
@@ -109,6 +124,8 @@ dependencies {
     // QR codes for adding people (accounts plan step 11; the one new library, Apache-2.0). Camera through Camera2.
     implementation("com.google.zxing:core:3.5.4")
     implementation(files("../libs/sherpa-onnx-1.13.8.aar"))
+    // The demo's local hub runs the real hub engine inside the demo app (src/demo only).
+    "demoImplementation"(project(":hub"))
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

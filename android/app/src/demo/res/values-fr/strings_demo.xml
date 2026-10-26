@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="demo_band">DÉMO</string>
+    <string name="demo_notice_text">Touchez pour les commandes de la démo</string>
+    <string name="demo_controls_title">Commandes de la démo</string>
+    <string name="demo_about">Voici la démo de Phonemesh. La radio, Kofi, Ama, Yaw et le relais local sont tous simulés dans cette appli : vous pouvez essayer chaque écran sans radio. Ces boutons font arriver les choses.</string>
+    <string name="demo_section_people">Personnes</string>
+    <string name="demo_kofi_writes">Kofi vous écrit</string>
+    <string name="demo_ama_adds">Ama vous ajoute par lien</string>
+    <string name="demo_someone_posts">Quelqu\'un écrit dans la discussion commune</string>
+    <string name="demo_kofi_picture">Kofi envoie une photo</string>
+    <string name="demo_stock_writes">Sena (appli Meshtastic) écrit à tous</string>
+    <string name="demo_stock_direct">Sena (appli Meshtastic) vous écrit</string>
+    <string name="demo_kofi_away">Kofi sort de portée</string>
+    <string name="demo_kofi_back">Kofi revient à portée</string>
+    <string name="demo_scan_hint">Pour ajouter Kofi ou Yaw : Ajouter quelqu\'un, puis Scanner un code, et choisissez-les.</string>
+    <string name="demo_section_phones">Leurs téléphones</string>
+    <string name="demo_phones_hint">En ajoutant quelqu\'un, l\'appli demande : les mêmes six images sur les deux téléphones ? Voici ce que montre le leur.</string>
+    <string name="demo_their_pictures">Images de sécurité de %1$s</string>
+    <string name="demo_their_pictures_title">Sur le téléphone de %1$s</string>
+    <string name="demo_not_added">%1$s ne vous a pas encore ajouté.</string>
+    <string name="demo_section_radio">Votre radio</string>
+    <string name="demo_radio_off">Éteindre la radio</string>
+    <string name="demo_radio_on">Allumer la radio</string>
+    <string name="demo_section_hub">Relais local</string>
+    <string name="demo_hub_hint">Pour utiliser le relais : Réglages, puis Relais local, puis Scanner le code du relais, et choisissez le relais local.</string>
+    <string name="demo_hub_off">Éteindre le relais</string>
+    <string name="demo_hub_on">Allumer le relais</string>
+    <string name="demo_hub_wifi_off">Couper le Wi-Fi du relais</string>
+    <string name="demo_hub_wifi_on">Rallumer le Wi-Fi du relais</string>
+    <string name="demo_hub_bluetooth_off">Couper le Bluetooth du relais</string>
+    <string name="demo_hub_bluetooth_on">Rallumer le Bluetooth du relais</string>
+    <string name="demo_section_demo">Démo</string>
+    <string name="demo_band_hide">Cacher l\'étiquette DÉMO</string>
+    <string name="demo_band_show">Montrer l\'étiquette DÉMO</string>
+    <string name="demo_start_over">Tout recommencer</string>
+    <string name="demo_start_over_message">Tout ce qui est dans l\'appli de démo sera effacé : votre nom, les discussions, les personnes et les voix téléchargées. L\'appli se ferme ; rouvrez-la pour recommencer.</string>
+    <string name="demo_need_name">Enregistrez d\'abord votre nom dans l\'appli.</string>
+    <string name="demo_need_kofi">Ajoutez d\'abord Kofi : Ajouter quelqu\'un, puis Scanner un code.</string>
+    <string name="demo_scan_title">Qu\'y a-t-il devant l\'appareil photo ?</string>
+    <string name="demo_scan_kofi">Le code de Kofi (vous vous rencontrez)</string>
+    <string name="demo_scan_yaw">Le lien de Yaw</string>
+    <string name="demo_scan_hub">Le code du relais local</string>
+    <string name="demo_scan_bad">Quelque chose qui n\'est pas un code Phonemesh</string>
+</resources>

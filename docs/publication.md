@@ -66,6 +66,13 @@ all release gates close. See [candidate notes](releases/v0.1.0.md).
    caches/build trees, operator config/cards/logs/mail, keys, device identifiers and
    unreviewed model assets. Update candidate notes only with verified outcomes.
 
+7. **Ship the demo (from v0.1.1).** Build `assembleDemo` from the release commit and attach
+   both demo APKs as `phonemesh-<version>-demo-<abi>.apk`, with their lines in `SHA256SUMS`.
+   Confirm `git diff <previous release>..HEAD -- android/app/src/main` holds only reviewed
+   app changes, walk [the demo coverage list](demo-coverage.md) on an emulator with an
+   empty crash log, and update its Verified column. The laptop launchers in `demo/laptop`
+   download the `-demo-arm64-v8a.apk` asset and check it against `SHA256SUMS`.
+
 ## Git and release actions — owner only, after the gates
 
 The owner chose a **fresh public history** on 2026-10-25: create the future public

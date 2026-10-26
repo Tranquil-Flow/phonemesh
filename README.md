@@ -153,6 +153,13 @@ The full explanation, including retries and how a phone connects, is in
 Tested on a Fairphone 3 (Android 10) and a Pixel 8 Pro (Android 16) with Meshtastic
 firmware 2.7.26. That is what was checked, not a list of everything that works.
 
+## Try it without a radio
+
+**Phonemesh Demo** is the app with a pretend radio, pretend people and a pretend local hub
+built in, so you can try every screen without hardware. Install it on an Android phone
+next to the normal app, or run it on a laptop with the launcher in
+[`demo/laptop`](demo/laptop/README.md). See [the demo guide](docs/demo.md).
+
 ## Setting up
 
 ### 1. Prepare the radios (once per radio)
@@ -275,14 +282,16 @@ pictures.
 
 ## Coming next
 
-Planned for the next version:
+Being designed now, each with its own specification:
 
-- **Private group chats:** create a group of chosen contacts, encrypted for them only.
-- **More emoji:** react with any emoji from the phone's own emoji keyboard, not just
-  the six in v0.1.0.
-- **"Local hub" in the app:** the hub screen and notification use the new name.
+- **Private group chats:** a group of chosen contacts, encrypted for them only.
+- **Account recovery and encrypted chat backup**, for a lost or new phone.
+- **More profile choices** than a name and a colour.
+- **Ewe and Kabiyè**, for the pilot in Togo.
+- **An airtime meter:** how long a message or picture takes to send, and why.
+- **Updates passed on through the local hub**, signed, for places without internet.
 
-Planned for later: account recovery, TalkBack support, and quantum-safe keys.
+Planned for later: TalkBack support and quantum-safe keys.
 
 ## Run a local hub
 
@@ -340,6 +349,8 @@ The full project check is `scripts/check.sh` (Python, hub JVM and Android). Run 
 ## Documentation
 
 - [How Phonemesh works](docs/how-it-works.md): the explainer.
+- [Phonemesh Demo](docs/demo.md): try the app without a radio, and
+  [what the demo covers](docs/demo-coverage.md).
 - [Release notes for v0.1.0](docs/releases/v0.1.0.md) and the
   [verification record](docs/android-verification.md).
 - [Android design](docs/android-design.md) and the

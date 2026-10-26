@@ -138,6 +138,9 @@ From handover 3 and the owner on 2026-10-14:
 54. Coverage measurement belongs in hub setup: whoever sets up hubs in an area runs a guided coverage check that
     compares radio settings at the places people need to reach (owner, 2026-10-26).
 55. The demo folder is named for any tester ("Phonemesh Demo"), not only designers (owner, 2026-10-26).
+56. Radio settings (owner, 2026-10-26): an area runs on LongFast, MediumFast or ShortFast, chosen by the coverage check
+    during hub setup (decision 54); every radio in the area is then set to it. A later release adds a converter: a hub
+    with two radios, one per setting, passing mail between a fast zone and a long-range zone.
 
 ## What an outsider can and cannot learn
 

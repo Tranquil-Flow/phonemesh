@@ -120,7 +120,10 @@ class HubActivity : ScreenActivity() {
         wifi.visibility = if (status.saved) View.VISIBLE else View.GONE
         bluetooth.visibility = wifi.visibility
         wifi.text = getString(R.string.hub_way_wifi, getString(wayWords(status.wifi)))
-        bluetooth.text = getString(R.string.hub_way_bluetooth, getString(wayWords(status.bluetooth)))
+        val bluetoothWay = if (status.wifi == HubWay.ANSWERED && status.bluetooth != HubWay.ANSWERED) {
+            R.string.hub_way_not_needed
+        } else wayWords(status.bluetooth)
+        bluetooth.text = getString(R.string.hub_way_bluetooth, getString(bluetoothWay))
         val path = when {
             status.sending == MailPaths.Path.WIFI_HUB -> R.string.hub_path_wifi
             status.sending == MailPaths.Path.BLUETOOTH_HUB -> R.string.hub_path_bluetooth

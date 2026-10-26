@@ -467,6 +467,9 @@ class HubScreenTest {
         assertEquals(1, wire.sent.size)
         val state = Views.tagged(activity!!, "hub_state") as TextView
         Views.waitUntil { state.text.toString() == words(R.string.hub_state_answered) }
+        // Decision 39: while Wi-Fi answers, Bluetooth is not needed, so the screen does not say it is still looking.
+        val bluetooth = Views.tagged(activity!!, "hub_bluetooth") as TextView
+        assertEquals(activity!!.getString(R.string.hub_way_bluetooth, words(R.string.hub_way_not_needed)), Views.textOf(bluetooth))
         wire.down = true
         TestCore.onMain { core.setDraft(added.chatId, "relais perdu"); assertTrue(core.send(added.chatId)) }
         Views.waitUntil { status().failure != null }

@@ -473,6 +473,7 @@
     <string name="hub_way_searching">Recherche</string>
     <string name="hub_way_linked">Lié, pas vérifié</string>
     <string name="hub_way_answered">Le relais a répondu</string>
+    <string name="hub_way_not_needed">Pas nécessaire</string>
     <string name="hub_sending">Envoi par : %1$s</string>
     <string name="hub_path_wifi">Wi-Fi du relais</string>
     <string name="hub_path_bluetooth">Bluetooth du relais</string>

@@ -477,6 +477,7 @@
     <string name="hub_way_searching">Looking</string>
     <string name="hub_way_linked">Linked, not checked</string>
     <string name="hub_way_answered">Hub answered</string>
+    <string name="hub_way_not_needed">Not needed</string>
     <string name="hub_sending">Sending by: %1$s</string>
     <string name="hub_path_wifi">Hub Wi-Fi</string>
     <string name="hub_path_bluetooth">Hub Bluetooth</string>

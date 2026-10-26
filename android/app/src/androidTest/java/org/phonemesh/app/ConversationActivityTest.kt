@@ -1097,6 +1097,30 @@ class ConversationActivityTest {
         assertEquals("Réactions : 👍 2", TestCore.onMain { shown.contentDescription.toString() })
     }
 
+    @Test fun anyOneEmojiFromTheKeyboardIsAReactionAndTextIsRefused() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        val news = TestCore.onMain {
+            core.history.addIncoming(group, "!1234abcd", "Le marché est ouvert", "fr", System.currentTimeMillis(), false, packetId = 701)
+        }
+        val a = open(group)
+        tapInDialog(longPress(a, news.id), "action_react")
+        tapInDialog(checkNotNull(a.dialogForTest), "react_other")
+        val ask = checkNotNull(a.dialogForTest)
+        val field = TestCore.onMain { Views.descendants(ask.window!!.decorView).first { it.tag == "react_field" } as android.widget.EditText }
+        val problem = TestCore.onMain { Views.descendants(ask.window!!.decorView).first { it.tag == "react_problem" } }
+        TestCore.onMain { field.setText("ok") }
+        TestCore.onMain { ask.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick() }
+        assertEquals(View.VISIBLE, TestCore.onMain { problem.visibility })
+        assertEquals("Tapez un seul emoji.", TestCore.onMain { (problem as android.widget.TextView).text.toString() })
+        assertTrue(TestCore.radio.sent.isEmpty())
+        TestCore.onMain { field.setText(" 🇹🇬 ") }
+        TestCore.onMain { ask.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick() }
+        Views.waitUntil { TestCore.radio.sent.isNotEmpty() }
+        assertTrue(TestCore.radio.sent.single().reaction)
+        assertEquals("🇹🇬", Views.textOf(Views.tagged(a, "reactions:${news.id}")!!))
+    }
+
     private fun planWindow(a: ConversationActivity): PlanDialog {
         Views.tap(a, "draft_later")
         val window = checkNotNull(a.planForTest)

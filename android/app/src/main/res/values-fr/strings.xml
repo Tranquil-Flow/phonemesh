@@ -458,6 +458,8 @@
     <string name="picture_id_limit">Limite atteinte. Envoyez du texte.</string>
     <string name="hub_saved">Relais gardé. Connexion au Wi-Fi.</string>
     <string name="hub_title">Relais local</string>
+    <string name="react_other">Autre emoji</string>
+    <string name="react_one_emoji">Tapez un seul emoji.</string>
     <string name="hub_none">Aucun</string>
     <string name="settings_hub_background">En arrière-plan</string>
     <string name="hub_state_none">Aucun relais gardé.</string>

@@ -1073,7 +1073,51 @@ class ConversationActivity : ScreenActivity() {
             }
             grid.addView(row)
         }
+        // Spec decision 29: any one emoji from the phone's keyboard.
+        grid.addView(Ui.button(this, palette, getString(R.string.react_other), R.drawable.ic_keyboard).apply {
+            tag = "react_other"
+            setOnClickListener { askForOtherEmoji(messageId) }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = pad() / 2
+        })
         show(picker)
+    }
+
+    /** One emoji typed with the phone's keyboard (its emoji panel); anything else is refused with a sentence. */
+    private fun askForOtherEmoji(messageId: Long) {
+        val field = EditText(this).apply {
+            tag = "react_field"
+            textSize = 32f
+            isSingleLine = true
+            gravity = Gravity.CENTER
+            minHeight = Ui.dp(this@ConversationActivity, 72)
+            contentDescription = getString(R.string.react_other)
+        }
+        val problem = Ui.text(this, getString(R.string.react_one_emoji), palette.text).apply {
+            tag = "react_problem"
+            visibility = View.GONE
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(), pad(), pad(), 0)
+            addView(field)
+            addView(problem)
+        }
+        val ask = Actions.readable(AlertDialog.Builder(this).setTitle(R.string.react_other).setView(box)
+            .setPositiveButton(R.string.react, null).setNegativeButton(R.string.cancel, null).create())
+        ask.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        show(ask)
+        field.requestFocus()
+        ask.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val emoji = org.phonemesh.core.wire.Reactions.single(field.text.toString())
+            if (emoji == null) {
+                problem.visibility = View.VISIBLE
+                core.speakLine(getString(R.string.react_one_emoji))
+            } else {
+                ask.dismiss()
+                core.react(messageId, emoji)
+            }
+        }
     }
 
     private fun copy(text: String) {

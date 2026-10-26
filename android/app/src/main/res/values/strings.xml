@@ -462,6 +462,8 @@
     <string name="picture_id_limit">Picture limit reached. Send text instead.</string>
     <string name="hub_saved">Hub saved. Joining its Wi-Fi.</string>
     <string name="hub_title">Local hub</string>
+    <string name="react_other">Other emoji</string>
+    <string name="react_one_emoji">Type one emoji only.</string>
     <string name="hub_none">None</string>
     <string name="settings_hub_background">In the background</string>
     <string name="hub_state_none">No hub saved.</string>

@@ -141,6 +141,9 @@ From handover 3 and the owner on 2026-10-14:
 56. Radio settings (owner, 2026-10-26): an area runs on LongFast, MediumFast or ShortFast, chosen by the coverage check
     during hub setup (decision 54); every radio in the area is then set to it. A later release adds a converter: a hub
     with two radios, one per setting, passing mail between a fast zone and a long-range zone.
+57. Notifications for new messages (the app has none today) are considered for a later release; they would need the
+    app to stay linked to a radio while closed, at a battery cost (owner, 2026-10-26).
+58. The Licences screen follows the app's language: English as well as French (owner, 2026-10-26).
 
 ## What an outsider can and cannot learn
 

@@ -461,7 +461,7 @@
     <string name="howto_name_awa">Awa</string>
     <string name="picture_id_limit">Picture limit reached. Send text instead.</string>
     <string name="hub_saved">Hub saved. Joining its Wi-Fi.</string>
-    <string name="hub_title">Village hub</string>
+    <string name="hub_title">Local hub</string>
     <string name="hub_none">None</string>
     <string name="settings_hub_background">In the background</string>
     <string name="hub_state_none">No hub saved.</string>
@@ -500,6 +500,6 @@
     <string name="roaming_block_refused">Android refused. Open the app, then retry.</string>
     <string name="roaming_block_ended">Background use stopped. Turn it on again.</string>
     <string name="roaming_channel">Hub in the background</string>
-    <string name="roaming_notification">Keeping the village hub</string>
+    <string name="roaming_notification">Keeping the local hub</string>
     <string name="roaming_stop">Stop</string>
 </resources>

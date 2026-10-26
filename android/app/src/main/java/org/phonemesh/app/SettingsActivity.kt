@@ -122,7 +122,7 @@ class SettingsActivity : ScreenActivity() {
         return row
     }
 
-    /** The village hub: the row shows the saved Wi-Fi's name (or None) and opens the hub screen. */
+    /** The local hub (spec decision 27): the row shows the saved Wi-Fi's name (or None) and opens the hub screen. */
     private fun hubRow(): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL

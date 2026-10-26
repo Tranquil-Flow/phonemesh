@@ -135,8 +135,8 @@ only stores and forwards the encrypted packets. You add a hub by scanning the hu
 operator shows you; from then on your phone checks that it is talking to that hub and no
 other.
 
-In the v0.1.0 app the hub's screen is still called **Village hub** (*Relais du village* in
-French). It becomes **Local hub** (*Relais local*) in the next version.
+The app calls the hub's screen **Local hub** (*Relais local* in French). In v0.1.0 it was
+**Village hub** (*Relais du village*).
 
 The full explanation, including retries and how a phone connects, is in
 **[How Phonemesh works](docs/how-it-works.md)**.
@@ -248,7 +248,7 @@ See [Run a local hub](#run-a-local-hub).
   mistakes, slower and a bigger download).
 - **My name:** change your name or colour.
 - **Show my code:** your QR code and link for adding someone.
-- **Hub screen** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
+- **Local hub** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
   sent, and **Keep hub when app is closed**.
 - **Read new messages aloud:** off by default.
 - **Share the app:** send the app and speech packs to another phone.

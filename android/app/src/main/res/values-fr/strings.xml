@@ -457,7 +457,7 @@
     <string name="howto_name_awa">Awa</string>
     <string name="picture_id_limit">Limite atteinte. Envoyez du texte.</string>
     <string name="hub_saved">Relais gardé. Connexion au Wi-Fi.</string>
-    <string name="hub_title">Relais du village</string>
+    <string name="hub_title">Relais local</string>
     <string name="hub_none">Aucun</string>
     <string name="settings_hub_background">En arrière-plan</string>
     <string name="hub_state_none">Aucun relais gardé.</string>
@@ -496,6 +496,6 @@
     <string name="roaming_block_refused">Android refuse. Ouvrez l’application, puis réessayez.</string>
     <string name="roaming_block_ended">Usage en arrière-plan arrêté. Réactivez-le.</string>
     <string name="roaming_channel">Relais en arrière-plan</string>
-    <string name="roaming_notification">Relais du village actif</string>
+    <string name="roaming_notification">Relais local actif</string>
     <string name="roaming_stop">Arrêter</string>
 </resources>

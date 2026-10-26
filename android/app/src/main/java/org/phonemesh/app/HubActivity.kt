@@ -17,7 +17,7 @@ import org.phonemesh.core.hub.HubDelivery
 import org.phonemesh.core.hub.MailPaths
 
 /**
- * The village hub (accounts step 16): scan or forget its QR, which ways reach it, what failed, and the opt-in to keep
+ * The local hub (accounts step 16; named in spec decision 27): scan or forget its QR, which ways reach it, what failed, and the opt-in to keep
  * it when the app is closed. A connection is never shown as proof of the hub: "linked" is a connection, and only an
  * answer over the pinned key earns "answered" (see [HubWay]).
  */

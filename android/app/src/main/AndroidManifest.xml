@@ -13,7 +13,7 @@
          while no screen is open. Android 14 also wants CHANGE_WIFI_STATE (declared below) or a held Bluetooth permission. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- A hub on the village Wi-Fi (accounts step 16): the app joins that one Wi-Fi by name and talks to the hub over
+    <!-- A local hub on its own Wi-Fi (accounts step 16): the app joins that one Wi-Fi by name and talks to the hub over
          HTTPS pinned to the hub's own key. Only what the calls need: requestNetwork, its callbacks, and the Wi-Fi
          specifier. ACCESS_WIFI_STATE is a normal permission for checking an already-connected exact SSID;
          no new runtime prompt or active Wi-Fi scan. Cleartext traffic stays off. -->

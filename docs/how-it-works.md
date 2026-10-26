@@ -242,8 +242,8 @@ lose work or reset the airtime budget.
 
 When the hub first starts, it creates its own key and prints a hub code containing its
 Wi-Fi name and password, its port, and a pin (a fingerprint of its key). The operator
-turns the code into a QR image offline, and each phone scans it (in v0.1.0:
-**Settings → Village hub**). From then on the phone talks to the hub only over TLS checked
+turns the code into a QR image offline, and each phone scans it (**Settings → Local hub**;
+**Village hub** in v0.1.0). From then on the phone talks to the hub only over TLS checked
 against that pin, so another computer pretending to be the hub on the same network is
 refused. Because the code contains the Wi-Fi password, it should be shown in person, not
 posted.
@@ -259,13 +259,12 @@ posted.
 Setup is in the [hub guide](../android/hub/README.md).
 
 **About the name.** The hub used to be called the *village hub*; hubs will not only serve
-villages, so it is now the *local hub* (*Relais local* in French). The v0.1.0 app still
-labels its screen **Village hub** (*Relais du village*); the next version uses the new
-name.
+villages, so it is now the *local hub* (*Relais local* in French). The v0.1.0 app
+labelled its screen **Village hub** (*Relais du village*).
 
 ## How a phone connects
 
-The hub screen in Settings (**Village hub** in v0.1.0) shows how messages leave the phone. Its
+The hub screen in Settings (**Local hub**; **Village hub** in v0.1.0) shows how messages leave the phone. Its
 **Sending by** line names the route in use now. The app prefers hub Wi-Fi, then hub
 Bluetooth, then your own radio.
 

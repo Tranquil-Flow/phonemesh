@@ -1,7 +1,7 @@
 # Phonemesh local hub (Mac prototype)
 
-The local hub was called the *village hub* before v0.1.0; the v0.1.0 app still labels
-its screen **Village hub** (*Relais du village*).
+The local hub was called the *village hub* before v0.1.0, and the v0.1.0 app labels its
+screen **Village hub** (*Relais du village*). From v0.1.1 the app says **Local hub** (*Relais local*).
 
 A JVM mailbox/relay with a Meshtastic radio on USB. Phones reach its pinned HTTPS API
 by local Wi-Fi or through the optional [native Mac BLE bridge](../../hub-ble-bridge/README.md).
@@ -92,7 +92,7 @@ trusted re-enrollment. Do not delete it as a connectivity workaround.
 
 ## Enroll and use a phone
 
-1. In Phonemesh open Settings → **Village hub → Scan hub code** (the local hub screen). Scan the operator's
+1. In Phonemesh open Settings → **Local hub → Scan hub code** (**Village hub** in v0.1.0). Scan the operator's
    code in person; do not enroll from an untrusted forwarded card.
 2. Grant requested camera/Bluetooth permissions and, for a real hub AP, approve the
    local Wi-Fi join. With BLE-only setup, cancel the unavailable Wi-Fi chooser.

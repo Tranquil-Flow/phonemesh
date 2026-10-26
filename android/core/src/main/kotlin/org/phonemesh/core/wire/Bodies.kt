@@ -30,7 +30,7 @@ sealed class Body {
         const val RECEIPT = 6
         const val HELLO = 7
         const val REF = 4
-        const val MAX_EMOJI = 8
+        const val MAX_EMOJI = 32
         private const val WITH_ACK = 0x80
 
         /** [body], with [ack] riding along when given. */

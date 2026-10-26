@@ -111,7 +111,7 @@ class SharedPostTest {
         refused(post(reply))
         refused(post(reply, ref = byteArrayOf(1, 2, 3), words = "x"))
         refused(post(reaction, language = "fr", ref = ref, words = "👍"))
-        refused(post(reaction, language = "", ref = ref, words = "👍👍👍"))
+        refused(post(reaction, language = "", ref = ref, words = "👍".repeat(9))) // 36 bytes: over the 32-byte reaction limit
         refused(SharedPost.Post(text, id, -1, "Awa", "fr", null, "x"))
         refused(SharedPost.Post(text, id, 1L shl 32, "Awa", "fr", null, "x"))
     }
@@ -143,7 +143,7 @@ class SharedPostTest {
             "reply with a reference and no text" to frame(kind = 2, ref = ref, body = ByteArray(0)),
             "reaction naming a language" to frame(kind = 3, ref = ref, body = "👍".toByteArray()),
             "reaction with no emoji" to frame(kind = 3, language = ByteArray(0), ref = ref, body = ByteArray(0)),
-            "reaction of ten bytes" to frame(kind = 3, language = ByteArray(0), ref = ref, body = "ééééé".toByteArray()),
+            "reaction of 34 bytes" to frame(kind = 3, language = ByteArray(0), ref = ref, body = "é".repeat(17).toByteArray()),
             "reaction not UTF-8" to frame(kind = 3, language = ByteArray(0), ref = ref, body = byteArrayOf(0xff.toByte())),
         )
         for ((why, bytes) in bad) assertNull(why, SharedPost.decode(bytes))

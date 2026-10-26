@@ -70,7 +70,8 @@ class WireTest {
         assertNull("unknown kind", Body.decode(byteArrayOf(9, 1)))
         assertNull("empty text", Body.decode(byteArrayOf(1, 2, 'f'.code.toByte(), 'r'.code.toByte())))
         assertNull("bad language", Body.decode(byteArrayOf(1, 2, 'F'.code.toByte(), 'R'.code.toByte(), 'x'.code.toByte())))
-        assertNull("long emoji", Body.decode(byteArrayOf(3) + ref + ByteArray(9) { 'a'.code.toByte() }))
+        assertNull("long emoji", Body.decode(byteArrayOf(3) + ref + ByteArray(Body.MAX_EMOJI + 1) { 'a'.code.toByte() }))
+        assertEquals("the reaction limit is 32 bytes (decision 29)", 32, Body.MAX_EMOJI)
         assertNull("receipt length", Body.decode(byteArrayOf(6, 0, 0, 0)))
         assertNull("not a picture", Body.decode(byteArrayOf(5, 1, 2)))
     }

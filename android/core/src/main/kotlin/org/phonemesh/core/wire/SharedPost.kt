@@ -22,7 +22,7 @@ import org.phonemesh.core.crypto.Bytes
  */
 object SharedPost {
     const val VERSION = 2
-    const val MAX_EMOJI = 8
+    const val MAX_EMOJI = 32
     const val REF_BYTES = 4
 
     /** Version, kind, sender id, sender's time. */

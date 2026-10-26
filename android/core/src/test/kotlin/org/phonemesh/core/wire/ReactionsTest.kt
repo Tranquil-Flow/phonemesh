@@ -22,14 +22,24 @@ class ReactionsTest {
         for (typed in listOf("", "  ", "a", "ok", "1", "👍👍", "😂x", "x😂", "🏽", "🇹", "Ω", "中")) assertNull(typed, Reactions.single(typed))
     }
 
-    @Test fun emojiOverTheWireLimitAreRefusedSoOlderPhonesCanReadEveryReaction() {
+    @Test fun joinedEmojiAndTagFlagsUpTo32BytesAreOneEmoji() {
+        // Owner, 2026-10-26: no phone runs v0.1.0, so reactions use the full 32-byte limit of decision 29.
+        assertEquals(32, Reactions.MAX_BYTES)
         assertEquals(SharedPost.MAX_EMOJI, Reactions.MAX_BYTES)
         assertEquals(Body.MAX_EMOJI, Reactions.MAX_BYTES)
-        for (typed in listOf("👨‍👩‍👧", "❤️‍🔥", "🧑🏽‍🌾")) assertNull(typed, Reactions.single(typed))
+        val scotland = "\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74\uDB40\uDC7F"
+        for (emoji in listOf("👨‍👩‍👧", "👨‍👩‍👧‍👦", "❤️‍🔥", "🧑🏽‍🌾", "🏳️‍🌈", "👩🏿‍🤝‍👨🏻", scotland)) assertEquals(emoji, Reactions.single(emoji))
+    }
+
+    @Test fun brokenJoinsAndTooLongJoinsAreRefused() {
+        val tooLong = List(5) { "👨" }.joinToString("\u200D") + "\u200D👩" // 6 joined people: 39 bytes
+        for (typed in listOf("👍\u200D", "\u200D👍", "👍\u200D\u200D👍", "👍\u200Dx", tooLong, "\uD83C\uDFF4\uDB40\uDC67", "\uDB40\uDC7F")) {
+            assertNull(typed, Reactions.single(typed))
+        }
     }
 
     @Test fun everyAcceptedReactionEncodesOnBothWires() {
-        for (emoji in listOf("👍🏽", "🇹🇬", "#️⃣", "❤️")) {
+        for (emoji in listOf("👍🏽", "🇹🇬", "#️⃣", "❤️", "👨‍👩‍👧‍👦")) {
             Body.encode(Body.Reaction(ByteArray(Body.REF), Reactions.single(emoji)!!))
         }
     }

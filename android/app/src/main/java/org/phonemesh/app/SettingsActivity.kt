@@ -347,7 +347,7 @@ class SettingsActivity : ScreenActivity() {
     }
 
     private fun showLicences() {
-        val body = Ui.text(this, Notices.TEXT, palette.text, Ui.BODY_SP).apply {
+        val body = Ui.text(this, Notices.text(resources.configuration.locales[0].language), palette.text, Ui.BODY_SP).apply {
             setPadding(pad() * 2, pad(), pad() * 2, pad())
             setTextIsSelectable(true)
         }

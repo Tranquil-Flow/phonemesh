@@ -180,8 +180,12 @@ if (-not ((& $Adb -s $s shell getprop sys.boot_completed 2>$null) -match '1')) {
 if (-not $NoMic) {
   & $Adb -s $s emu avd hostmicon | Out-Null
   if ($LASTEXITCODE -ne 0) { Say 'Could not turn on the microphone; Talk will hear nothing.' }
-  # The switch can turn itself off while the emulator runs: a hidden keeper turns it back on every few seconds until it stops.
-  $keep = "while ((& '$Adb' -s $s get-state 2>`$null) -eq 'device') { & '$Adb' -s $s emu avd hostmicon | Out-Null; Start-Sleep 5 }"
+  # The switch's link to the microphone goes stale after a while; switching it off and on revives it. A hidden keeper
+  # does that every 10 seconds while nothing is recording (never during a recording), until the emulator stops.
+  $keep = "while ((& '$Adb' -s $s get-state 2>`$null) -eq 'device') { " +
+    "`$last = (& '$Adb' -s $s shell dumpsys audio 2>`$null | Select-String ' rec (start|stop) ' | Select-Object -Last 1); " +
+    "if (-not (`$last -and `$last.Line -match ' rec start ')) { & '$Adb' -s $s emu avd hostmicoff | Out-Null; & '$Adb' -s $s emu avd hostmicon | Out-Null }; " +
+    "Start-Sleep 10 }"
   Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile', '-Command', $keep | Out-Null
 }
 Say 'Installing the demo app...'

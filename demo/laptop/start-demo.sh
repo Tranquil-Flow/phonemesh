@@ -73,7 +73,7 @@ serial() { "$ADB" devices 2>/dev/null | awk '/^emulator-/{print $1}' | while rea
 
 if [ "$COMMAND" = stop ]; then
   s="$(serial || true)"; [ -n "$s" ] || { say "The demo emulator is not running."; exit 0; }
-  [ -f "$HOME_DIR/mic-keeper.pid" ] && kill "$(cat "$HOME_DIR/mic-keeper.pid")" 2>/dev/null; rm -f "$HOME_DIR/mic-keeper.pid"
+  if [ -f "$HOME_DIR/mic-keeper.pid" ]; then kill "$(cat "$HOME_DIR/mic-keeper.pid")" 2>/dev/null || true; rm -f "$HOME_DIR/mic-keeper.pid"; fi
   "$ADB" -s "$s" emu kill >/dev/null && say "Stopped."; exit 0
 fi
 if [ "$COMMAND" = remove ]; then
@@ -195,16 +195,22 @@ if [ -z "$s" ]; then
 fi
 for _ in $(seq 1 120); do [ "$("$ADB" -s "$s" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] && break; sleep 3; done
 [ "$("$ADB" -s "$s" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ] || die "the virtual phone did not finish starting."
-# -allow-host-audio alone still sends zeros: the emulator's "Enable Host Microphone Access" switch starts off, and it
-# can turn itself off again while the emulator runs. A small keeper turns it back on every few seconds until the
-# emulator stops (one keeper at a time; "stop" ends it).
+# -allow-host-audio alone still sends zeros: the emulator's "Enable Host Microphone Access" switch starts off, and its
+# link to the computer's microphone goes stale after a while (silence, though the switch still says on); only switching
+# it off and on again revives it. A small keeper does that every 10 seconds while nothing is recording, never during a
+# recording, until the emulator stops (one keeper at a time; "stop" ends it).
 KEEPER="$HOME_DIR/mic-keeper.pid"
-[ -f "$KEEPER" ] && kill "$(cat "$KEEPER")" 2>/dev/null; rm -f "$KEEPER"
+if [ -f "$KEEPER" ]; then kill "$(cat "$KEEPER")" 2>/dev/null || true; rm -f "$KEEPER"; fi # it may have ended already
 if [ "$MIC" = 1 ]; then
   "$ADB" -s "$s" emu avd hostmicon >/dev/null 2>&1 || say "Could not turn on the microphone; Talk will hear nothing."
   # shellcheck disable=SC2016 # expanded by the inner shell
-  nohup bash -c 'while [ "$("$0" -s "$1" get-state 2>/dev/null)" = device ]; do "$0" -s "$1" emu avd hostmicon >/dev/null 2>&1; sleep 5; done' \
-    "$ADB" "$s" >/dev/null 2>&1 &
+  nohup bash -c 'while [ "$("$0" -s "$1" get-state 2>/dev/null)" = device ]; do
+      case "$("$0" -s "$1" shell dumpsys audio 2>/dev/null | grep -E " rec (start|stop) " | tail -1)" in
+        *" rec start "*) ;;
+        *) "$0" -s "$1" emu avd hostmicoff >/dev/null 2>&1; "$0" -s "$1" emu avd hostmicon >/dev/null 2>&1 ;;
+      esac
+      sleep 10
+    done' "$ADB" "$s" >/dev/null 2>&1 &
   echo $! > "$KEEPER"
 fi
 say "Installing the demo app..."

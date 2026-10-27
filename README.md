@@ -32,19 +32,21 @@ instead of a long number. The app is in French and English.
 
 ## Status
 
-**v0.1.0, released 2026-10-25.** Download the APK for your phone from the
-[v0.1.0 release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.0) and check
-its SHA-256 against `SHA256SUMS` there. The [release notes](docs/releases/v0.1.0.md) say
-what was tested and what was not.
+**v0.1.1, released 2026-10-27.** Download the APK for your phone from the
+[v0.1.1 release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1) and check
+its SHA-256 against `SHA256SUMS` there. The [release notes](docs/releases/v0.1.1.md) say
+what is new, what was tested and what was not.
 
-This is a first release, tested on two phones and a small number of radios. It is not
-a finished product and makes no range, capacity or delivery guarantee.
+v0.1.1 adds your own picture (a colour, an emoji, a letter or a small photo), the radio
+time a message will take, a recovery kit for your contacts, any emoji as a reaction, and
+fewer resends on a busy radio. It was checked on an emulator; v0.1.0 was tested on two
+phones and a small number of radios. It is not a finished product and makes no range,
+capacity or delivery guarantee.
 
 **Try it without a radio.** Phonemesh Demo is the real app with a pretend radio, pretend
 people and a pretend local hub. It runs on an Android phone, or in an emulator on a Mac.
 Downloads and step-by-step instructions are on the
-[v0.1.1-demo.1 pre-release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1-demo.1).
-It is a test build from work toward v0.1.1, not a release.
+[v0.1.1 release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1).
 
 ## How it works
 
@@ -82,7 +84,7 @@ flowchart TB
 ## How accounts work
 
 Your account is made on your phone the first time you open the app: you say your name
-and pick a colour. There is no phone number, no email, no password and no account server.
+and pick a colour and a picture. There is no phone number, no email, no password and no account server.
 Your encryption keys are created on the phone and never leave it.
 
 Your account is not tied to a radio. Radios are shared equipment: you can use any radio,
@@ -100,8 +102,10 @@ There is no search and no directory. You add someone in one of two ways:
 both phones, nobody is in the middle pretending to be the other person. Compare them side
 by side, or over a phone call for a contact added by link. No reading is needed.
 
-There is **no recovery in v0.1**: if you lose the phone or clear the app's data, the
-account is gone, and your contacts add your new one. The
+**Settings → Recovery kit** makes a recovery card (a QR code and twelve words) and a sealed
+copy of your contacts. On a new phone the kit lists your people again, and you add each
+one again: a new phone has a new account, so your safety pictures change. Without a kit,
+a lost phone means a new account that your contacts add again. The
 [explainer](docs/how-it-works.md#accounts-and-contacts) covers keys and encryption.
 
 ## The local hub
@@ -192,7 +196,7 @@ Phonemesh works with radios running stock [Meshtastic](https://meshtastic.org) f
 
 ### 2. Set up the app
 
-Install the APK from the [release page](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.0)
+Install the APK from the [release page](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1)
 (allow installs from that source only if you trust it, and check the SHA-256). Choose
 the app language on the first screen. A numbered guide then walks you through five steps,
 each with pictures and spoken help:
@@ -225,7 +229,7 @@ See [Run a local hub](#run-a-local-hub).
 - **The chats list** keeps the shared chat at the top. Long-press a private chat to
   **Pin to top** or **Delete chat**.
 - **Private group chats** (a group of chosen people, encrypted for them only) are not
-  in v0.1.0. They are planned for the next version.
+  in v0.1.1. They are planned for v0.1.2.
 
 ### Talking and listening
 
@@ -240,11 +244,12 @@ See [Run a local hub](#run-a-local-hub).
 
 ### In a conversation
 
-- **Reply** or **React** (six pictures in v0.1.0: 👍 ❤️ 😂 😮 😢 🙏) by long-pressing a message
-  that went over the radio.
+- **Reply** or **React** with any emoji by long-pressing a message that went over the radio.
 - **Copy**, **Share** or **Forward** a message's words. Forwarding puts them in another
   chat's draft, so you hear them and choose to send.
 - **Delete** a message from this phone (others keep their copy).
+- **Radio time:** under the draft, the app says how long the radio will send it, for
+  example "About 7 seconds on the radio".
 - **Send a picture:** take or choose a photo, pick its size and colour, and see roughly
   how many seconds of radio time it will take before sending. Pictures travel in several
   packets and show their progress.
@@ -259,12 +264,13 @@ See [Run a local hub](#run-a-local-hub).
 - **Languages (packs):** add or remove speech packs.
 - **Understanding speech:** *Fast* (best for older phones) or *Accurate* (fewer
   mistakes, slower and a bigger download).
-- **My name:** change your name or colour.
+- **My name:** change your name, your colour and your picture (letter, emoji or photo).
 - **Show my code:** your QR code and link for adding someone.
 - **Local hub** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
   sent, and **Keep hub when app is closed**.
 - **Read new messages aloud:** off by default.
 - **Share the app:** send the app and speech packs to another phone.
+- **Recovery kit:** make a recovery card and a sealed copy of your contacts, or restore one.
 - **Show the guide again:** replay the welcome story and the tips.
 
 The **?** button on the chats screen opens Help, which explains each feature with
@@ -277,8 +283,10 @@ pictures.
   are the supported voice path.
 - **Hub Wi-Fi must be WPA2-Personal** (or open). Android 10 phones cannot join a
   WPA2/WPA3 mixed-mode network through the app.
-- **No account recovery or transfer.** A lost phone means a new account; contacts add it
-  again.
+- **Recovery keeps your contacts, not your account.** A new phone has a new account; the
+  recovery kit lists your people so you can add each one again. Messages are not saved.
+- **Photos need a local hub.** Your photo goes only through a local hub, never by radio.
+  Contacts who never use that hub see your emoji or letter.
 - History is stored in the app's private storage under Android's file encryption, not in
   a separately encrypted database.
 - No quantum-safe encryption yet. Every message carries a key-type marker so it can be
@@ -288,14 +296,13 @@ pictures.
 
 ## Coming next
 
-Being designed now, each with its own specification:
+Planned for v0.1.2, each with its own specification:
 
 - **Private group chats:** a group of chosen contacts, encrypted for them only.
-- **Account recovery and encrypted chat backup**, for a lost or new phone.
-- **More profile choices** than a name and a colour.
-- **Ewe and Kabiyè**, for the pilot in Togo.
-- **An airtime meter:** how long a message or picture takes to send, and why.
+- **Encrypted chat backup**, for a lost or new phone.
 - **Updates passed on through the local hub**, signed, for places without internet.
+
+Then **Ewe and Kabiyè**, for the pilot in Togo.
 
 Planned for later: TalkBack support and quantum-safe keys.
 
@@ -359,7 +366,7 @@ The full project check is `scripts/check.sh` (Python, hub JVM and Android). Run 
 - [How Phonemesh works](docs/how-it-works.md): the explainer.
 - [Phonemesh Demo](docs/demo.md): try the app without a radio, and
   [what the demo covers](docs/demo-coverage.md).
-- [Release notes for v0.1.0](docs/releases/v0.1.0.md) and the
+- [Release notes for v0.1.1](docs/releases/v0.1.1.md) (and [v0.1.0](docs/releases/v0.1.0.md)) and the
   [verification record](docs/android-verification.md).
 - [Android design](docs/android-design.md) and the
   [accounts and hub specification](docs/specs/2026-10-14-accounts-design.md).

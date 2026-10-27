@@ -135,6 +135,17 @@ class DemoWorld(private val app: Context) {
     }
 
     /** Kofi sends a picture. False until Kofi has been added. */
+    /** Kofi picks another emoji for his picture and writes: the change arrives behind his message. */
+    fun kofiChangesPicture(): Boolean {
+        if (!hasAccount()) return false
+        val user = userId()
+        val language = language()
+        val kofi = person(DemoPerson.Who.KOFI)
+        if (!kofi.knows(user)) return false
+        soon { if (kofi.changePicture(user)) kofi.writeTo(user, language) }
+        return true
+    }
+
     fun kofiSendsPicture(): Boolean {
         if (!hasAccount()) return false
         val user = userId()

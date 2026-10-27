@@ -17,6 +17,8 @@ import org.phonemesh.core.wire.Body
 import org.phonemesh.core.wire.HubAck
 import org.phonemesh.core.wire.SharedChatWire
 import org.phonemesh.core.wire.SharedPost
+import org.phonemesh.core.account.Avatar
+import org.phonemesh.core.account.Profile
 import org.phonemesh.core.wire.WireV2
 
 /**
@@ -25,13 +27,16 @@ import org.phonemesh.core.wire.WireV2
  * retries. Only the screen is missing: they answer from [DemoScript]. All methods may be called from any thread.
  */
 class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private val clock: DemoClock) {
-    enum class Who(val key: String, val label: String, val node: String, val colour: Int, val replies: Boolean) {
-        /** Met in person (QR codes), writes back. */
-        KOFI("kofi", "Kofi", "!d0e1c0f1", 0x43A047, true),
-        /** Sends you a request by link; sends receipts but never writes back. */
-        AMA("ama", "Ama", "!d0e1a3a1", 0x8E24AA, false),
-        /** You open his link; he accepts and writes back. */
-        YAW("yaw", "Yaw", "!d0e1ca01", 0xFB8C00, true),
+    enum class Who(val key: String, val label: String, val node: String, val colour: Int, val avatar: Avatar, val replies: Boolean) {
+        /** Met in person (QR codes), writes back. An emoji picture, which he can change from the controls. */
+        KOFI("kofi", "Kofi", "!d0e1c0f1", 0x43A047, Avatar.Emoji("🐟"), true),
+        /** Sends you a request by link; sends receipts but never writes back. Her letter. */
+        AMA("ama", "Ama", "!d0e1a3a1", 0x8E24AA, Avatar.Letter, false),
+        /** You open his link; he accepts and writes back. A colour from the wheel, not one of the eight. */
+        YAW("yaw", "Yaw", "!d0e1ca01", 0x00838F, Avatar.Letter, true);
+
+        /** The profile their phone starts with (revision 1). */
+        fun profile(): Profile = Profile(label, colour, avatar)
     }
 
     private val history = History(app, "demo-${who.key}.db")
@@ -43,7 +48,7 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
     private val lastLanguage = HashMap<AccountId, String>()
 
     init {
-        if (history.accountRow()?.name.isNullOrEmpty()) store.setName(who.label, who.colour)
+        if (history.accountRow()?.name.isNullOrEmpty()) store.setProfile(who.label, who.colour, who.avatar)
         accounts = Accounts(history, store, send = { false }, now = clock::now)
         // Receipts after the protocol's shortest quiet time (15 s) instead of a random 15 to 60 s, so Delivered comes soon.
         postman = Postman(store, AppMailStore(history, store), quietDelay = { Postman.MIN_QUIET_MS })
@@ -145,6 +150,24 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
         val out = postman.send(account, body, null, clock.now()) ?: return
         mesh.broadcast(who.node, WireV2.PORT, out.packet)
         postman.transmitted(out.outboxId)
+        // As the app does it (profile spec PF5): a changed profile follows the next message, once per contact.
+        if (body is Body.Text && account in owed) {
+            owed.remove(account)
+            store.profile()?.let { sayNow(account, Body.ProfileUpdate(it)) }
+        }
+    }
+
+    /** Contacts that have not been told about the latest picture change. */
+    private val owed = HashSet<AccountId>()
+
+    /** They choose another emoji for their picture; [account] learns it with their next message. */
+    @Synchronized fun changePicture(account: AccountId): Boolean {
+        if (!knows(account)) return false
+        val now = store.profile() ?: return false
+        val next = PICTURES[(PICTURES.indexOf((now.avatar as? Avatar.Emoji)?.text) + 1) % PICTURES.size]
+        store.setProfile(now.name, now.colour, Avatar.Emoji(next))
+        owed.add(account)
+        return true
     }
 
     /** What their phone's postman does each second: receipts, held messages and resends that are due. */
@@ -163,6 +186,8 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
     }
 
     companion object {
+        /** The emoji Kofi cycles through when he changes his picture. */
+        val PICTURES = listOf("🐟", "🐠", "⚽", "🌻")
         private const val VAULT = "phonemesh-demo-vault"
         private const val TICK_MS = 1_000L
         private const val ACCEPT_MS = 2_500L

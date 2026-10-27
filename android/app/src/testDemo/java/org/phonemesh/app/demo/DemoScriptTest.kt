@@ -11,6 +11,22 @@ import org.phonemesh.core.wire.SharedPost
 class DemoScriptTest {
     private val languages = listOf("en", "en-US", "en_GB", "fr", "fr-FR", "de")
 
+    /** Profile spec: the demo people show an emoji, a letter and a wheel colour, all valid profiles. */
+    @Test fun demoPeopleHaveValidDifferentProfiles() {
+        val named = listOf(0xE53935, 0xFB8C00, 0xFDD835, 0x43A047, 0x1E88E5, 0x8E24AA, 0xEC407A, 0x6D4C41)
+        for (who in DemoPerson.Who.values()) {
+            val profile = who.profile()
+            assertEquals(profile, org.phonemesh.core.account.Profile.decode(profile.encode()))
+        }
+        assertEquals(org.phonemesh.core.account.Avatar.Emoji("🐟"), DemoPerson.Who.KOFI.avatar)
+        assertEquals(org.phonemesh.core.account.Avatar.Letter, DemoPerson.Who.AMA.avatar)
+        assertTrue("Yaw's colour comes from the wheel", DemoPerson.Who.YAW.colour !in named)
+        for (emoji in DemoPerson.PICTURES) {
+            assertEquals(emoji, org.phonemesh.core.account.Avatar.Emoji(emoji).text)
+            assertTrue("$emoji is on every phone's list", org.phonemesh.core.account.EmojiAvatars.all.contains(emoji))
+        }
+    }
+
     @Test fun languageTagsAreTheAppsCanonicalOnes() {
         for (language in languages) {
             val tag = DemoScript.tag(language)

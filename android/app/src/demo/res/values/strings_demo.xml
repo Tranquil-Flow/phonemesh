@@ -11,6 +11,7 @@
     <string name="demo_ama_adds">Ama adds you by link</string>
     <string name="demo_someone_posts">Someone writes in the shared chat</string>
     <string name="demo_kofi_picture">Kofi sends a picture</string>
+    <string name="demo_kofi_new_picture">Kofi changes his picture and writes</string>
     <string name="demo_stock_writes">Sena (Meshtastic app) writes to everyone</string>
     <string name="demo_stock_direct">Sena (Meshtastic app) writes to you</string>
     <string name="demo_kofi_away">Kofi goes out of range</string>

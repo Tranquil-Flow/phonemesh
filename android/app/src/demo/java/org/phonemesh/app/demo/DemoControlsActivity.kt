@@ -77,6 +77,13 @@ class DemoControlsActivity : Activity() {
                 else -> 0
             }
         }
+        act(R.string.demo_kofi_new_picture) {
+            when {
+                !world.hasAccount() -> R.string.demo_need_name
+                !world.kofiChangesPicture() -> R.string.demo_need_kofi
+                else -> 0
+            }
+        }
         act(R.string.demo_ama_adds) { if (world.amaAddsYou()) 0 else R.string.demo_need_name }
         act(R.string.demo_someone_posts) { world.someonePosts(); 0 }
         act(R.string.demo_stock_writes) { world.stockUserWrites(); 0 }

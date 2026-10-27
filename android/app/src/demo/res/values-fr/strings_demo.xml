@@ -9,6 +9,7 @@
     <string name="demo_ama_adds">Ama vous ajoute par lien</string>
     <string name="demo_someone_posts">Quelqu\'un écrit dans la discussion commune</string>
     <string name="demo_kofi_picture">Kofi envoie une photo</string>
+    <string name="demo_kofi_new_picture">Kofi change d\'image et vous écrit</string>
     <string name="demo_stock_writes">Sena (appli Meshtastic) écrit à tous</string>
     <string name="demo_stock_direct">Sena (appli Meshtastic) vous écrit</string>
     <string name="demo_kofi_away">Kofi sort de portée</string>

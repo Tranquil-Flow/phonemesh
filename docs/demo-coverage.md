@@ -38,6 +38,7 @@ screen) or from the "Demo controls" icon.
 | Waiting for a radio | Controls: "Switch the radio off" (and the hub off), then send | Real | Yes |
 | Radio comes back, waiting messages go | Controls: "Switch the radio on" | Real | Yes |
 | Receive a picture | Controls: "Kofi sends a picture" | Real picture wire; a drawn picture | Yes |
+| A contact changes their picture | Controls: "Kofi changes his picture and writes" | Real profile update behind his message | Yes: 🐟 became 🐠 with his next message, and only the message counted as unread |
 | Send a picture | **Send a picture**: **Take a photo** or **Choose a photo** | Real; the emulator's camera shows a virtual room, a phone uses its own | Verified: **Take a photo** asks for the camera first, then sizes, colour, **Send**, Delivered |
 | Message actions: Reply, React, Copy, Share, Forward, Delete | Long-press a message | Real | Menu and React: yes |
 | React with any one emoji | Long-press, **React**, **Other emoji**, then the keyboard's emoji panel | Real | Dialog and refusal of text: yes. An emoji itself: by the app's own emulator test (adb cannot type emoji) |

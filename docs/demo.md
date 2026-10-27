@@ -26,14 +26,16 @@ Each release from v0.1.1 has two demo files next to the normal app, for example
 - **Sena**: she uses the plain Meshtastic app, not Phonemesh. She writes in the shared chat.
 - **The local hub**: in Settings, **Local hub**, **Scan hub code**, pick "The local hub's code".
 
-Kofi and Yaw answer your private messages. Everyone nearby sometimes writes in the shared chat.
+Kofi and Yaw answer your private messages. Everyone nearby sometimes writes in the shared chat. Each person has
+their own picture: Kofi an emoji, Ama her letter, Yaw his letter on a colour from the colour wheel.
 
 ## The demo controls
 
 Pull down from the top of the screen and tap the **Phonemesh Demo** notification, or open the **Demo controls** icon.
 From there you can make things happen that would need other people or hardware:
 
-- Kofi writes to you or sends a picture; Ama adds you by link; Sena writes to everyone or to you.
+- Kofi writes to you, sends a picture, or changes his picture and writes; Ama adds you by link; Sena writes to
+  everyone or to you.
 - See the safety pictures on Kofi's, Ama's or Yaw's phone, to compare with yours.
 - Kofi goes out of range and comes back, so messages go through the hub.
 - Switch your radio off and on, the hub off and on, and the hub's Wi-Fi or Bluetooth off and on.

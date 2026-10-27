@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "phonemesh"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local multilingual speech-to-text messaging over Meshtastic"
 requires-python = ">=3.11,<3.14"
 readme = "README.md"

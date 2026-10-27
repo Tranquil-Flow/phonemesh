@@ -8,8 +8,9 @@ radio waves, the other people and the hub are simulated, inside the app.
 
 ## Get it
 
-Each release from v0.1.1 has two demo files next to the normal app, for example
-`phonemesh-0.1.1-demo-arm64-v8a.apk`, and their checksums in `SHA256SUMS`.
+Each release from v0.1.1 has demo files next to the normal app, for example
+`phonemesh-0.1.1-demo-arm64-v8a.apk`, and their checksums in `SHA256SUMS`: one for each kind of phone, and an
+`x86_64` one for laptops.
 
 - **On an Android phone (8.0 or newer):** install the demo file. Most phones made after 2017 take `arm64-v8a`, older
   ones `armeabi-v7a`. It installs next to the normal Phonemesh app as "Phonemesh Demo" and doesn't touch its data.

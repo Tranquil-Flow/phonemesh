@@ -18,6 +18,10 @@ require(fakeCountry.isEmpty() || Regex("[A-Z]{2}").matches(fakeCountry)) { "phon
 val picturesBuild = project.findProperty("phonemesh.pictures") != "false"
 // Hardware test T1 of the accounts spec: -Pphonemesh.t1probe=true adds a probe that adb starts (T1ProbeRun). Debug only.
 val t1Probe = project.findProperty("phonemesh.t1probe") == "true"
+// Laptop demo (decision 37): -Pphonemesh.x86_64=true adds an x86_64 APK for Windows and Linux laptops running Android
+// on an x86_64 CPU. Release builds never set it: the phone APKs stay arm64-v8a and armeabi-v7a.
+val laptopAbis = if (project.findProperty("phonemesh.x86_64") == "true") listOf("x86_64") else emptyList()
+val abis = listOf("arm64-v8a", "armeabi-v7a") + laptopAbis
 // Hardware test T2 (joining a hub's Wi-Fi with no internet): -Pphonemesh.t2probe=true adds src/probe/java (T2ProbeRun)
 // and, through src/probe/AndroidManifest.xml, the Wi-Fi permissions it needs. Debug only; its code is not even compiled
 // into a normal build.
@@ -46,8 +50,8 @@ android {
         buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")
         buildConfigField("boolean", "T1_PROBE", "false")
         buildConfigField("boolean", "T2_PROBE", "false")
-        // The picture upscaling bridge (src/main/cpp) is built for the two phone ABIs the APKs carry.
-        externalNativeBuild { cmake { abiFilters("arm64-v8a", "armeabi-v7a") } }
+        // The picture upscaling bridge (src/main/cpp) is built for the ABIs the APKs carry.
+        externalNativeBuild { cmake { abiFilters(*abis.toTypedArray()) } }
     }
     ndkVersion = "28.2.13676358"
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
@@ -112,7 +116,7 @@ android {
         abi {
             isEnable=true
             reset()
-            include("arm64-v8a", "armeabi-v7a")
+            include(*abis.toTypedArray())
             isUniversalApk = false
         }
     }

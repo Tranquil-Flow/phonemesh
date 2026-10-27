@@ -152,7 +152,9 @@ fi
 # ---- 3. The demo app ----
 HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "$APK" ] && [ "$VERSION" = latest ]; then
+  # The demo app for this computer's Android (x86_64 on Intel and AMD), else the ARM one through Android's translation.
   local_apk="$(find "$HERE" -maxdepth 1 -name "*-demo-$ABI.apk" 2>/dev/null | sort | tail -1)"
+  [ -n "$local_apk" ] || local_apk="$(find "$HERE" -maxdepth 1 -name "*-demo-arm64-v8a.apk" 2>/dev/null | sort | tail -1)"
   if [ -n "$local_apk" ]; then
     APK="$local_apk"
     if [ -f "$HERE/SHA256SUMS" ]; then
@@ -167,7 +169,9 @@ fi
 if [ -z "$APK" ]; then
   if [ "$VERSION" = latest ]; then api="https://api.github.com/repos/$REPO/releases/latest"; else api="https://api.github.com/repos/$REPO/releases/tags/$VERSION"; fi
   json="$(curl -fsSL "$api")" || die "could not reach GitHub for the release."
-  apk_url="$(printf '%s' "$json" | grep -oE '"browser_download_url": *"[^"]*-demo-arm64-v8a\.apk"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
+  apk_url="$(printf '%s' "$json" | grep -oE "\"browser_download_url\": *\"[^\"]*-demo-$ABI\\.apk\"" | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
+  # Older releases have only ARM demo apps; Android's translation runs them on x86_64.
+  [ -n "$apk_url" ] || apk_url="$(printf '%s' "$json" | grep -oE '"browser_download_url": *"[^"]*-demo-arm64-v8a\.apk"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
   sums_url="$(printf '%s' "$json" | grep -oE '"browser_download_url": *"[^"]*/SHA256SUMS"' | head -1 | sed -E 's/.*"(https[^"]+)"/\1/')"
   [ -n "$apk_url" ] || die "this release has no demo app yet. Use --apk FILE, or --version with a release that has one."
   [ -n "$sums_url" ] || die "this release has no SHA256SUMS to check the demo app against."

@@ -74,7 +74,7 @@ The folder is `~/.cache/phonemesh-demo-laptop` (Windows: `%LOCALAPPDATA%\phoneme
 
 ## Good to know
 
-- Windows and Linux laptops run an x86_64 Android. The demo app is built for ARM phones and runs there through
-  Android's built-in ARM translation, so it is a little slower.
+- Windows and Linux laptops run an x86_64 Android. The launcher takes the release's x86_64 demo app. A release
+  without one gives the ARM demo app, which runs through Android's built-in ARM translation, a little slower.
 - If the demo app on the virtual phone was built on another computer, the script removes it first, because Android
   only updates an app signed with the same key. Your demo data goes with it.

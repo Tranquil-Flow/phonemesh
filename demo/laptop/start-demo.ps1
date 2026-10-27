@@ -146,8 +146,10 @@ PlayStore.enabled=false
 if (-not $Apk) {
   $api = if ($Version -eq 'latest') { "https://api.github.com/repos/$Repo/releases/latest" } else { "https://api.github.com/repos/$Repo/releases/tags/$Version" }
   try { $release = Invoke-RestMethod -Uri $api -UseBasicParsing } catch { Stop-Demo 'could not reach GitHub for the release.' }
-  # Windows runs the x86_64 system image; the arm64 demo app runs on it through Android's translation layer.
-  $asset = $release.assets | Where-Object { $_.name -like '*-demo-arm64-v8a.apk' } | Select-Object -First 1
+  # Windows runs the x86_64 system image: the x86_64 demo app when the release has one, else the arm64 one through
+  # Android's translation layer.
+  $asset = $release.assets | Where-Object { $_.name -like '*-demo-x86_64.apk' } | Select-Object -First 1
+  if (-not $asset) { $asset = $release.assets | Where-Object { $_.name -like '*-demo-arm64-v8a.apk' } | Select-Object -First 1 }
   $sums = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS' } | Select-Object -First 1
   if (-not $asset) { Stop-Demo 'this release has no demo app yet. Use -Apk FILE, or -Version with a release that has one.' }
   if (-not $sums) { Stop-Demo "this release has no SHA256SUMS to check the demo app against." }

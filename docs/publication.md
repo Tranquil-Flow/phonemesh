@@ -66,12 +66,14 @@ all release gates close. See [candidate notes](releases/v0.1.0.md).
    caches/build trees, operator config/cards/logs/mail, keys, device identifiers and
    unreviewed model assets. Update candidate notes only with verified outcomes.
 
-7. **Ship the demo (from v0.1.1).** Build `assembleDemo` from the release commit and attach
-   both demo APKs as `phonemesh-<version>-demo-<abi>.apk`, with their lines in `SHA256SUMS`.
+7. **Ship the demo (from v0.1.1).** Build `assembleDemo -Pphonemesh.x86_64=true` from the release commit and attach
+   the three demo APKs (arm64-v8a, armeabi-v7a, x86_64) as `phonemesh-<version>-demo-<abi>.apk`, with their lines in
+   `SHA256SUMS`. Only the demo gets x86_64; the normal app's release build never sets the property.
    Confirm `git diff <previous release>..HEAD -- android/app/src/main` holds only reviewed
    app changes, walk [the demo coverage list](demo-coverage.md) on an emulator with an
    empty crash log, and update its Verified column. The laptop launchers in `demo/laptop`
-   download the `-demo-arm64-v8a.apk` asset and check it against `SHA256SUMS`.
+   download the `-demo-x86_64.apk` asset on Windows and on Intel or AMD computers, else
+   `-demo-arm64-v8a.apk`, and check it against `SHA256SUMS`.
 
 8. **Ship the hub (from v0.1.1).** Attach `android/hub/build/distributions/phonemesh-hub.zip`
    (built by `:hub:distZip` from the release commit) as `phonemesh-hub-<version>.zip`, with

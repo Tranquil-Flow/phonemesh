@@ -25,6 +25,11 @@ class Postman(
     private val store: MailStore,
     private val newPair: () -> KeyPairBytes = KeyPairBytes::generate,
     private val quietDelay: () -> Long = { 15_000L + receiptRandom.nextInt(45_001) },
+    /**
+     * Whether private group keys ([Body.GroupKeyBody]) are taken. Off until the app has groups: then a group key is
+     * refused like an unknown body (no receipt, no step of the session), so a sender never thinks it arrived.
+     */
+    private val groups: Boolean = false,
 ) {
     /** A message the app should show. [ref] is what replies and reactions to it name ([Ratchet.reference]). */
     class Received(val contact: AccountId, val body: Body, val ref: ByteArray)
@@ -131,7 +136,7 @@ class Postman(
             // heads and parts are consumed only by MailStore.keep, which must store them before anything is acknowledged.
             if (decoded.body !is Body.Text && decoded.body !is Body.Reply && decoded.body !is Body.Reaction &&
                 decoded.body !is Body.Receipt && decoded.body !is Body.PictureHead && decoded.body !is Body.PicturePart &&
-                decoded.body !is Body.ProfileUpdate && decoded.body !is Body.AvatarPiece) return null
+                decoded.body !is Body.ProfileUpdate && decoded.body !is Body.AvatarPiece && !(groups && decoded.body is Body.GroupKeyBody)) return null
             val ref = Ratchet.reference(opened.code)
             val response = if (decoded.body is Body.Receipt) null else {
                 // A late old-chain packet needs its own covering ack, not today's unrelated receiving chain.

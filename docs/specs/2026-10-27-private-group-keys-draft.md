@@ -38,7 +38,8 @@ A writer must durably store `chainAfterNext()` before the packet leaves (no key 
 
 - Every epoch is started by an admin of the epoch before it (or by the creator). The admin sends each other member a
   70-byte key over their private session: version 1 | group id 16 | epoch u32 | secret 32 | roster digest 16 |
-  roster part count. A person being removed gets no key.
+  roster part count. A person being removed gets no key. On the wire it is private body kind 10 (`GroupKeyBody`),
+  receipted like a text; a phone without groups refuses it like an unknown body (no receipt, no session step).
 - The member list goes once to everyone as signed group packets on the admin's new chain. Roster bytes: version 1 |
   name length | UTF-8 name (1-24 bytes) | colour RGB | count (2-20) | count x (flags: 1 admin, 0 member | IK33).
   Each packet body: op 2 | index | count | up to 136 roster bytes; 20 people take 6 packets. App messages are op 1.

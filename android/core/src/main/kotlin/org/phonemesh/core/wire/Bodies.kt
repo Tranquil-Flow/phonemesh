@@ -26,6 +26,8 @@ sealed class Body {
 
     /** One piece (picture head or part bytes) of a contact's photo avatar; never a chat picture (decision 50). */
     class AvatarPiece(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
+    /** A private group's new epoch key for this one member ([org.phonemesh.core.group.GroupKey], draft GK2, 70 bytes). */
+    class GroupKeyBody(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
 
     companion object {
         const val TEXT = 1
@@ -37,6 +39,7 @@ sealed class Body {
         const val HELLO = 7
         const val PROFILE = 8
         const val AVATAR = 9
+        const val GROUP_KEY = 10
         const val REF = 4
         const val MAX_EMOJI = 32
         private const val WITH_ACK = 0x80
@@ -86,6 +89,10 @@ sealed class Body {
                 require(PictureWire.decodeV2(body.bytes) != null) { "not a picture piece" }
                 byteArrayOf(AVATAR.toByte()) + body.bytes
             }
+            is GroupKeyBody -> {
+                require(org.phonemesh.core.group.GroupKey.decode(body.bytes) != null) { "not a group key" }
+                byteArrayOf(GROUP_KEY.toByte()) + body.bytes
+            }
         }
 
         fun decode(bytes: ByteArray): Body? = try {
@@ -103,6 +110,7 @@ sealed class Body {
                 HELLO -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { Hello(it) }
                 PROFILE -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { ProfileUpdate(it) }
                 AVATAR -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) != null }?.let { AvatarPiece(it) }
+                GROUP_KEY -> bytes.copyOfRange(1, bytes.size).takeIf { org.phonemesh.core.group.GroupKey.decode(it) != null }?.let { GroupKeyBody(it) }
                 else -> null
             }
         } catch (_: Refused) {

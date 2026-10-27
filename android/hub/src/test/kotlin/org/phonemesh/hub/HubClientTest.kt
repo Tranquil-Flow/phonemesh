@@ -76,6 +76,28 @@ class HubClientTest {
         return listener
     }
 
+    /** Decision 64: a held packet is kept for phones that fetch it here and is never aired, not even on a retry. */
+    @Test fun aHeldPacketIsKeptForFetchingButNeverAired() {
+        val radio = FakeRadio()
+        val hub = Hub(mailbox, radio)
+        val own = HubServer(hub, mailbox, "Held hub", tls, 0).also { it.start() }
+        try {
+            val c = HubClient("127.0.0.1", own.port, tls.pin, SocketFactory.getDefault())
+            val packet = Packets.message(7)
+            assertEquals(HubClient.Sent.STORED, c.sendHeld(301, packet))
+            assertEquals("a retry is the same kept packet", HubClient.Sent.ALREADY, c.sendHeld(301, packet))
+            repeat(30) { hub.tick() }
+            assertTrue("nothing was aired", radio.sent.isEmpty())
+            val code = org.phonemesh.core.session.SessionState.hexOf(packet.copyOfRange(1, 9))
+            assertTrue("a phone fetching its mail gets it", c.mail(0, listOf(code), 0).any { it.packet.contentEquals(packet) })
+            assertEquals("only private mail can be held", HubClient.Sent.REFUSED, c.sendHeld(303, Packets.message(8)))
+            // The ordinary path still airs.
+            assertEquals(HubClient.Sent.STORED, c.send(301, Packets.message(9)))
+            repeat(30) { hub.tick() }
+            assertEquals(1, radio.sent.size)
+        } finally { own.stop() }
+    }
+
     @Test fun theClientAndTheHubComputeThePinTheSameWay() {
         val key = ByteArray(91) { (it * 7).toByte() }
         assertEquals(Tls.pinOf(key), HubCard.pinOf(key))

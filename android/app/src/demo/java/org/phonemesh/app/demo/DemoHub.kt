@@ -122,9 +122,13 @@ class DemoHub(private val dir: File, private val mesh: DemoMesh, private val clo
 
         private fun reach() { if (dead || !way.reachable()) throw IOException("the demo hub does not answer") }
 
-        override fun send(port: Int, packet: ByteArray): HubClient.Sent {
+        override fun send(port: Int, packet: ByteArray): HubClient.Sent = offer(port, packet, air = true)
+
+        override fun sendHeld(port: Int, packet: ByteArray): HubClient.Sent = offer(port, packet, air = false)
+
+        private fun offer(port: Int, packet: ByteArray, air: Boolean): HubClient.Sent {
             reach()
-            return when (hub.fromPhone(PHONE, port, packet)) {
+            return when (hub.fromPhone(PHONE, port, packet, air)) {
                 Hub.Sent.STORED -> HubClient.Sent.STORED
                 Hub.Sent.ALREADY -> HubClient.Sent.ALREADY
                 Hub.Sent.REFUSED -> HubClient.Sent.REFUSED

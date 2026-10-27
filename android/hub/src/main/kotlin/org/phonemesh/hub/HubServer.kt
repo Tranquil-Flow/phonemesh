@@ -23,6 +23,7 @@ import javax.net.ssl.SSLContext
  * - `POST /mail?since=N&wait=S&hellos=1&shared=1`: the body lists recipient codes in hex, one per line (a body, not
  *   the address, so code lists are never in a URL or a log). Answers mail after seq N, waiting up to S seconds
  *   (at most 30) for some to arrive: one `seq port hex` line each.
+ * - `/send?port=301&air=0`: kept for phones that fetch it here, never aired (decision 64, photo avatars).
  * - `/updates/v1/...`: signed updates the operator imported, read only ([UpdateRoutes]).
  */
 class HubServer(
@@ -57,7 +58,8 @@ class HubServer(
         val port = query(ex)["port"]?.toIntOrNull() ?: return reply(ex, 400, "port?\n")
         val body = ex.requestBody.readNBytes(MAX_BODY + 1)
         if (body.size > MAX_BODY) return reply(ex, 400, "too long\n")
-        when (hub.fromPhone(ex.remoteAddress.address.hostAddress, port, body)) {
+        val air = query(ex)["air"] != "0"
+        when (hub.fromPhone(ex.remoteAddress.address.hostAddress, port, body, air)) {
             Hub.Sent.STORED -> reply(ex, 200, "stored\n")
             Hub.Sent.ALREADY -> reply(ex, 200, "already\n")
             Hub.Sent.REFUSED -> reply(ex, 400, "not a Phonemesh packet\n")

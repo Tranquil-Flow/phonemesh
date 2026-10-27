@@ -60,9 +60,16 @@ class Hub(
      * after [Outbox.MAX_AGE] from first storage. The mailbox row, its time and its retention never change. Nothing is
      * re-aired without such a request, and shared-chat posts (port 303) keep single forwarding.
      */
-    @Synchronized fun fromPhone(phone: String, port: Int, bytes: ByteArray): Sent {
+    @Synchronized fun fromPhone(phone: String, port: Int, bytes: ByteArray, air: Boolean = true): Sent {
         if (port != WireV2.PORT && port != org.phonemesh.core.wire.SharedChatWire.PORT) return Sent.REFUSED
         if (mailbox.classify(port, bytes) == null) return Sent.REFUSED
+        // Decision 64: photo avatars go only through a hub. Such a packet is kept for phones that fetch their mail here
+        // (Wi-Fi or Bluetooth) and is never queued for the radio, now or on a retry.
+        if (!air) {
+            if (port != WireV2.PORT) return Sent.REFUSED
+            if (mailbox.contains(port, bytes)) return Sent.ALREADY
+            return if (mailbox.put(port, bytes, clock()) != null) Sent.STORED else Sent.BUSY
+        }
         val id = Outbox.key(port, bytes)
         val now = clock()
         val pending = outbox.entries.firstOrNull { it.id == id }

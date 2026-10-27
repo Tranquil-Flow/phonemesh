@@ -214,6 +214,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             )
             if (!hasColumn(db, "contacts", "photo_sent")) db.execSQL("ALTER TABLE contacts ADD COLUMN photo_sent BLOB")
         }
+        // Decision 64: outbox rows that go only through a hub, never by this phone's radio (photo avatar pieces).
+        if (oldVersion < 20) db.execSQL("CREATE TABLE IF NOT EXISTS hub_only (outbox_id INTEGER PRIMARY KEY)")
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -358,6 +360,15 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     fun photoSent(accountId: String): ByteArray? =
         readableDatabase.query("contacts", arrayOf("photo_sent"), "account_id = ?", arrayOf(accountId), null, null, null)
             .use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getBlob(0) else null }
+
+    /** Outbox row [outboxId] goes only through a hub (decision 64); rows that left the outbox are forgotten. */
+    fun markHubOnly(outboxId: Long) {
+        writableDatabase.execSQL("DELETE FROM hub_only WHERE outbox_id NOT IN (SELECT id FROM outbox)")
+        writableDatabase.execSQL("INSERT OR IGNORE INTO hub_only (outbox_id) VALUES (?)", arrayOf(outboxId))
+    }
+
+    fun isHubOnly(outboxId: Long): Boolean =
+        readableDatabase.rawQuery("SELECT 1 FROM hub_only WHERE outbox_id = ?", arrayOf(outboxId.toString())).use { it.moveToFirst() }
 
     fun setPhotoSent(accountId: String, id: ByteArray) {
         writableDatabase.update("contacts", ContentValues().apply { put("photo_sent", id) }, "account_id = ?", arrayOf(accountId))
@@ -956,7 +967,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 19
+        const val VERSION = 20
         const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */

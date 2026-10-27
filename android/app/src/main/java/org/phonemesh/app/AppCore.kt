@@ -909,15 +909,18 @@ class AppCore private constructor(
     /**
      * This phone's photo follows the next message to a contact who does not have it yet (decision 50 D): its pieces as
      * ordinary private packets, kept, resent and acknowledged. Never on the shared chat. Nothing when the profile shows
-     * no photo.
+     * no photo. Only through a hub (decision 64): with no hub in reach it waits for a later message, and the pieces
+     * never go on this phone's radio, nor does the hub air them; the contact gets it when they fetch mail from a hub.
      */
     private fun photoAfterMessage(contact: org.phonemesh.core.account.AccountId, now: Long): List<Postman.Out> = history.transaction {
         val wanted = accounts.profile()?.avatar as? org.phonemesh.core.account.Avatar.Photo ?: return@transaction emptyList()
         val own = history.ownPhoto()?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it.webp).contentEquals(wanted.id) }
             ?: return@transaction emptyList()
         if (history.photoSent(contact.toString())?.contentEquals(wanted.id) == true) return@transaction emptyList()
+        if (hubWire() == null) return@transaction emptyList()
         val outs = org.phonemesh.core.account.AvatarPhotos.pieces(own.webp, own.width, own.height, own.sketch)
             .mapNotNull { postman.send(contact, Body.AvatarPiece(it), null, now) }
+            .onEach { history.markHubOnly(it.outboxId) }
         history.setPhotoSent(contact.toString(), wanted.id)
         outs
     }
@@ -1006,6 +1009,8 @@ class AppCore private constructor(
             val row = history.outboxRow(id)
             // A QR replacement or a peer receipt can retire queued work before its turn.
             if (row == null || row.state !in setOf("WAITING", "SENT", "HUB")) { mailQueue.remove(id); continue }
+            // Decision 64: hub-only rows stay durable and wait for a hub; never this radio.
+            if (history.isHubOnly(id)) { mailQueue.remove(id); continue }
             // AE4 backstop: past 180 s this hour, the packet keeps its place and goes when there is room again.
             if (!allowanceRoomFor(row.packet.size)) return
             mailQueue.remove(id)
@@ -1205,13 +1210,14 @@ class AppCore private constructor(
         val epoch = hubEpoch
         val port = row.port
         val bytes = row.packet.copyOf()
+        val held = history.isHubOnly(id)
         if (hubFlight.isEmpty()) failedHubWire = null
         hubFlight.add(id)
         try {
             hubSendIo.execute {
                 // Serial IO: one dead wire must not consume a full timeout for every queued picture part.
                 val result = if (failedHubWire === wire) HubDelivery.Result.NOT_REACHED else try {
-                    HubDelivery.offer(wire, port, bytes)
+                    HubDelivery.offer(wire, port, bytes, held)
                 } catch (_: RuntimeException) { HubDelivery.Result.NOT_REACHED }
                 if (result != HubDelivery.Result.REACHED) failedHubWire = wire
                 main.post { hubOffered(id, route.path, wire, pin, epoch, result) }

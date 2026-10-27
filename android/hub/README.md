@@ -234,6 +234,7 @@ All phone calls use TLS pinned to the hub public key from the card (over Wi-Fi o
 |---|---|
 | `GET /hello` | `phonemesh-hub 1`, name, newest mail sequence |
 | `POST /send?port=301` (private) or `port=303` (shared) | One packet, at most 228 bytes; `stored` / `already` means reached hub; 400 refused, 429 busy |
+| `POST /send?port=301&air=0` | The same, but the hub keeps it only for phones that fetch their mail here and never sends it by radio (photo avatars) |
 | `POST /mail?since=N&wait=S&hellos=1&shared=1` | Recipient codes in the body, hex, one per line; mail after N, waiting at most 30 seconds |
 | `GET /updates/v1/catalog`, `GET /updates/v1/recovery` | The signed update catalog and recovery policy the operator imported, exact bytes; 404 when there are none |
 | `GET` or `HEAD /updates/v1/objects/<sha256>` | An imported app or pack file; one byte range at most (206, 416 for a bad range); 429 when two downloads are already running or this phone has one |

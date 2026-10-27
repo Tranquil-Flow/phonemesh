@@ -63,17 +63,14 @@ class PhotoAvatarTest {
         assertNotNull("this phone shows its photo", core.ownFace()!!.photo)
         assertEquals("saving sends nothing by itself", 0, TestCore.radio.broadcasts.size)
 
+        // Decision 64: with no hub in reach the message goes by radio and the photo waits; it never goes on the radio.
         send(chatId, "hello with my photo")
         val bodies = TestCore.radio.broadcasts.mapNotNull { bea.postman.receive(it.payload, 1_000)?.body }
         assertTrue(bodies.first() is Body.Text)
-        val pieces = bodies.filterIsInstance<Body.AvatarPiece>().map { it.bytes }
-        assertArrayEquals("the photo they get is the one saved", draft.webp, AvatarPhotos.join(pieces)!!.webp)
-        assertEquals("one head and ceil(size / 198) parts", 1 + (draft.webp.size + 197) / 198, pieces.size)
-
-        val after = TestCore.radio.broadcasts.size
-        send(chatId, "nothing new")
-        val later = TestCore.radio.broadcasts.drop(after).mapNotNull { bea.postman.receive(it.payload, 2_000)?.body }
-        assertTrue("sent once", later.none { it is Body.AvatarPiece })
+        assertTrue("no photo piece on the radio", bodies.none { it is Body.AvatarPiece })
+        assertNull("still to send, through a hub", TestCore.onMain { core.history.photoSent(bea.account) })
+        assertTrue("nothing waits for the radio either", TestCore.onMain { core.history.outbox(bea.account) }
+            .none { core.history.isHubOnly(it.id) })
 
         // A different photo the same day is refused, with a sentence.
         val other = core.draftOf(Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF43A047.toInt()) })!!

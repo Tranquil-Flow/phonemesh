@@ -47,6 +47,13 @@ class HubPathsTest {
         val letters = CopyOnWriteArrayList<HubClient.Mail>()
         val polls = CopyOnWriteArrayList<Long>()
         val helloFlags = CopyOnWriteArrayList<Boolean>()
+        val held = CopyOnWriteArrayList<Pair<Int, ByteArray>>()
+
+        override fun sendHeld(port: Int, packet: ByteArray): HubClient.Sent {
+            if (mode == Mode.DOWN) throw IOException("no hub")
+            held += port to packet.copyOf()
+            return HubClient.Sent.STORED
+        }
 
         override fun send(port: Int, packet: ByteArray): HubClient.Sent {
             sent += port to packet.copyOf()
@@ -157,12 +164,55 @@ class HubPathsTest {
         }
         TestCore.restart()
         TestCore.onMain {
-            assertEquals(19, core.history.readableDatabase.version)
+            assertEquals(20, core.history.readableDatabase.version)
             assertTrue(row.packet.contentEquals(core.history.outboxRow(row.id)!!.packet))
             assertEquals("HUB", core.history.outboxRow(row.id)!!.state)
             assertFalse("legacy HUB is not proof of a particular pinned hub", HubCustody(core.history).has(row.id, pin))
             assertEquals(DeliveryStatus.HUB, core.history.lastMessage(rig.chatId)!!.status)
         }
+    }
+
+    /** Decision 64: a photo goes only through a hub, held there for fetching; its pieces never reach the radio. */
+    @Test fun aPhotoGoesOnlyThroughTheHubAndNeverOnTheRadio() {
+        val rig = rig()
+        val bitmap = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF1E88E5.toInt()) }
+        val draft = TestCore.onMain { core.draftOf(bitmap) }!!
+        assertTrue(TestCore.onMain { core.saveProfilePhoto("Awa", 0x1E88E5, draft) })
+        send(rig, "hello with my photo")
+        Views.waitUntil { rig.wire.held.size >= 1 + (draft.webp.size + 197) / 198 }
+        Thread.sleep(500)
+        val pieces = rig.wire.held.mapNotNull { (port, bytes) ->
+            assertEquals(org.phonemesh.core.wire.WireV2.PORT, port)
+            (rig.bea.postman.receive(bytes, 1_000)?.body as? Body.AvatarPiece)?.bytes
+        }
+        assertEquals("every held packet is a photo piece", rig.wire.held.size, pieces.size)
+        assertTrue("the photo they get is the one saved",
+            draft.webp.contentEquals(org.phonemesh.core.account.AvatarPhotos.join(pieces)!!.webp))
+        assertTrue("the message itself went the ordinary way", rig.wire.sent.isNotEmpty())
+        assertTrue("no photo piece among ordinary hub sends", rig.wire.sent.none { (_, b) ->
+            rig.bea.postman.receive(b, 2_000)?.body is Body.AvatarPiece })
+        // The hub goes away before a retry: the pieces wait for it and never fall back to the radio.
+        rig.link.down()
+        TestCore.onMain { core.runPostman() }
+        Thread.sleep(1_000)
+        assertTrue("the radio stays quiet", TestCore.radio.broadcasts.none { rig.bea.postman.receive(it.payload, 3_000)?.body is Body.AvatarPiece })
+    }
+
+    /** A joined hub that does not answer: the message falls back to the radio, the photo pieces wait for the hub. */
+    @Test fun whenTheHubDoesNotAnswerThePhotoWaitsAndNeverFallsBackToTheRadio() {
+        val rig = rig()
+        rig.wire.mode = Mode.DOWN
+        val bitmap = android.graphics.Bitmap.createBitmap(64, 64, android.graphics.Bitmap.Config.ARGB_8888).apply { eraseColor(0xFF43A047.toInt()) }
+        val draft = TestCore.onMain { core.draftOf(bitmap) }!!
+        assertTrue(TestCore.onMain { core.saveProfilePhoto("Awa", 0x43A047, draft) })
+        send(rig, "hello while the hub is quiet")
+        Views.waitUntil { TestCore.radio.broadcasts.isNotEmpty() }
+        Thread.sleep(3_000)
+        val bodies = TestCore.radio.broadcasts.mapNotNull { rig.bea.postman.receive(it.payload, 1_000)?.body }
+        assertTrue("the message went by radio", bodies.any { it is Body.Text })
+        assertTrue("no photo piece on the radio", bodies.none { it is Body.AvatarPiece })
+        val waiting = rows(rig).filter { here { core.history.isHubOnly(it.id) } }
+        assertEquals("the pieces wait, durable", 1 + (draft.webp.size + 197) / 198, waiting.size)
     }
 
     @Test fun anAcceptingHubIsOfferedTheSameCiphertextAgainAtTheRetryDeadline() {

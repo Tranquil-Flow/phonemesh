@@ -20,8 +20,9 @@ object HubDelivery {
         NOT_REACHED,
     }
 
-    fun offer(wire: HubWire, port: Int, packet: ByteArray): Result = try {
-        when (wire.send(port, packet.copyOf())) {
+    /** [held]: the hub must keep it off the radio ([HubWire.sendHeld]); a way that cannot is [Result.NOT_REACHED]. */
+    fun offer(wire: HubWire, port: Int, packet: ByteArray, held: Boolean = false): Result = try {
+        when (if (held) wire.sendHeld(port, packet.copyOf()) else wire.send(port, packet.copyOf())) {
             HubClient.Sent.STORED, HubClient.Sent.ALREADY -> Result.REACHED
             HubClient.Sent.REFUSED -> Result.REFUSED
             HubClient.Sent.BUSY -> Result.BUSY

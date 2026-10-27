@@ -25,6 +25,12 @@ import javax.net.ssl.X509TrustManager
 interface HubWire {
     fun send(port: Int, packet: ByteArray): HubClient.Sent
 
+    /**
+     * Like [send], but the hub keeps the packet only for phones that fetch their mail from it and never airs it
+     * (decision 64: photo avatars only through a hub). A way that cannot promise that throws, so the packet waits.
+     */
+    fun sendHeld(port: Int, packet: ByteArray): HubClient.Sent = throw IOException("this way to the hub cannot keep mail off the radio")
+
     /** Mail after [since] for [codes]; with [hellos] also the hellos, which carry no code. */
     fun mail(since: Long, codes: Collection<String>, waitSeconds: Int, hellos: Boolean = false): List<HubClient.Mail>
 
@@ -118,8 +124,12 @@ class HubClient(
      * STORED and ALREADY both mean the hub holds the letter. A transport failure, a pin mismatch or an answer that is not
      * exactly one of the hub's is an [IOException]: the outcome is then unknown and the letter must go another way.
      */
-    override fun send(port: Int, packet: ByteArray): Sent {
-        val reply = call("POST", "/send?port=$port", packet, sendMillis)
+    override fun send(port: Int, packet: ByteArray): Sent = post("/send?port=$port", packet)
+
+    override fun sendHeld(port: Int, packet: ByteArray): Sent = post("/send?port=$port&air=0", packet)
+
+    private fun post(path: String, packet: ByteArray): Sent {
+        val reply = call("POST", path, packet, sendMillis)
         val text = reply.text.trim()
         return when {
             reply.status == 200 && text == "stored" -> Sent.STORED

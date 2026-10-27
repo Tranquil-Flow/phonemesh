@@ -178,6 +178,15 @@ From handover 3 and the owner on 2026-10-14:
     is a button on Add someone; each member sends their own name and picture to the group, shown as "Not in your
     contacts" to people who have not added them; nobody is in a group without choosing **Join**; the last admin to
     leave chooses the next admin; group messages show "Delivered to N of M" from per-member group receipts.
+73. v0.1.2 is one release with private groups, the full chat backup and hub updates (packs first); hub updates wait
+    only if the update keys arrive late. Its size stays within +256 KB per ABI over signed v0.1.1, measured per
+    feature (owner, 2026-10-27).
+74. "New members see recent messages": the adding admin sends the last 7 days, at most 50 messages, through a hub
+    only, never by radio, shown as shared by that admin (owner, 2026-10-27).
+75. The full chat backup includes group messages as read-only history, with no group keys: a restored phone is not
+    back in its groups and must be added again (owner, 2026-10-27).
+76. Before v0.1.2 is released, fresh AI review lanes check the new group code, the full backup and the phone side of
+    updates, and every finding is fixed; a human cryptographer's review stays skipped for now (owner, 2026-10-27).
 
 ## What an outsider can and cannot learn
 

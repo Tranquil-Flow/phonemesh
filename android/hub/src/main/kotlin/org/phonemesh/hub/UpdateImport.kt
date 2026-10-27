@@ -17,7 +17,11 @@ import java.security.MessageDigest
  * bytes). A recovery policy, signed only by the recovery key, can replace the catalog key first. The hub serves
  * nothing new yet; this fills `updates/` for the phone routes that come next.
  */
-class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, initialCatalogKey: ByteArray, initialKeyId: Int = 1) {
+class UpdateImport(
+    private val dir: File, private val recoveryKey: ByteArray, initialCatalogKey: ByteArray, initialKeyId: Int = 1,
+    /** At most this much for update objects (spec 5.4: about 2 GB) and never less free space than [mailReserve]. */
+    private val objectQuota: Long = OBJECT_QUOTA, private val mailReserve: Long = MAIL_RESERVE,
+) {
     private val updates = File(dir, "updates")
     private val objects = File(updates, "objects")
     private val partial = File(updates, "partial")
@@ -51,13 +55,16 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
         return State.decode(stateFile.readBytes()) ?: throw IOException("updates/trust-state.bin is damaged")
     }
 
-    fun import(stick: File): Result {
+    /** One import at a time (review D9). */
+    @Synchronized fun import(stick: File): Result {
         val root = stick.toPath()
         if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return Result.Refused("not a folder")
-        val recoveryFile = regular(stick, "recovery.pmup")
+        // Each file is read once, bounded, and those same bytes are checked and kept (review D3, D4).
+        val recoveryBytes = regular(stick, "recovery.pmup")?.let { bounded(it) ?: return Result.Refused("recovery.pmup is too large") }
         var next = state
-        if (recoveryFile != null) {
-            val env = UpdateMetadata.verify(bounded(recoveryFile) ?: return Result.Refused("recovery.pmup is too large"), mapOf(100 to recoveryKey))
+        var adopted: ByteArray? = null
+        if (recoveryBytes != null) {
+            val env = UpdateMetadata.verify(recoveryBytes, emptyMap(), recoveryKey)
                 ?: return Result.Refused("recovery.pmup is not signed by the recovery key")
             if (env.kind != UpdateMetadata.RECOVERY) return Result.Refused("recovery.pmup is not a recovery policy")
             val r = UpdateMetadata.recovery(env.payload) ?: return Result.Refused("recovery.pmup is damaged")
@@ -66,11 +73,12 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
                 if (r.catalogKey.contentEquals(next.key)) return Result.Refused("the new catalog key is the old one")
                 // A new epoch starts its own numbering, at the policy's minimum.
                 next = State(r.epoch, r.catalogKeyId, r.catalogKey, r.minSequence - 1, ByteArray(32))
+                adopted = recoveryBytes
             }
         }
         val catalogFile = regular(stick, "catalog.pmup") ?: return Result.Refused("no catalog.pmup")
         val bytes = bounded(catalogFile) ?: return Result.Refused("catalog.pmup is too large")
-        val env = UpdateMetadata.verify(bytes, mapOf(next.keyId to next.key))
+        val env = UpdateMetadata.verify(bytes, mapOf(next.keyId to next.key), null)
             ?: return Result.Refused("catalog.pmup is not signed by the current catalog key")
         if (env.kind != UpdateMetadata.CATALOG) return Result.Refused("catalog.pmup is not a catalog")
         val catalog = UpdateMetadata.catalog(env.payload) ?: return Result.Refused("catalog.pmup is damaged")
@@ -84,6 +92,12 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
         }
         // Objects: only signed digests, hashed while copied into partial/, then moved into objects/.
         objects.mkdirs(); partial.mkdirs()
+        // Room first (review D2): the objects still to copy must fit the quota and leave mail its reserve.
+        val needed = catalog.entries.filter { e -> !File(objects, hex(e.digest)).isFile && catalog.revoked.none { it.contentEquals(e.digest) } }
+            .sumOf { it.bytes }
+        val held = objects.listFiles().orEmpty().sumOf { it.length() }
+        if (held + needed > objectQuota) return Result.Refused("these updates do not fit the hub's room for updates")
+        if (dir.usableSpace - needed < mailReserve) return Result.Refused("not enough free space: mail keeps its reserve")
         var copied = 0
         var missing = 0
         for (entry in catalog.entries) {
@@ -116,10 +130,13 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
         // Publish: the catalog by its digest, then the trust state (new sequence) last, each by atomic rename.
         val catalogs = File(updates, "catalogs").apply { mkdirs() }
         write(File(catalogs, "${hex(digest)}.pmup"), bytes)
-        recoveryFile?.let { write(File(File(updates, "policies").apply { mkdirs() }, "${hex(sha256(it.readBytes()))}.pmup"), it.readBytes()) }
+        // Only a policy that started a new trust epoch is kept: one per epoch, the one served (review D6).
+        adopted?.let { write(File(File(updates, "policies").apply { mkdirs() }, "${hex(sha256(it))}.pmup"), it) }
         val accepted = State(catalog.epoch, next.keyId, next.key, catalog.sequence, digest)
         write(stateFile, accepted.encode())
         state = accepted
+        // Revoked objects are not served any more (review D8).
+        for (d in catalog.revoked) File(objects, hex(d)).delete()
         return Result.Imported(catalog.sequence, copied, missing)
     }
 
@@ -127,7 +144,9 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
     private fun regular(dir: File, name: String): File? =
         File(dir, name).takeIf { Files.isRegularFile(it.toPath(), LinkOption.NOFOLLOW_LINKS) }
 
-    private fun bounded(f: File): ByteArray? = if (f.length() > UpdateMetadata.MAX_ENVELOPE) null else f.readBytes()
+    /** At most [UpdateMetadata.MAX_ENVELOPE] bytes, whatever the file says its length is; null when there are more. */
+    private fun bounded(f: File): ByteArray? =
+        f.inputStream().use { it.readNBytes(UpdateMetadata.MAX_ENVELOPE + 1) }.takeIf { it.size <= UpdateMetadata.MAX_ENVELOPE }
 
     private fun write(target: File, bytes: ByteArray) {
         val tmp = File(target.parentFile, ".${target.name}.tmp")
@@ -136,5 +155,10 @@ class UpdateImport(private val dir: File, private val recoveryKey: ByteArray, in
     }
 
     private fun sha256(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b)
+
+    companion object {
+        const val OBJECT_QUOTA = 2_000_000_000L
+        const val MAIL_RESERVE = 100_000_000L
+    }
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 }

@@ -30,6 +30,8 @@ class HubServer(
     private val hub: Hub, private val mailbox: Mailbox, private val name: String, private val tls: Tls, port: Int,
     /** The hub's data folder, for the read-only update routes ([UpdateRoutes]); null serves none. */
     updatesDir: File? = null,
+    /** How long a download may make no progress before it is closed ([UpdateRoutes]). */
+    updateStallMillis: Long = UpdateRoutes.STALL_MILLIS,
 ) {
     private val server = HttpsServer.create(InetSocketAddress(port), 0)
     private val pool = Executors.newFixedThreadPool(32)
@@ -40,7 +42,7 @@ class HubServer(
         server.createContext("/hello") { handle(it) { ex -> reply(ex, 200, "phonemesh-hub 1\nname $name\nlatest ${mailbox.latest()}\n") } }
         server.createContext("/send") { handle(it, ::send) }
         server.createContext("/mail") { handle(it, ::mail) }
-        updatesDir?.let { d -> val routes = UpdateRoutes(d); server.createContext("/updates/v1/") { handle(it, routes::handle) } }
+        updatesDir?.let { d -> val routes = UpdateRoutes(d, updateStallMillis); server.createContext("/updates/v1/") { handle(it, routes::handle) } }
     }
 
     val port: Int get() = server.address.port

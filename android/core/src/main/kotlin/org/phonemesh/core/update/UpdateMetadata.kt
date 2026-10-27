@@ -29,6 +29,8 @@ object UpdateMetadata {
     const val MAX_EXPANDED = 512L * 1024 * 1024
     const val MAX_FILES = 5_000
     const val APP_ID = "org.phonemesh.app"
+    /** The recovery key's id: only kind 2 uses it, and a catalog key may never take it (review D1, D7). */
+    const val RECOVERY_KEY_ID = 100
     private val MAGIC = "PMUP".toByteArray(Charsets.US_ASCII)
     private val DOMAIN = "phonemesh-update-v1\u0000".toByteArray(Charsets.US_ASCII)
     private const val HEADER = 12
@@ -58,10 +60,12 @@ object UpdateMetadata {
     class Envelope(val kind: Int, val keyId: Int, val payload: ByteArray)
 
     /**
-     * The envelope in [bytes] when it is well formed and signed by the key [keys] holds for its key id; null otherwise.
-     * [keys] maps allowlisted key ids to 65-byte uncompressed P-256 public keys.
+     * The envelope in [bytes] when it is well formed and signed by the key its kind allows; null otherwise. A catalog
+     * verifies only under [catalogKeys] (allowlisted ids, never [RECOVERY_KEY_ID]); a recovery policy only under
+     * [recoveryKey] at [RECOVERY_KEY_ID], so a catalog key can never sign its own successor (review D1). Keys are
+     * 65-byte uncompressed P-256 public keys.
      */
-    fun verify(bytes: ByteArray, keys: Map<Int, ByteArray>): Envelope? {
+    fun verify(bytes: ByteArray, catalogKeys: Map<Int, ByteArray>, recoveryKey: ByteArray?): Envelope? {
         if (bytes.size < HEADER + 64 || bytes.size > MAX_ENVELOPE) return null
         if (!bytes.copyOfRange(0, 4).contentEquals(MAGIC) || bytes[4].toInt() != SCHEMA) return null
         val b = ByteBuffer.wrap(bytes)
@@ -70,7 +74,11 @@ object UpdateMetadata {
         val keyId = b.getShort(6).toInt() and 0xFFFF
         val length = b.getInt(8)
         if (length < 0 || HEADER.toLong() + length + 64 != bytes.size.toLong()) return null
-        val key = keys[keyId]?.let(::publicKey) ?: return null
+        val encoded = when (kind) {
+            CATALOG -> if (keyId == RECOVERY_KEY_ID) null else catalogKeys[keyId]
+            else -> if (keyId == RECOVERY_KEY_ID) recoveryKey else null
+        }
+        val key = encoded?.let(::publicKey) ?: return null
         val signature = bytes.copyOfRange(HEADER + length, bytes.size)
         if (BigInteger(1, signature.copyOfRange(32, 64)) > P256.n.shiftRight(1)) return null
         if (!P256.verify(key, DOMAIN + bytes.copyOfRange(0, HEADER + length), signature)) return null
@@ -92,7 +100,7 @@ object UpdateMetadata {
     fun recovery(payload: ByteArray): Recovery? = try {
         val f = Fields(payload)
         val r = Recovery(f.u64(), f.u16(), f.raw(65), f.u64(), f.u32())
-        need(publicKey(r.catalogKey) != null && r.epoch > 0)
+        need(publicKey(r.catalogKey) != null && r.epoch > 0 && r.catalogKeyId != RECOVERY_KEY_ID)
         f.end(); r
     } catch (_: Bad) { null } catch (_: RuntimeException) { null }
 
@@ -119,6 +127,7 @@ object UpdateMetadata {
         val id = f.text(idLen); val label = f.text(labelLen); val abi = f.text(abiLen)
         need(version > 0 && (maxApp == 0L || maxApp >= minApp) && minApi in 1..1000 && abi in ABIS && bytes > 0)
         val zero = ByteArray(32)
+        need(!digest.contentEquals(zero))
         if (kind == APK) {
             need(id == APP_ID && format == 0 && bytes <= MAX_APK_BYTES && expanded == 0L && files == 0)
             need(sums.contentEquals(zero) && !cert.contentEquals(zero) && abi.isNotEmpty())
@@ -167,7 +176,7 @@ object UpdateMetadata {
                 Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                     .decode(ByteBuffer.wrap(raw)).toString()
             } catch (_: java.nio.charset.CharacterCodingException) { throw Bad() }
-            need(s.none { it.code < 0x20 || it.code == 0x7F || it in "<>&\"'" || it.code in 0x202A..0x202E || it.code in 0x2066..0x2069 })
+            need(s.none { it.code < 0x20 || it.code == 0x7F || it in "<>&\"'" || it.code in 0x200B..0x200F || it.code in 0x202A..0x202E || it.code in 0x2066..0x2069 })
             return s
         }
         fun end() = need(!b.hasRemaining())

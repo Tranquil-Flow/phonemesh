@@ -18,8 +18,41 @@ class UpdateMetadataTest {
     private fun hex(k: String) = v.getValue(k).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     private val keys get() = mapOf(1 to hex("catalogKey"), 100 to hex("recoveryKey"))
 
+    /** Both keys at hand, as a phone has them: catalogs only under catalog ids, policies only under the recovery key. */
+    private fun verify(b: ByteArray, keys: Map<Int, ByteArray>) =
+        UpdateMetadata.verify(b, keys.filterKeys { it != UpdateMetadata.RECOVERY_KEY_ID }, keys[UpdateMetadata.RECOVERY_KEY_ID])
+
+    private fun pub(k: java.security.KeyPair) =
+        byteArrayOf(4) + fixed((k.public as ECPublicKey).w.affineX) + fixed((k.public as ECPublicKey).w.affineY)
+
+    /** Review D1: the kind decides the key; a catalog key never signs a policy, the recovery key never a catalog. */
+    @Test fun eachKindVerifiesOnlyUnderItsOwnKey() {
+        val c = P256.generate(); val r = P256.generate()
+        val both = mapOf(1 to pub(c), 100 to pub(r))
+        val policy = ByteBuffer.allocate(8 + 2 + 65 + 8 + 4).putLong(2).putShort(2).put(pub(P256.generate())).putLong(1).putInt(1).array()
+        assertNotNull(verify(UpdateMetadata.sign(UpdateMetadata.RECOVERY, 100, policy, r.private), both))
+        assertNull("a policy signed by the catalog key, under its own id", verify(UpdateMetadata.sign(UpdateMetadata.RECOVERY, 1, policy, c.private), both))
+        assertNull("a policy signed by the catalog key, under the recovery id", verify(UpdateMetadata.sign(UpdateMetadata.RECOVERY, 100, policy, c.private), both))
+        val p = hex("catalogPayload")
+        assertNotNull(verify(UpdateMetadata.sign(UpdateMetadata.CATALOG, 1, p, c.private), both))
+        assertNull("a catalog under the recovery id", verify(UpdateMetadata.sign(UpdateMetadata.CATALOG, 100, p, r.private), both))
+        assertNull("a catalog key at the recovery id", verify(UpdateMetadata.sign(UpdateMetadata.CATALOG, 100, p, c.private), mapOf(100 to pub(c))))
+    }
+
+    /** Review D7: no zero digest, no catalog key at the recovery id, no zero-width or direction marks in labels. */
+    @Test fun parserHardening() {
+        val p = hex("catalogPayload")
+        val zero = p.copyOf().also { ByteArray(32).copyInto(it, 43 + 42) }
+        assertNull(UpdateMetadata.catalog(zero))
+        val lrm = p.copyOf().also { "\u200E1.".toByteArray().copyInto(it, 43 + 150 + 17) }
+        assertNull(UpdateMetadata.catalog(lrm))
+        val policy = { id: Int -> ByteBuffer.allocate(8 + 2 + 65 + 8 + 4).putLong(2).putShort(id.toShort()).put(hex("catalogKey2")).putLong(1).putInt(1).array() }
+        assertNotNull(UpdateMetadata.recovery(policy(2)))
+        assertNull(UpdateMetadata.recovery(policy(100)))
+    }
+
     @Test fun thePythonCatalogVerifiesAndReadsAsTheSpecSays() {
-        val env = UpdateMetadata.verify(hex("catalog"), keys)!!
+        val env = verify(hex("catalog"), keys)!!
         assertEquals(UpdateMetadata.CATALOG, env.kind); assertEquals(1, env.keyId)
         assertArrayEquals(hex("catalogPayload"), env.payload)
         val c = UpdateMetadata.catalog(env.payload)!!
@@ -34,18 +67,18 @@ class UpdateMetadataTest {
     }
 
     @Test fun theRecoveryPolicyVerifiesOnlyUnderTheRecoveryKey() {
-        val env = UpdateMetadata.verify(hex("policy"), keys)!!
+        val env = verify(hex("policy"), keys)!!
         assertEquals(UpdateMetadata.RECOVERY, env.kind); assertEquals(100, env.keyId)
         val r = UpdateMetadata.recovery(env.payload)!!
         assertEquals(2L, r.epoch); assertEquals(2, r.catalogKeyId); assertArrayEquals(hex("catalogKey2"), r.catalogKey)
-        assertNull("signed by R, so not valid under the catalog key's id", UpdateMetadata.verify(hex("policy"), mapOf(100 to hex("catalogKey"))))
+        assertNull("signed by R, so not valid under the catalog key's id", verify(hex("policy"), mapOf(100 to hex("catalogKey"))))
     }
 
     @Test fun kotlinSignsAnEnvelopePythonVerifies() {
         val k = P256.generate()
         val env = UpdateMetadata.sign(UpdateMetadata.CATALOG, 1, hex("catalogPayload"), k.private)
         val pub = byteArrayOf(4) + fixed((k.public as ECPublicKey).w.affineX) + fixed((k.public as ECPublicKey).w.affineY)
-        assertNotNull(UpdateMetadata.verify(env, mapOf(1 to pub)))
+        assertNotNull(verify(env, mapOf(1 to pub)))
         File(System.getProperty("java.io.tmpdir"), "pmup-kotlin.txt").writeText(env.hex() + " " + pub.hex())
     }
 
@@ -53,11 +86,11 @@ class UpdateMetadataTest {
         val e = hex("catalog")
         for (i in e.indices) for (bit in 0..7) {
             val bad = e.copyOf().also { it[i] = (it[i].toInt() xor (1 shl bit)).toByte() }
-            assertNull("byte $i bit $bit", UpdateMetadata.verify(bad, keys))
+            assertNull("byte $i bit $bit", verify(bad, keys))
         }
-        for (n in 0 until e.size) assertNull("cut $n", UpdateMetadata.verify(e.copyOf(n), keys))
-        assertNull(UpdateMetadata.verify(e + 0, keys))
-        assertNull("an unknown key id", UpdateMetadata.verify(e, mapOf(2 to hex("catalogKey"))))
+        for (n in 0 until e.size) assertNull("cut $n", verify(e.copyOf(n), keys))
+        assertNull(verify(e + 0, keys))
+        assertNull("an unknown key id", verify(e, mapOf(2 to hex("catalogKey"))))
     }
 
     @Test fun aHighSSignatureIsRefused() {
@@ -68,13 +101,13 @@ class UpdateMetadataTest {
         val flipped = e.copyOfRange(0, e.size - 32) + high
         assertTrue("the high-S twin is a valid ECDSA signature", P256.verify(UpdateMetadata.publicKey(hex("catalogKey"))!!,
             "phonemesh-update-v1\u0000".toByteArray() + e.copyOfRange(0, e.size - 64), flipped.copyOfRange(flipped.size - 64, flipped.size)))
-        assertNull("but malleable signatures are refused", UpdateMetadata.verify(flipped, keys))
+        assertNull("but malleable signatures are refused", verify(flipped, keys))
     }
 
     private fun resign(payload: ByteArray): ByteArray? {
         val k = P256.generate()
         val pub = byteArrayOf(4) + fixed((k.public as ECPublicKey).w.affineX) + fixed((k.public as ECPublicKey).w.affineY)
-        val env = UpdateMetadata.verify(UpdateMetadata.sign(1, 1, payload, k.private), mapOf(1 to pub))!!
+        val env = verify(UpdateMetadata.sign(1, 1, payload, k.private), mapOf(1 to pub))!!
         return env.payload
     }
 

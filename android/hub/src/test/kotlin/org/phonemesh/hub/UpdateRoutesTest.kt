@@ -138,6 +138,49 @@ class UpdateRoutesTest {
         assertEquals(404, call("/updates/v1/objects/${"a".repeat(64)}").code)
     }
 
+    /** Review D5: a download that stops reading is closed after the stall time, so the phone's slot comes back. */
+    @Test fun aStalledDownloadIsClosedAndItsSlotFreed() {
+        val big = ByteArray(16 * 1024 * 1024) { (it * 31 + 7).toByte() }
+        val bigName = hex(sha(big))
+        val id = "phonemesh-voice-xx".toByteArray(); val label = "1".toByteArray()
+        val entry = byteArrayOf(3, id.size.toByte(), label.size.toByte(), 0) +
+            ByteBuffer.allocate(38).putLong(1).putLong(2).putLong(0).putInt(26).putShort(2).putLong(big.size.toLong()).array() +
+            sha(big) + ByteBuffer.allocate(12).putLong(20_000_000).putInt(3).array() + sha("s".toByteArray()) + ByteArray(32) + id + label
+        val p = byteArrayOf(1) + ByteBuffer.allocate(42).putLong(1).putLong(1).putLong(1).putLong(2).putLong(1).putShort(1).array() + entry + byteArrayOf(0, 0)
+        val s = folder.newFolder()
+        File(s, "catalog.pmup").writeBytes(UpdateMetadata.sign(UpdateMetadata.CATALOG, 1, p, c.private))
+        File(s, "objects").mkdirs(); File(s, "objects/$bigName").writeBytes(big)
+        val d = folder.newFolder("stall")
+        assertTrue(UpdateImport(d, pub(r), pub(c)).import(s) is UpdateImport.Result.Imported)
+        val mailbox = Mailbox(File(d, "mail"), 30)
+        val own = HubServer(Hub(mailbox, FakeRadio()), mailbox, "Stall hub", tls, 0, updatesDir = d, updateStallMillis = 1_000).also { it.start() }
+        try {
+            val stalled = open(own.port, "/updates/v1/objects/$bigName")
+            stalled.inputStream.read()
+            Thread.sleep(4_000)
+            val again = open(own.port, "/updates/v1/objects/$bigName")
+            assertEquals("the slot came back", 200, again.responseCode)
+            assertEquals(big.size.toLong(), again.inputStream.use { it.readBytes() }.size.toLong())
+            runCatching { stalled.disconnect() }
+        } finally { own.stop() }
+    }
+
+    private fun open(port: Int, path: String): HttpsURLConnection {
+        val ctx = SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw java.security.cert.CertificateException()
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                    if (Tls.pinOf(chain[0].publicKey.encoded) != tls.pin) throw java.security.cert.CertificateException()
+                }
+                override fun getAcceptedIssuers() = arrayOf<X509Certificate>()
+            }), null)
+        }
+        return (URL("https://127.0.0.1:$port$path").openConnection() as HttpsURLConnection).apply {
+            sslSocketFactory = ctx.socketFactory
+            setHostnameVerifier { _, _ -> true }
+        }
+    }
+
     @Test fun mailStillWorksBesideTheUpdateRoutes() {
         importStick()
         val hello = call("/hello")

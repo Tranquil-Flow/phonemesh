@@ -17,9 +17,11 @@ import java.util.concurrent.Semaphore
  * - `GET` or `HEAD /updates/v1/objects/<sha256>`: an object, with `ETag` (its digest) and one byte range at most.
  *
  * The hub vouches for nothing: phones check every byte against the signed catalog. Bulk transfers are capped (two at a
- * time, one per phone) so mail keeps the link; extra requests get 429. Nothing is logged per phone.
+ * time, one per phone) so mail keeps the link; extra requests get 429. A download that makes no progress for
+ * [stallMillis] is closed, so a slow reader cannot hold a slot for ever (review D5). Nothing is logged per phone.
  */
-class UpdateRoutes(private val dir: File) {
+class UpdateRoutes(private val dir: File, private val stallMillis: Long = STALL_MILLIS) {
+    private val watchdog = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "update-stall").apply { isDaemon = true } }
     private val updates get() = File(dir, "updates")
     private val transfers = Semaphore(MAX_TRANSFERS)
     private val perClient = ConcurrentHashMap.newKeySet<String>()
@@ -89,6 +91,14 @@ class UpdateRoutes(private val dir: File) {
         val client = ex.remoteAddress.address.hostAddress
         if (!perClient.add(client)) return status(ex, 429, "Retry-After" to "5")
         if (!transfers.tryAcquire()) { perClient.remove(client); return status(ex, 429, "Retry-After" to "5") }
+        // A blocked socket write only gives way to an interrupt (the server's channels are interruptible), and only
+        // while this transfer is still running on this thread.
+        val progress = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
+        val writer = Thread.currentThread()
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        val stall = watchdog.scheduleWithFixedDelay({
+            synchronized(active) { if (active.get() && System.currentTimeMillis() - progress.get() > stallMillis) writer.interrupt() }
+        }, stallMillis / 4, stallMillis / 4, java.util.concurrent.TimeUnit.MILLISECONDS)
         try {
             ex.sendResponseHeaders(code, length)
             RandomAccessFile(file, "r").use { raf ->
@@ -100,10 +110,16 @@ class UpdateRoutes(private val dir: File) {
                         val n = raf.read(buffer, 0, minOf(buffer.size.toLong(), left).toInt())
                         if (n < 0) break
                         out.write(buffer, 0, n); left -= n
+                        progress.set(System.currentTimeMillis())
                     }
                 }
             }
+        } catch (_: java.io.IOException) {
+            // The phone went away or stalled: the slot is free again below.
         } finally {
+            synchronized(active) { active.set(false) }
+            stall.cancel(false)
+            Thread.interrupted()
             transfers.release(); perClient.remove(client)
         }
     }
@@ -118,6 +134,7 @@ class UpdateRoutes(private val dir: File) {
 
     companion object {
         const val MAX_TRANSFERS = 2
+        const val STALL_MILLIS = 60_000L
         private val DIGEST = Regex("[0-9a-f]{64}")
         private val RANGE = Regex("bytes=(\\d{1,18})-(\\d{0,18})")
     }

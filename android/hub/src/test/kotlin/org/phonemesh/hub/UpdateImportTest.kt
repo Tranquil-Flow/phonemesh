@@ -121,6 +121,30 @@ class UpdateImportTest {
         assertTrue("the state survives a restart", UpdateImport(dir, pub(r), pub(c)).state.epoch == 2L)
     }
 
+    /** Review D2: an import that would pass the update quota or eat into mail's reserve is refused before copying. */
+    @Test fun updatesStayWithinTheirRoomAndLeaveMailItsReserve() {
+        val dir = folder.newFolder()
+        assertTrue(UpdateImport(dir, pub(r), pub(c), objectQuota = 1_000).import(stick(catalog(1))) is UpdateImport.Result.Refused)
+        assertTrue(UpdateImport(dir, pub(r), pub(c), mailReserve = Long.MAX_VALUE / 2).import(stick(catalog(1))) is UpdateImport.Result.Refused)
+        assertTrue("nothing copied", File(dir, "updates/objects").listFiles().orEmpty().isEmpty())
+        assertTrue(UpdateImport(dir, pub(r), pub(c)).import(stick(catalog(1))) is UpdateImport.Result.Imported)
+    }
+
+    /** Review D6, D8: only an adopted policy is kept; a revoked object is no longer held. */
+    @Test fun onlyAdoptedPoliciesAreKeptAndRevokedObjectsGo() {
+        val (h, dir) = hub()
+        h.import(stick(catalog(1)))
+        assertTrue(File(dir, "updates/objects/${hex(sha(voice))}").exists())
+        h.import(stick(catalog(2, entries = emptyList(), revoked = listOf(sha(voice))), objects = emptyMap()))
+        assertTrue("revoked, so gone", !File(dir, "updates/objects/${hex(sha(voice))}").exists())
+        fun policy(minSequence: Long) = UpdateMetadata.sign(UpdateMetadata.RECOVERY, 100,
+            ByteBuffer.allocate(8 + 2 + 65 + 8 + 4).putLong(2).putShort(2).put(pub(c2)).putLong(minSequence).putInt(1).array(), r.private)
+        assertTrue(h.import(stick(catalog(1, epoch = 2, key = c2, keyId = 2), recovery = policy(1))) is UpdateImport.Result.Imported)
+        assertTrue(h.import(stick(catalog(2, epoch = 2, key = c2, keyId = 2), recovery = policy(1))) is UpdateImport.Result.Imported)
+        assertTrue(h.import(stick(catalog(3, epoch = 2, key = c2, keyId = 2), recovery = policy(2))) is UpdateImport.Result.Imported)
+        assertEquals("only the policy that started epoch 2 is kept", 1, File(dir, "updates/policies").listFiles()!!.size)
+    }
+
     @Test fun aDamagedTrustFileStopsUpdatesInsteadOfResetting() {
         val (h, dir) = hub()
         h.import(stick(catalog(2)))

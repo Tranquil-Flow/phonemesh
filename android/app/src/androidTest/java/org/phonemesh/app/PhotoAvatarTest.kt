@@ -130,4 +130,26 @@ class PhotoAvatarTest {
         }
         assertNull(core.chatFace(chat)!!.photo)
     }
+
+    /** Review B1: one cached photo per contact; a new photo replaces it and the old one is not shown again. */
+    @Test fun aContactsNewPhotoReplacesTheCachedOne() {
+        TestCore.install()
+        val (bea, chatId) = PersonFixture.meet()
+        val chat = TestCore.onMain { core.history.chat(chatId)!! }
+        fun deliverPhoto(colour: Int, revision: Long, at: Long): Avatar.Photo {
+            val photo = core.draftOf(Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888).apply { eraseColor(colour) })!!
+            PersonFixture.deliver(PersonFixture.send(bea, Body.ProfileUpdate(Profile("Bea", 0x8E24AA, photo.avatar, revision = revision)), at))
+            for (piece in AvatarPhotos.pieces(photo.webp, photo.width, photo.height, photo.sketch)) {
+                PersonFixture.deliver(PersonFixture.send(bea, Body.AvatarPiece(piece), at + 500))
+            }
+            return photo.avatar as Avatar.Photo
+        }
+        val first = deliverPhoto(0xFFEC407A.toInt(), 2, 1_000)
+        Views.waitUntil { core.chatFace(chat)!!.photo != null }
+        assertNotNull("the first photo is cached", core.photoOf(bea.account, first))
+        val second = deliverPhoto(0xFF43A047.toInt(), 3, 3_000)
+        Views.waitUntil { core.photoOf(bea.account, second) != null }
+        assertEquals(second, core.chatFace(chat)!!.avatar)
+        assertNull("the old photo is gone from the cache too", core.photoOf(bea.account, first))
+    }
 }

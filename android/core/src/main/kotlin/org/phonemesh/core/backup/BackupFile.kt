@@ -12,7 +12,7 @@ import java.security.SecureRandom
  * size is exactly `120 + P + 20 * N`. Never sent over radio.
  *
  * This version works in memory and caps files at [MAX_IN_MEMORY]: a contacts-only copy is tens of kilobytes. Full
- * chat backups (BK, v0.1.2) need the streaming reader the spec describes before the 512 MiB format limit is offered.
+ * chat backups use [BackupStream], the same bytes one chunk at a time, up to the 512 MiB format limit.
  */
 object BackupFile {
     const val HEADER = 120

@@ -174,6 +174,10 @@ From handover 3 and the owner on 2026-10-14:
     keys, catalog and recovery (owner, 2026-10-27; how decision 61 is done).
 71. Group screens are shown as a clickable mockup (English and French) for review before they are built
     (owner, 2026-10-27).
+72. Group screens as in the reviewed mockup, with the recommended picks (owner, 2026-10-27): **New private group**
+    is a button on Add someone; each member sends their own name and picture to the group, shown as "Not in your
+    contacts" to people who have not added them; nobody is in a group without choosing **Join**; the last admin to
+    leave chooses the next admin; group messages show "Delivered to N of M" from per-member group receipts.
 
 ## What an outsider can and cannot learn
 

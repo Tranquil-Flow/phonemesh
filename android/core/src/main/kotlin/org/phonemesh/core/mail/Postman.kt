@@ -15,7 +15,8 @@ import org.phonemesh.core.wire.WireV2
 /**
  * The person-to-person messaging engine (accounts plan step 13), pure Kotlin so two phones and a lossy radio can be
  * tested on the JVM. It seals and opens wire v2 packets, keeps every outgoing packet with the state that sealed it
- * ([MailStore.keep], review F3), resends after 2, 10 and 30 minutes until the other phone's receipt covers it,
+ * ([MailStore.keep], review F3), resends with a doubling, jittered wait ([retryDelay]) until the other phone's
+ * receipt covers it,
  * sends a receipt after 15–60 seconds of quiet unless a reply goes first, and holds new messages past the flow-control
  * window ([Ratchet.WINDOW], review F5) until an ack frees room. Times are milliseconds. Not thread-safe: one caller.
  */
@@ -80,7 +81,7 @@ class Postman(
         val sealed = Ratchet.seal(state, Body.encode(body, ack), newPair)
         val row = Outgoing(
             0, contact, messageId, sealed.packet, sealed.chainTag, sealed.counter, sealed.code.copyOf(),
-            created = now, tries = 0, nextTry = now + RETRY_MS[0], status = Status.WAITING,
+            created = now, tries = 0, nextTry = now + retryDelay(0, sealed.code), status = Status.WAITING,
             isReceipt = body is Body.Receipt, carriedAck = if (body is Body.Receipt) body.ack else ack,
             namesMessage = body !is Body.PicturePart,
         )
@@ -140,6 +141,7 @@ class Postman(
             store.keep(contact, opened.state, null,
                 incoming = MailStore.Incoming(decoded.body, ref, now, decoded.ack, digest, response,
                     if (response == null) null else now + delay), expected = state) ?: throw MailStore.Refused()
+            repair(contact, now)
             if (decoded.body is Body.Receipt) return null
             return Received(contact, decoded.body, ref)
         }
@@ -173,14 +175,33 @@ class Postman(
             }
         }
         for (row in store.unconfirmed()) {
-            if (row.nextTry > now || row.isReceipt) continue
+            if (row.isReceipt) continue
+            // Three days without a receipt: failed, even while waiting for a resend that falls later.
+            if (now - row.created > GIVE_UP_MS) {
+                if (row.status != Status.FAILED) store.update(row.copy(status = Status.FAILED))
+                continue
+            }
+            if (row.nextTry > now) continue
+            // Bounded (AE2): after MAX_RESENDS the row waits for a receipt or the give-up time, sending nothing more.
+            if (row.tries >= MAX_RESENDS) { store.update(row.copy(nextTry = row.created + GIVE_UP_MS + 1)); continue }
             val tries = row.tries + 1
-            val next = if (tries < RETRY_MS.size) now + RETRY_MS[tries] else now + RETRY_MS.last()
-            val failed = now - row.created > GIVE_UP_MS
-            store.update(row.copy(tries = tries, nextTry = next, status = if (failed) Status.FAILED else row.status))
-            if (!failed) out += Out(row.contact, row.packet, row.id)
+            store.update(row.copy(tries = tries, nextTry = now + retryDelay(tries, row.code)))
+            out += Out(row.contact, row.packet, row.id)
         }
         return out
+    }
+
+    /**
+     * Heard from [contact]: their phone is in reach, so rows to them that already missed an airing go again within a
+     * minute or two (jittered) instead of at the end of a long wait (AE2 selective repair). The resend bound holds.
+     */
+    private fun repair(contact: AccountId, now: Long) {
+        for (row in store.unconfirmed()) {
+            if (row.contact != contact || row.isReceipt || row.tries < 1 || row.tries >= MAX_RESENDS) continue
+            if (row.status == Status.DELIVERED || row.status == Status.FAILED) continue
+            val soon = now + REPAIR_MS + (jitter(row.code, row.tries) * REPAIR_MS).toLong()
+            if (row.nextTry > soon) store.update(row.copy(nextTry = soon))
+        }
     }
 
     /** Packets no radio has taken yet (WAITING), oldest first: send them as soon as a radio is ready. */
@@ -217,8 +238,29 @@ class Postman(
 
     companion object {
         private val receiptRandom = java.security.SecureRandom()
-        /** Resends after 2, 10 and 30 minutes, then every 30 minutes until delivered or [GIVE_UP_MS]. */
-        val RETRY_MS = longArrayOf(2 * 60_000L, 10 * 60_000L, 30 * 60_000L)
+        /**
+         * Resends (decision 53 AE2, replacing decision 24's 2/10/30 minutes): the wait doubles from [FIRST_RETRY_MS] to
+         * [MAX_RETRY_MS], each time 75-100 % of that so phones that lost the same radio do not all resend together, and a
+         * row goes again at most [MAX_RESENDS] times before [GIVE_UP_MS]. Hearing the contact brings missed rows forward.
+         */
+        const val FIRST_RETRY_MS = 2 * 60_000L
+        const val MAX_RETRY_MS = 4 * 3_600_000L
+        const val MAX_RESENDS = 24
+        const val REPAIR_MS = 60_000L
+
+        /** The wait before resend number [tries] + 1 of the packet with [code]. */
+        fun retryDelay(tries: Int, code: ByteArray): Long {
+            val base = minOf(FIRST_RETRY_MS shl minOf(tries, 16), MAX_RETRY_MS)
+            return (base * (0.75 + 0.25 * jitter(code, tries))).toLong()
+        }
+
+        /** A fraction in [0, 1) from [code] and [tries]: different for every packet and phone, the same on every run. */
+        internal fun jitter(code: ByteArray, tries: Int): Double {
+            val h = Bytes.sha256(code + byteArrayOf(tries.toByte(), (tries ushr 8).toByte()))
+            val n = ((h[0].toLong() and 0xFF) shl 24) or ((h[1].toLong() and 0xFF) shl 16) or
+                ((h[2].toLong() and 0xFF) shl 8) or (h[3].toLong() and 0xFF)
+            return n.toDouble() / 4_294_967_296.0
+        }
         const val MIN_QUIET_MS = 15_000L
         const val MAX_QUIET_MS = 60_000L
         const val GIVE_UP_MS = 3 * 86_400_000L

@@ -125,7 +125,9 @@ From handover 3 and the owner on 2026-10-14:
     Android app (owner, 2026-10-26).
 53. Radio airtime (owner, 2026-10-26, review AE1-AE12): text and small delivery traffic come first on the radio, with
     pictures, avatars and history sent over hub Wi-Fi first and a slow, budgeted radio fallback (AE1); bounded,
-    adaptive, jittered retries replace decision 24's timing once loss and offline tests pass (AE2); group "delivered"
+    adaptive, jittered retries replace decision 24's timing once loss and offline tests pass (AE2; built in v0.1.1:
+    2 minutes doubling to 4 hours, 75-100 % jitter, at most 24 resends in 3 days, and hearing a contact brings
+    their missed messages forward); group "delivered"
     receipts are combined, sent with other traffic or over Wi-Fi (AE3); a hub scheduler counts seconds on air, puts
     receipts and texts before media, shares time fairly per person and starts at about 180 s per hour for app traffic,
     with an in-app limit as a backstop on radios away from a hub (AE4); radio setting, hop limit and relays are chosen

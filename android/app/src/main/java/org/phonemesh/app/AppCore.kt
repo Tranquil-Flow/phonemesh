@@ -937,7 +937,7 @@ class AppCore private constructor(
             when {
                 stored != null && stored.state != Postman.Status.SUPERSEDED.name -> {
                     if (stored.state == Postman.Status.DELIVERED.name) throw org.phonemesh.core.mail.MailStore.Refused()
-                    history.updateOutbox(stored.id, stored.tries, now + Postman.RETRY_MS[0], Postman.Status.WAITING.name)
+                    history.updateOutbox(stored.id, stored.tries, now + Postman.FIRST_RETRY_MS, Postman.Status.WAITING.name)
                     Postman.Out(contact, stored.packet, stored.id, stored.isReceipt)
                 }
                 history.held(chat.address).any { it.messageId == message.id } -> null
@@ -1986,7 +1986,7 @@ class AppCore private constructor(
                 if (!held && live.all { it.state == Postman.Status.DELIVERED.name }) throw org.phonemesh.core.mail.MailStore.Refused()
                 history.setStatus(message.id, DeliveryStatus.WAITING)
                 live.filter { it.state != Postman.Status.DELIVERED.name }.map { row ->
-                    history.updateOutbox(row.id, row.tries, now + Postman.RETRY_MS[0], Postman.Status.WAITING.name)
+                    history.updateOutbox(row.id, row.tries, now + Postman.FIRST_RETRY_MS, Postman.Status.WAITING.name)
                     Postman.Out(contact, row.packet, row.id, row.isReceipt)
                 }
             } else {

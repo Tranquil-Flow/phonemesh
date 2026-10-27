@@ -115,7 +115,7 @@ class Accounts(
             history.transaction {
                 keepContact(card.encode(), card.profile, met = false, told = true)
                 val row = History.OutboxRow(0, account.toString(), null, WireV2.PORT, opened.hello, null, null,
-                    now(), 0, now() + org.phonemesh.core.mail.Postman.RETRY_MS[0], "WAITING")
+                    now(), 0, now() + org.phonemesh.core.mail.Postman.FIRST_RETRY_MS, "WAITING")
                 if (!store.storeSession(account, opened.state, row)) throw org.phonemesh.core.mail.MailStore.Refused()
                 val id = history.lastOutboxId
                 store.pendingRequests.retire(account)

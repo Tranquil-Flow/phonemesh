@@ -244,6 +244,63 @@ class PostmanTest {
         assertEquals("still resent until delivered", 1, a.postman.due(2 * 60_000).size)
     }
 
+    // ---- AE2: bounded, adaptive, jittered resends (decision 53)
+
+    @Test fun resendWaitsDoubleToFourHoursAndSpreadPerPacket() {
+        val r = Random(3)
+        for (tries in 0..30) {
+            val base = minOf(Postman.FIRST_RETRY_MS shl minOf(tries, 16), Postman.MAX_RETRY_MS)
+            val waits = (0 until 200).map { Postman.retryDelay(tries, r.nextBytes(8)) }
+            assertTrue("tries=$tries within 75-100 %", waits.all { it in (base * 3 / 4)..base })
+            assertTrue("spread, not in step", waits.toSet().size > 190)
+        }
+        assertEquals("deterministic for one packet", Postman.retryDelay(4, ByteArray(8) { it.toByte() }), Postman.retryDelay(4, ByteArray(8) { it.toByte() }))
+    }
+
+    @Test fun anUnheardMessageGoesAtMost24TimesThenFails() {
+        val (a, _) = pair()
+        val m = a.postman.send(a.them, text("loin"), 1, 0)!!
+        a.postman.transmitted(m.outboxId)
+        var resends = 0
+        var now = 0L
+        while (now < Postman.GIVE_UP_MS + 3_600_000) { now += 60_000; resends += a.postman.due(now).size }
+        // Decision 24's 2/10/30-minute timing would have offered it 146 times in three days.
+        assertTrue("bounded: $resends", resends <= Postman.MAX_RESENDS)
+        assertTrue("still persistent: $resends", resends >= 15)
+        assertEquals(Postman.Status.FAILED, a.store.status(1))
+    }
+
+    @Test fun aLinkLosingHalfThePacketsBothWaysStillDeliversEveryMessage() {
+        val (a, b) = pair()
+        val r = Random(11)
+        for (i in 1..10L) a.postman.send(a.them, text("m$i"), i, 0)!!.let { a.postman.transmitted(it.outboxId); if (r.nextBoolean()) b.postman.receive(it.packet, 1_000) }
+        var now = 1_000L
+        while (now < Postman.GIVE_UP_MS && (1..10L).any { a.store.status(it) != Postman.Status.DELIVERED }) {
+            now += 30_000
+            // Every packet a phone hands to its radio is marked sent, receipts too, as the app does.
+            for (out in a.postman.due(now)) { a.postman.transmitted(out.outboxId); if (r.nextBoolean()) b.postman.receive(out.packet, now) }
+            for (out in b.postman.due(now)) { b.postman.transmitted(out.outboxId); if (r.nextBoolean()) a.postman.receive(out.packet, now) }
+        }
+        assertTrue("half lost each way, receipts too: all delivered", (1..10L).all { a.store.status(it) == Postman.Status.DELIVERED })
+    }
+
+    @Test fun hearingAnAwayContactBringsTheirMissedMessagesForward() {
+        val (a, b) = pair()
+        val m = a.postman.send(a.them, text("tu es là ?"), 1, 0)!!
+        a.postman.transmitted(m.outboxId)
+        // B is away for twenty hours: A's resends reach nobody, and its wait grows to hours.
+        var now = 0L
+        while (now < 20 * 3_600_000) { now += 60_000; a.postman.due(now) }
+        val waiting = a.postman.nextDue()!! - now
+        assertTrue("a long wait by now: $waiting ms", waiting > 30 * 60_000)
+        // B comes back and writes: A hears B, so the missed message goes within two minutes.
+        val hello = b.postman.send(b.them, text("me revoilà"), 2, now)!!
+        assertNotNull(a.postman.receive(hello.packet, now))
+        val soon = (1..4).flatMap { a.postman.due(now + it * 30_000L) }
+        assertTrue("resent soon after B was heard", soon.any { it.packet.contentEquals(m.packet) })
+        assertEquals("tu es là ?", (b.postman.receive(m.packet, now + 120_000)!!.body as Body.Text).text)
+    }
+
     @Test fun afterThreeDaysAMessageIsMarkedFailed() {
         val (a, _) = pair()
         a.postman.send(a.them, text("loin"), 1, 0)

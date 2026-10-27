@@ -149,8 +149,12 @@ A sent message shows one status at a time. Each means exactly one thing:
 
 None of these mean the person has listened to it.
 
-Private messages are retried until the receipt arrives: after 2, 10 and 30 minutes, then
-every 30 minutes, for up to three days. A retry sends the exact same encrypted bytes. If
+Private messages are retried until the receipt arrives. The first retry comes after about
+2 minutes, and each wait doubles up to about 4 hours. Each wait is a little shorter by a
+random amount, so phones that missed the same radio do not all send again together. A
+message is sent again at most 24 times, for up to three days. When your phone hears from
+the person again, it sends their missed messages within a minute or two instead of
+waiting. A retry sends the exact same encrypted bytes. If
 the recipient already has the message, their phone ignores the copy and sends a fresh
 receipt, so retries never show up as duplicates.
 

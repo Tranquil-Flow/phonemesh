@@ -192,7 +192,8 @@ class PostmanPictureTest {
         val (a, b) = pair()
         val sent = a.postman.sendPicture(a.them, 1, packets(500), 0).map { checkNotNull(it) }
         sent.forEach { a.postman.transmitted(it.outboxId) }
-        assertEquals("the next wake-up is the first resend", 2 * 60_000L, a.postman.nextDue())
+        // AE2: the first resend comes after 75-100 % of two minutes, different per packet.
+        assertTrue("the next wake-up is the first resend", a.postman.nextDue()!! in 90_000L..2 * 60_000L)
         sent.filterIndexed { i, _ -> i != 2 }.forEach { b.postman.receive(it.packet, 1_000) }
         assertTrue(joined(b) == null)
         val resent = a.postman.due(2 * 60_000)

@@ -103,6 +103,19 @@ class GroupCipherTest {
         assertTrue(r.missed().isEmpty())
     }
 
+    /** Review C5: packets carry low-S signatures only, so nobody can make a second valid copy of one. */
+    @Test fun onlyLowSSignaturesAreTakenAndEveryPacketHasOne() {
+        val (w, r) = pair()
+        val packets = (0 until 16).map { w.seal("m$it".toByteArray()) }
+        for (p in packets) assertTrue(P256.isLowS(p.copyOfRange(p.size - 64, p.size)))
+        val p = packets[0]
+        val s = java.math.BigInteger(1, p.copyOfRange(p.size - 32, p.size))
+        val t = (P256.n - s).toByteArray().let { if (it.size > 32) it.copyOfRange(it.size - 32, it.size) else it }
+        val high = p.copyOfRange(0, p.size - 32) + ByteArray(32 - t.size) + t
+        assertNull("the high-S twin", r.open(high))
+        assertEquals("m0", String(r.open(p)!!))
+    }
+
     @Test fun aForgedCodeCannotMoveTheChain() {
         val (w, r) = pair()
         val p = (0 until 3).map { w.seal("m$it".toByteArray()) }

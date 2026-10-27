@@ -40,6 +40,11 @@ class GroupMembersTest {
 
     private fun text(phone: GroupMember, packet: ByteArray): String? = phone.receive(packet)?.second?.let { String(it) }
 
+    /** Review C9: a member list names identity keys on the curve only. */
+    @Test fun rosterIdentitiesMustBeOnTheCurve() {
+        assertTrue(runCatching { GroupRoster.Member(ByteArray(33) { 5 }, false) }.isFailure)
+    }
+
     @Test fun anAdminStartsAGroupAndEveryoneReadsEveryone() {
         val a = phone(ama); val k = phone(kofi); val y = phone(yaw)
         val out = a.newEpoch(roster(ama to true, kofi to false, yaw to false))

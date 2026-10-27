@@ -70,6 +70,25 @@ identity key, or by a key that the identity key certifies, proves authorship to 
   signatures prevented that. Admins are already trusted with the member list; the reviewer is asked whether members
   should cross-check each other's keys privately (more airtime) or accept this.
 
+## Review findings to settle before groups are switched on (agent review, lane C)
+
+Fixed in core: signatures are low S only (C5); member lists take identity keys on the curve only (C9). Still to
+design in, before any app uses groups:
+
+- **C1:** the signature travels in clear, so anyone who knew the group id can test packets against members' keys
+  (removed members name the sender of later packets). Decision 66's group signing keys narrow this to keys bound to
+  nobody outside the group; consider sealing the signature inside the AEAD as well.
+- **C2:** a co-admin can block his removal with a key for epoch 2^32-1 and no member list. Bound the epoch step and
+  drop a pending key whose list does not arrive.
+- **C3:** two admins starting the same next epoch split the group silently. Order competing epochs (for example by
+  digest) and tell members.
+- **C4:** a removed phone is never told and keeps sending into an epoch nobody reads.
+- **C6:** a phone never asks the hub for its own next codes, so a hub can name a sender by exclusion; ask for them too.
+- **C7:** the epoch secret travels as an ordinary private body and is stored with the incoming row before the group
+  takes it; keep it out of message storage and wipe it.
+- **C8:** the writer's state cannot be saved before a packet leaves; give it a store-before-send API.
+- **C10:** every packet recomputes all windows; cache code to position.
+
 ## Questions for the reviewer
 
 1. **Deniability:** settled by decision 66 (above); review the admin-relayed signing keys and their trade-off.

@@ -51,7 +51,7 @@ object GroupCipher {
         require(body.isNotEmpty() && body.size <= MAX_BODY) { "a group body is 1..$MAX_BODY bytes" }
         val header = WireV2.Header(step.code, null).encode()
         val sealed = Aead.seal(step.key, step.nonce, header, body)
-        val signature = sign(signed(group, epoch, seq, header, sealed))
+        val signature = P256.lowS(sign(signed(group, epoch, seq, header, sealed)))
         check(signature.size == SIGNATURE) { "a raw P-256 signature" }
         return header + sealed + signature
     }
@@ -64,7 +64,8 @@ object GroupCipher {
         val sealed = packet.copyOfRange(WireV2.PLAIN_HEADER, packet.size - SIGNATURE)
         val signature = packet.copyOfRange(packet.size - SIGNATURE, packet.size)
         // Signature first: a member who knows the group key still cannot pass off a packet as someone else's.
-        if (!P256.verify(identity, signed(group, epoch, seq, header, sealed), signature)) return null
+        // Low S only, so nobody can turn a packet into a second valid one (review C5).
+        if (!P256.isLowS(signature) || !P256.verify(identity, signed(group, epoch, seq, header, sealed), signature)) return null
         return Aead.open(step.key, step.nonce, header, sealed)
     }
 

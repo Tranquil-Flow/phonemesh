@@ -14,7 +14,7 @@ import java.security.SecureRandom
 class GroupRoster(val name: String, val colour: Int, val members: List<Member>) {
     class Member(identity: ByteArray, val admin: Boolean) {
         val identity: ByteArray = identity.copyOf()
-        init { require(identity.size == P256.POINT) }
+        init { require(identity.size == P256.POINT && P256.decompress(identity) != null) { "an identity key on the curve" } }
     }
 
     init {

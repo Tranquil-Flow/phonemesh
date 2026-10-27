@@ -94,6 +94,17 @@ object P256 {
     }
 
     /** False for a bad key, a malformed or out-of-range signature, or one that does not match. Never throws. */
+    /** Whether a raw r||s signature has s at most n/2 (the one form of each signature). */
+    fun isLowS(signature: ByteArray): Boolean =
+        signature.size == 64 && BigInteger(1, signature.copyOfRange(32, 64)) <= n.shiftRight(1)
+
+    /** The same signature with s at most n/2. */
+    fun lowS(signature: ByteArray): ByteArray {
+        if (signature.size != 64 || isLowS(signature)) return signature
+        val s = (n - BigInteger(1, signature.copyOfRange(32, 64))).toByteArray().let { if (it.size > 32) it.copyOfRange(it.size - 32, it.size) else it }
+        return signature.copyOfRange(0, 32) + ByteArray(32 - s.size) + s
+    }
+
     fun verify(key: ByteArray, message: ByteArray, signature: ByteArray): Boolean {
         val publicKey = publicKey(key) ?: return false
         return verify(publicKey, message, signature)

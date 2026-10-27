@@ -52,6 +52,17 @@ class AppMailStore(private val history: History, private val store: AccountStore
         MailStore.Committed(outboxId)
     }
 
+    /**
+     * A contact's changed profile (PF5): kept when newer than the one known, so an old or repeated update changes
+     * nothing. It is acknowledged either way, and shows no bubble.
+     */
+    private fun keepProfile(person: History.ContactRow, profile: org.phonemesh.core.account.Profile) {
+        val known = person.profile?.let { org.phonemesh.core.account.Profile.decode(it) }
+        if (known != null && known.revision >= profile.revision) return
+        history.putContact(History.ContactRow(person.accountId, person.card, profile.name, profile.colour, person.met, person.voice,
+            person.added, profile.encode()))
+    }
+
     private fun project(contact: AccountId, state: SessionState, incoming: MailStore.Incoming) {
         val person = checkNotNull(history.contactRow(contact.toString())) { "missing contact" }
         // A packet authenticated by the current session proves the peer received this start; hub acks cannot.
@@ -67,6 +78,7 @@ class AppMailStore(private val history: History, private val store: AccountStore
                     packetId = ref, replyTo = refNumber(body.ref))
                 is Body.Reaction -> history.addReaction(chat.id, person.accountId, body.emoji, refNumber(body.ref), incoming.at)
                 is Body.PictureHead, is Body.PicturePart -> incomingPictures.accept(chat, person.accountId, body, ref, incoming.at)
+                is Body.ProfileUpdate -> keepProfile(person, body.profile)
                 else -> error("unsupported incoming body")
             }
         }

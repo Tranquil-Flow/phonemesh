@@ -157,7 +157,7 @@ class HubPathsTest {
         }
         TestCore.restart()
         TestCore.onMain {
-            assertEquals(16, core.history.readableDatabase.version)
+            assertEquals(17, core.history.readableDatabase.version)
             assertTrue(row.packet.contentEquals(core.history.outboxRow(row.id)!!.packet))
             assertEquals("HUB", core.history.outboxRow(row.id)!!.state)
             assertFalse("legacy HUB is not proof of a particular pinned hub", HubCustody(core.history).has(row.id, pin))

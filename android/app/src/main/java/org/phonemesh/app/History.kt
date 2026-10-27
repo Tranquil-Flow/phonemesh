@@ -193,6 +193,10 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             db.execSQL("ALTER TABLE $table ADD COLUMN profile BLOB")
             db.execSQL("UPDATE $table SET colour = $OLD_COLOURS")
         }
+        // Profile updates (PF5): the newest revision of this phone's profile each contact was sent, and when.
+        if (oldVersion < 17) for (column in listOf("profile_sent", "profile_sent_at")) {
+            if (!hasColumn(db, "contacts", column)) db.execSQL("ALTER TABLE contacts ADD COLUMN $column INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -290,6 +294,16 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     fun contactRows(): List<ContactRow> =
         readableDatabase.query("contacts", null, null, null, null, null, "added").use { c -> buildList { while (c.moveToNext()) add(c.contact()) } }
+
+    /** The revision of this phone's profile last sent to [accountId] (0: none known) and when (ms, 0: never). */
+    fun profileSent(accountId: String): Pair<Long, Long> =
+        readableDatabase.query("contacts", arrayOf("profile_sent", "profile_sent_at"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else 0L to 0L }
+
+    fun setProfileSent(accountId: String, revision: Long, at: Long) {
+        writableDatabase.update("contacts", ContentValues().apply { put("profile_sent", revision); put("profile_sent_at", at) },
+            "account_id = ?", arrayOf(accountId))
+    }
 
     /** Local listening preference only; never replace the contact or its transport state. */
     fun setContactVoice(accountId: String, voice: String?): Boolean =
@@ -825,7 +839,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 16
+        const val VERSION = 17
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */
         private const val OLD_COLOURS = "CASE colour WHEN 0 THEN ${0xE53935} WHEN 1 THEN ${0xFB8C00} WHEN 2 THEN ${0xFDD835} " +

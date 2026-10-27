@@ -807,10 +807,27 @@ class AppCore private constructor(
     private fun sendPerson(messageId: Long, chat: Chat, text: String, language: String, replyTo: Long?) {
         val body = personBody(text, language, replyTo)
         if (!mailOperation {
-            val out = postman.send(AppMailStore.idOf(chat.address), body, messageId, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            val contact = AppMailStore.idOf(chat.address)
+            val out = postman.send(contact, body, messageId, now)
             if (out != null) push(out)
+            profileAfterMessage(contact, now)?.let { push(it) }
             schedulePostman()
         }) runCatching { history.setStatus(messageId, DeliveryStatus.FAILED) }
+    }
+
+    /**
+     * Profile changes reach a contact behind the next message sent to them (profile spec PF5): one update with the
+     * newest profile when they were not sent it yet, at most one an hour, so edits never fan out to everyone at once
+     * and cost one small packet only after a change. It is an ordinary private packet: kept, resent, acknowledged.
+     */
+    private fun profileAfterMessage(contact: org.phonemesh.core.account.AccountId, now: Long): Postman.Out? = history.transaction {
+        val own = accounts.profile() ?: return@transaction null
+        val (sent, at) = history.profileSent(contact.toString())
+        if (own.revision <= sent || now - at < PROFILE_GAP_MS) return@transaction null
+        val out = postman.send(contact, Body.ProfileUpdate(own), null, now)
+        history.setProfileSent(contact.toString(), own.revision, now)
+        out
     }
 
     private fun personBody(text: String, language: String, replyTo: Long?): Body =
@@ -1557,9 +1574,9 @@ class AppCore private constructor(
                             val message = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
                             val packet = postman.send(AppMailStore.idOf(chat.address), personBody(planned.text, planned.language, planned.replyTo), message.id, now)
                             if (!history.deletePlanned(planned.id)) throw org.phonemesh.core.mail.MailStore.Refused()
-                            packet
+                            listOfNotNull(packet, profileAfterMessage(AppMailStore.idOf(chat.address), now))
                         }
-                        out?.let { push(it) }
+                        out.forEach { push(it) }
                         schedulePostman()
                     } else {
                         val message = history.transaction {
@@ -1814,7 +1831,8 @@ class AppCore private constructor(
     }
 
     private fun sealPicture(chat: Chat, messageId: Long, packets: List<PictureWire.Packet>, now: Long): List<Postman.Out> =
-        postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull()
+        postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull() +
+            listOfNotNull(profileAfterMessage(AppMailStore.idOf(chat.address), now))
 
     /** Picture retry is for people only: the stored packets go again, byte for byte. Old radio chats never resend. */
     private fun resendPicture(message: Message): Boolean {
@@ -2407,6 +2425,8 @@ class AppCore private constructor(
     }
 
     companion object {
+        /** At most one profile update an hour to each contact (profile spec PF5). */
+        const val PROFILE_GAP_MS = 60 * 60_000L
         /** Person-chat references are numbers at or above this (radio packet ids are below). */
         private const val REF_FLOOR = 1L shl 40
 

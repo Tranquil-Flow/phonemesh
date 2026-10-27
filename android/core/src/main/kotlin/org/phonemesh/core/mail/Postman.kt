@@ -113,7 +113,8 @@ class Postman(
             // Do not consume keys or acknowledge bodies whose durable app handler is not implemented yet. Picture
             // heads and parts are consumed only by MailStore.keep, which must store them before anything is acknowledged.
             if (decoded.body !is Body.Text && decoded.body !is Body.Reply && decoded.body !is Body.Reaction &&
-                decoded.body !is Body.Receipt && decoded.body !is Body.PictureHead && decoded.body !is Body.PicturePart) return null
+                decoded.body !is Body.Receipt && decoded.body !is Body.PictureHead && decoded.body !is Body.PicturePart &&
+                decoded.body !is Body.ProfileUpdate) return null
             val ref = Ratchet.reference(opened.code)
             val response = if (decoded.body is Body.Receipt) null else {
                 // A late old-chain packet needs its own covering ack, not today's unrelated receiving chain.

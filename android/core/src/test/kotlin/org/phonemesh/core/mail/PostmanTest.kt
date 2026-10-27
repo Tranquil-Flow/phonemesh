@@ -109,6 +109,20 @@ class PostmanTest {
     private fun text(s: String) = Body.Text("fr", s)
     private fun texts(got: List<Postman.Received?>) = got.mapNotNull { (it?.body as? Body.Text)?.text }
 
+    /** Profile spec PF5: a changed profile is a private body like a text, delivered once and acknowledged. */
+    @Test fun aProfileUpdateIsDeliveredAndAcknowledged() {
+        val (a, b) = pair()
+        val profile = org.phonemesh.core.account.Profile("Awa", 0x1E88E5, org.phonemesh.core.account.Avatar.Emoji("🐟"), revision = 2)
+        val sent = a.postman.send(a.them, Body.ProfileUpdate(profile), 7L, 0)!!
+        a.postman.transmitted(sent.outboxId)
+        val got = b.postman.receive(sent.packet, 1_000)
+        assertEquals(Body.ProfileUpdate(profile), got?.body)
+        assertNull("a repeat is not shown again", b.postman.receive(sent.packet, 2_000))
+        val receipt = b.postman.due(61_000).single()
+        a.postman.receive(receipt.packet, 62_000)
+        assertEquals(Postman.Status.DELIVERED, a.store.status(7L))
+    }
+
     @Test fun threeMessagesArriveAndOneReceiptAfterQuietConfirmsThemAll() {
         val (a, b) = pair()
         val sent = (1..3L).map { a.postman.send(a.them, text("m$it"), it, 0)!! }

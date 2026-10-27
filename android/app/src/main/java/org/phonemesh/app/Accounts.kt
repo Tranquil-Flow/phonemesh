@@ -79,7 +79,7 @@ class Accounts(
                 }
                 try {
                     history.transaction {
-                        keepContact(code.card.encode(), code.card.profile, met = true)
+                        keepContact(code.card.encode(), code.card.profile, met = true, told = true)
                         check(store.installQrSession(account, state))
                         store.pendingRequests.retire(account)
                         Added.Contact(account, history.personChat(account.toString(), code.card.name).id, met = true)
@@ -113,7 +113,7 @@ class Accounts(
         val opened = Start.link(store, profile, card, KeyPairBytes.generate()) ?: return Added.Bad
         val made = try {
             history.transaction {
-                keepContact(card.encode(), card.profile, met = false)
+                keepContact(card.encode(), card.profile, met = false, told = true)
                 val row = History.OutboxRow(0, account.toString(), null, WireV2.PORT, opened.hello, null, null,
                     now(), 0, now() + org.phonemesh.core.mail.Postman.RETRY_MS[0], "WAITING")
                 if (!store.storeSession(account, opened.state, row)) throw org.phonemesh.core.mail.MailStore.Refused()
@@ -185,14 +185,18 @@ class Accounts(
 
     fun isMet(account: AccountId): Boolean = history.contactRow(account.toString())?.met == true
 
-    /** Keeps [profile] unless the contact already has a newer one (an old card scanned again). */
-    private fun keepContact(card: ByteArray, profile: Profile, met: Boolean) {
+    /**
+     * Keeps [profile] unless the contact already has a newer one (an old card scanned again). [told]: they got this
+     * phone's current profile in the same exchange (QR, or the hello), so no update needs to follow.
+     */
+    private fun keepContact(card: ByteArray, profile: Profile, met: Boolean, told: Boolean = false) {
         val account = AccountId.of(identityOf(card)).toString()
         val old = history.contactRow(account)
         val known = old?.profile?.let { Profile.decode(it) }
         val kept = if (known != null && known.revision > profile.revision) known else profile
         history.putContact(History.ContactRow(account, card, kept.name, kept.colour, met || old?.met == true, old?.voice,
             old?.added ?: now(), kept.encode()))
+        if (told) store.profile()?.let { history.setProfileSent(account, it.revision, 0L) }
     }
 
     companion object {

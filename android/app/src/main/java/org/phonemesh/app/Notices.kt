@@ -30,6 +30,11 @@ Copyright 2017 Unicode, Inc.
 Licence: Unicode License v3
 https://www.unicode.org/license.txt
 
+BIP 39 word lists (English, French), for recovery words
+Marek Palatinus, Pavol Rusnak, Aaron Voisine, Sean Bowe
+Licence: MIT
+https://github.com/bitcoin/bips/tree/master/bip-0039
+
 Licence texts: docs/licenses in the source code.
 
 sherpa-onnx 1.13.8
@@ -103,6 +108,11 @@ Liste des emoji Unicode (Emoji 5.0), pour les images de profil
 Copyright 2017 Unicode, Inc.
 Licence : Unicode License v3
 https://www.unicode.org/license.txt
+
+Listes de mots BIP 39 (anglais, français), pour les mots de récupération
+Marek Palatinus, Pavol Rusnak, Aaron Voisine, Sean Bowe
+Licence : MIT
+https://github.com/bitcoin/bips/tree/master/bip-0039
 
 Textes des licences : docs/licenses dans le code source.
 

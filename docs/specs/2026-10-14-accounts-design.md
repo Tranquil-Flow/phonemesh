@@ -156,10 +156,14 @@ From handover 3 and the owner on 2026-10-14:
 62. Phones take voice and engine pack updates first; app updates come later. A phone always asks the person before
     downloading an update (owner, 2026-10-27).
 63. No `v0.1.1-demo.2` pre-release: v0.1.1 is released properly, then the demo uses that release (owner, 2026-10-27).
-64. Photo avatars go only through a hub for now; people without a hub see the emoji or letter picture. This is a known
-    limitation to revisit later (owner, 2026-10-27).
+64. Photo avatars go only through a hub for now, and never on a radio: the phone sends a photo only when a hub is in
+    reach, the hub keeps it for phones that fetch their mail from it and never airs it. People elsewhere see the emoji
+    or letter picture. A known limitation to revisit later (owner, 2026-10-27).
 65. The radio settings profile (AE6) is checked against the firmware source first, then in a session on the owner's
     radio, with each write approved (owner, 2026-10-27).
+66. Group messages are deniable to outsiders: each member's group signing key reaches the admin over their private
+    session and everyone else in the roster, never signed by an identity key (owner, 2026-10-27; design in
+    `docs/specs/2026-10-27-private-group-keys-draft.md`).
 
 ## What an outsider can and cannot learn
 

@@ -51,10 +51,28 @@ A writer must durably store `chainAfterNext()` before the packet leaves (no key 
   chains derived from a secret, not the secret.
 - Cost of one change for N people: N-1 private packets plus at most 6 group packets.
 
+## Signing keys (decision 66, not built yet)
+
+The owner chose deniability toward outsiders, so group packets stop being signed by identity keys. A signature by an
+identity key, or by a key that the identity key certifies, proves authorship to anyone. Instead:
+
+- Each member makes one P-256 **group signing key** per group and sends its public half (33 bytes) to the inviting
+  admin over their private session (new private body: group id 16 | key 33). Private sessions are deniable (X3DH),
+  so this binding convinces the admin and nobody else.
+- The roster carries each member's signing key: entry = flags | IK33 | SK33. Twenty people take about 11 roster
+  packets instead of 6. The 70-byte group key that the admin sends each member privately gains the admin's own
+  signing key (103 bytes, still one packet).
+- Group packets are signed by the sender's group signing key, over the same bytes as before; a reader takes the key
+  from the roster entry of the chain's owner.
+- Cost of one membership change for 20 people: about 5 more group packets, plus one private packet from each new
+  member. Leaked messages and rosters carry only signatures by keys bound to nobody outside the group.
+- Trade-off: an admin who lies in the roster could now speak as another member to the others, where identity
+  signatures prevented that. Admins are already trusted with the member list; the reviewer is asked whether members
+  should cross-check each other's keys privately (more airtime) or accept this.
+
 ## Questions for the reviewer
 
-1. **Deniability:** signing with the long-term identity key lets any member prove to outsiders who wrote a message.
-   Alternative: a per-epoch signing key per member, certified once by the identity key and sent with the roster.
+1. **Deniability:** settled by decision 66 (above); review the admin-relayed signing keys and their trade-off.
 2. **Forward secrecy inside an epoch:** a member keeping `S` can rederive every chain. Phones should derive all
    members' `CK0` at once and erase `S`; a malicious member can still keep it. Renewal on join/leave heals.
 3. Signature verified before decryption: is the signed-then-encrypted ordering (signature over ciphertext) right

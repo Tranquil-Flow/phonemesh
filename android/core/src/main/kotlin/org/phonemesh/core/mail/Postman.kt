@@ -26,11 +26,21 @@ class Postman(
     private val newPair: () -> KeyPairBytes = KeyPairBytes::generate,
     private val quietDelay: () -> Long = { 15_000L + receiptRandom.nextInt(45_001) },
     /**
-     * Whether private group keys ([Body.GroupKeyBody]) are taken. Off until the app has groups: then a group key is
-     * refused like an unknown body (no receipt, no step of the session), so a sender never thinks it arrived.
+     * Where private group bodies ([Body.Group]) go; null until the app has groups, and then they are refused like an
+     * unknown body (no receipt, no step of the session), so a sender never thinks they arrived.
      */
-    private val groups: Boolean = false,
+    private val groups: GroupInbox? = null,
 ) {
+    /**
+     * Takes a private group body before anything else happens to the packet (review C7). True: taken, so the packet
+     * is kept and receipted, and only the body's kind is stored, never its bytes (a key's secret stays with the
+     * group). False: refused, with no receipt and no session step. It must be idempotent (the same body again after a
+     * crash is taken again) and durable before it returns true.
+     */
+    fun interface GroupInbox {
+        fun take(from: AccountId, body: Body.Group, now: Long): Boolean
+    }
+
     /** A message the app should show. [ref] is what replies and reactions to it name ([Ratchet.reference]). */
     class Received(val contact: AccountId, val body: Body, val ref: ByteArray)
 
@@ -44,6 +54,8 @@ class Postman(
     fun send(contact: AccountId, body: Body, messageId: Long?, now: Long): Out? {
         val state = store.session(contact) ?: throw MailStore.Refused()
         if (!Ratchet.maySealNew(state, store.lastAck(contact))) {
+            // A group body is never held as plaintext (a key carries the epoch secret): the group asks again later.
+            if (body is Body.Group) return null
             store.hold(contact, messageId, Body.encode(body), now)
             return null
         }
@@ -136,7 +148,14 @@ class Postman(
             // heads and parts are consumed only by MailStore.keep, which must store them before anything is acknowledged.
             if (decoded.body !is Body.Text && decoded.body !is Body.Reply && decoded.body !is Body.Reaction &&
                 decoded.body !is Body.Receipt && decoded.body !is Body.PictureHead && decoded.body !is Body.PicturePart &&
-                decoded.body !is Body.ProfileUpdate && decoded.body !is Body.AvatarPiece && !(groups && decoded.body is Body.GroupKeyBody)) return null
+                decoded.body !is Body.ProfileUpdate && decoded.body !is Body.AvatarPiece && decoded.body !is Body.Group) return null
+            val body = (decoded.body as? Body.Group)?.let { g ->
+                val inbox = groups ?: return null
+                val taken = inbox.take(contact, g, now)
+                g.wipe(); opened.body.fill(0)
+                if (!taken) return null
+                Body.Group(g.kind, ByteArray(0))
+            } ?: decoded.body
             val ref = Ratchet.reference(opened.code)
             val response = if (decoded.body is Body.Receipt) null else {
                 // A late old-chain packet needs its own covering ack, not today's unrelated receiving chain.
@@ -144,11 +163,11 @@ class Postman(
                 Ack(opened.chainTag, opened.counter, -1)
             }
             store.keep(contact, opened.state, null,
-                incoming = MailStore.Incoming(decoded.body, ref, now, decoded.ack, digest, response,
+                incoming = MailStore.Incoming(body, ref, now, decoded.ack, digest, response,
                     if (response == null) null else now + delay), expected = state) ?: throw MailStore.Refused()
             repair(contact, now)
             if (decoded.body is Body.Receipt) return null
-            return Received(contact, decoded.body, ref)
+            return Received(contact, body, ref)
         }
         return null
     }

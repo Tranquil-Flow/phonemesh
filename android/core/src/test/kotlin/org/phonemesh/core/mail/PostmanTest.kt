@@ -1,5 +1,6 @@
 package org.phonemesh.core.mail
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -7,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.phonemesh.core.account.AccountId
 import org.phonemesh.core.crypto.Bytes
+import org.phonemesh.core.crypto.P256
 import org.phonemesh.core.session.Phone
 import org.phonemesh.core.session.SessionState
 import org.phonemesh.core.wire.Ack
@@ -22,6 +24,8 @@ class PostmanTest {
         val rows = LinkedHashMap<Long, Postman.Outgoing>()
         val acks = HashMap<AccountId, Ack>()
         val holds = LinkedHashMap<Long, Pair<AccountId, Postman.Held>>()
+        /** Every incoming item stored, as a real store would write it. */
+        val kept = ArrayList<MailStore.Incoming>()
         private var nextId = 1L
         var refuseCommit = false
         private val replays = LinkedHashMap<String, MailStore.Replay>()
@@ -55,6 +59,7 @@ class PostmanTest {
             val old = sessions[contact]
             check(old == null || state.serial > old.serial) { "state must move forward" }
             incoming?.let { item ->
+                kept += item
                 replays.entries.removeAll { it.value.expires < item.at && it.value.due == null }
                 if (replays.size >= MailStore.MAX_REPLAYS) throw MailStore.Refused()
                 if (item.due != null) pendingReceipts().filter { it.contact == contact }.forEach { replays[it.digest] = it.copy(due = item.due) }
@@ -97,7 +102,11 @@ class PostmanTest {
     private class Side(val phone: Phone, val other: Phone, groups: Boolean = false) {
         val store = MapStore()
         val them = AccountId.of(other.keys.identity)
-        val postman = Postman(phone.keys, store, quietDelay = { 20_000L }, groups = groups)
+        /** Group bodies the group side took: kind and a copy of the bytes, as a real group store would keep them. */
+        val taken = ArrayList<Pair<Int, ByteArray>>()
+        var accept = true
+        val postman = Postman(phone.keys, store, quietDelay = { 20_000L },
+            groups = if (groups) Postman.GroupInbox { _, body, _ -> if (accept) taken += body.kind to body.bytes.copyOf(); accept } else null)
         init { store.sessions[them] = phone.state }
     }
 
@@ -302,25 +311,64 @@ class PostmanTest {
         assertTrue("resent soon after B was heard", soon.any { it.packet.contentEquals(m.packet) })
         assertEquals("tu es là ?", (b.postman.receive(m.packet, now + 120_000)!!.body as Body.Text).text)
     }
-    /** Groups GK2: an admin's group key goes to one member over their private session, like a text, and is receipted. */
+    private fun groupKey(epoch: Long = 3) = org.phonemesh.core.group.GroupKey(ByteArray(16) { 1 }, epoch, ByteArray(32) { 2 },
+        ByteArray(16) { 3 }, ByteArray(16) { 4 }, 2, P256.compress(P256.generate().public as java.security.interfaces.ECPublicKey))
+
+    /**
+     * Groups GK3: an admin's group key goes to one member over their private session, like a text, and is receipted.
+     * Review C7: the group side takes it before anything is stored, and the mail store keeps only its kind, never the
+     * secret.
+     */
     @Test fun aGroupKeyTravelsOverThePrivateSessionAndIsReceipted() {
         val (a, b) = pair(groups = true)
-        val key = org.phonemesh.core.group.GroupKey(ByteArray(16) { 1 }, 3, ByteArray(32) { 2 }, ByteArray(16) { 3 }, 2)
-        val out = a.postman.send(a.them, Body.GroupKeyBody(key.encode()), 9, 0)!!
+        val key = groupKey()
+        val out = a.postman.send(a.them, Body.Group(Body.GROUP_KEY, key.encode()), 9, 0)!!
         a.postman.transmitted(out.outboxId)
         val got = b.postman.receive(out.packet, 1_000)!!
-        val back = org.phonemesh.core.group.GroupKey.decode((got.body as Body.GroupKeyBody).bytes)!!
+        assertEquals(Body.GROUP_KEY, (got.body as Body.Group).kind)
+        assertEquals("the received body carries no secret", 0, (got.body as Body.Group).bytes.size)
+        assertEquals(0, (b.store.kept.single().body as Body.Group).bytes.size)
+        val back = org.phonemesh.core.group.GroupKey.decode(b.taken.single().second)!!
         assertEquals(3L, back.epoch); assertEquals(2, back.parts)
         a.postman.receive(b.postman.due(61_000).single().packet, 62_000)
         assertEquals(Postman.Status.DELIVERED, a.store.status(9))
-        assertTrue("a damaged key is not a body", runCatching { Body.encode(Body.GroupKeyBody(ByteArray(69))) }.isFailure)
-        assertNull(Body.decode(byteArrayOf(Body.GROUP_KEY.toByte()) + ByteArray(69)))
+        assertTrue("a damaged key is not a body", runCatching { Body.encode(Body.Group(Body.GROUP_KEY, ByteArray(118))) }.isFailure)
+        assertNull(Body.decode(byteArrayOf(Body.GROUP_KEY.toByte()) + ByteArray(118)))
+        assertTrue("kind 14 is not a group body", runCatching { Body.encode(Body.Group(14, ByteArray(21))) }.isFailure)
+    }
+
+    @Test fun signingKeysRemovalNoticesAndRequestsTravelTheSameWay() {
+        val (a, b) = pair(groups = true)
+        val g = ByteArray(16) { 5 }
+        val signer = P256.compress(P256.generate().public as java.security.interfaces.ECPublicKey)
+        val bodies = listOf(
+            org.phonemesh.core.group.GroupControl.Signer(g, signer),
+            org.phonemesh.core.group.GroupControl.Removed(g, 4),
+            org.phonemesh.core.group.GroupControl.Ask(g, 4),
+        )
+        for ((i, c) in bodies.withIndex()) {
+            val out = a.postman.send(a.them, Body.Group(c.kind, c.encode()), 20L + i, i * 1_000L)!!
+            assertNotNull(b.postman.receive(out.packet, i * 1_000L + 500))
+        }
+        assertEquals(listOf(11, 12, 13), b.taken.map { it.first })
+        assertArrayEquals(signer, (org.phonemesh.core.group.GroupControl.decode(11, b.taken[0].second) as org.phonemesh.core.group.GroupControl.Signer).key)
+    }
+
+    /** A group body the group side refuses is not receipted, and the session goes on. */
+    @Test fun aRefusedGroupBodyIsNotReceipted() {
+        val (a, b) = pair(groups = true)
+        b.accept = false
+        val out = a.postman.send(a.them, Body.Group(Body.GROUP_KEY, groupKey().encode()), 9, 0)!!
+        assertNull(b.postman.receive(out.packet, 1_000))
+        assertTrue(b.postman.due(61_000).isEmpty())
+        assertTrue(b.store.kept.isEmpty())
+        val text = a.postman.send(a.them, text("toujours là"), 10, 2_000)!!
+        assertEquals("toujours là", (b.postman.receive(text.packet, 3_000)!!.body as Body.Text).text)
     }
 
     @Test fun aPhoneWithoutGroupsRefusesAGroupKeyAndItsSessionGoesOn() {
         val (a, b) = pair()
-        val key = org.phonemesh.core.group.GroupKey(ByteArray(16) { 1 }, 1, ByteArray(32) { 2 }, ByteArray(16) { 3 }, 1)
-        val out = a.postman.send(a.them, Body.GroupKeyBody(key.encode()), 9, 0)!!
+        val out = a.postman.send(a.them, Body.Group(Body.GROUP_KEY, groupKey(1).encode()), 9, 0)!!
         assertNull("refused, so never receipted", b.postman.receive(out.packet, 1_000))
         assertTrue(b.postman.due(61_000).isEmpty())
         val text = a.postman.send(a.them, text("toujours là"), 10, 2_000)!!

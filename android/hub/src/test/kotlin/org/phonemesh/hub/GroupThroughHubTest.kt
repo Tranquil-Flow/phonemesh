@@ -21,26 +21,29 @@ class GroupThroughHubTest {
 
     @Test fun membersFetchTheGroupsPacketsByTheCodesTheyExpect() {
         val ama = P256.generate(); val kofi = P256.generate()
-        val amaId = P256.compress(ama.public as ECPublicKey); val kofiId = P256.compress(kofi.public as ECPublicKey)
+        val amaSk = P256.generate(); val kofiSk = P256.generate()
+        fun id(k: java.security.KeyPair) = P256.compress(k.public as ECPublicKey)
+        val amaId = id(ama); val kofiId = id(kofi)
         val group = ByteArray(16) { 9 }
-        val a = GroupMember(amaId, { P256.sign(ama.private, it) }, group)
-        val k = GroupMember(kofiId, { P256.sign(kofi.private, it) }, group)
-        val out = a.newEpoch(GroupRoster("Puits", 0x123456, listOf(GroupRoster.Member(amaId, true), GroupRoster.Member(kofiId, false))))
-        assertTrue(k.receiveKey(amaId, GroupKey.decode(out.keys.values.single())!!))
+        val a = GroupMember(amaId, id(amaSk), { P256.sign(amaSk.private, it) }, group)
+        val k = GroupMember(kofiId, id(kofiSk), { P256.sign(kofiSk.private, it) }, group)
+        val list = GroupRoster("Puits", 0x123456, listOf(GroupRoster.Member(amaId, true, id(amaSk)), GroupRoster.Member(kofiId, false, id(kofiSk))))
+        val out = a.newEpoch(list, 0)
+        assertTrue(k.receiveKey(amaId, GroupKey.decode(out.keys.values.single())!!, 0))
 
         val mailbox = Mailbox(folder.newFolder(), 30)
         for (p in out.rosterPackets) assertEquals(Mailbox.Kind.CODE, mailbox.put(301, p, 1_000)!!.kind)
         // Kofi asks for the codes he expects (the roster on Ama's new chain) and rebuilds the group from what he gets.
         fun fetch(codes: List<ByteArray>) = mailbox.after(0, codes.map { Mailbox.hex(it) }.toSet(), hellos = false, shared = false)
-        for (r in fetch(k.expectedCodes())) k.receive(r.bytes)
+        for (r in fetch(k.expectedCodes(1_000))) k.receive(r.bytes, 1_000)
         assertEquals(GroupMember.State.ACTIVE, k.state)
 
         val text = a.send("à midi au puits".toByteArray())
         mailbox.put(301, text, 2_000)
         assertTrue("someone asking for other codes gets nothing", mailbox.after(0, setOf("00".repeat(8)), false, false).isEmpty())
-        val got = fetch(k.expectedCodes()).mapNotNull { k.receive(it.bytes) }
+        val got = fetch(k.expectedCodes(2_000)).flatMap { k.receive(it.bytes, 2_000) }
         assertEquals(1, got.size)
-        assertArrayEquals(amaId, got.single().first)
-        assertEquals("à midi au puits", String(got.single().second))
+        assertArrayEquals(amaId, got.single().sender)
+        assertEquals("à midi au puits", String(got.single().body))
     }
 }

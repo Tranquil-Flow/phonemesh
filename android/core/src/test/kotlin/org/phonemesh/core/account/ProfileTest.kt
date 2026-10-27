@@ -18,7 +18,7 @@ class ProfileTest {
     private fun profiles() = listOf(
         Profile("Aïcha", 0x43A047),
         Profile("Kofi", 0xE53935, Avatar.Emoji("🐟"), revision = 7),
-        Profile("Ama", 0x1E88E5, Avatar.Emoji("👨‍👩‍👧‍👦"), revision = 0xffffffffL),
+        Profile("Ama", 0x1E88E5, Avatar.Emoji("👨‍👩‍👧‍👦"), revision = Profile.MAX_REVISION),
         Profile("Yaw", 0x000000, Avatar.Photo(photoId), revision = 2),
         Profile("x".repeat(40), 0xFFFFFF, Avatar.Emoji("🏴󠁧󠁢󠁳󠁣󠁴󠁿")),
     )
@@ -34,10 +34,20 @@ class ProfileTest {
     }
 
     @Test fun theLayoutIsNameColourRevisionAvatar() {
-        val bytes = Profile("Ab", 0x123456, Avatar.Emoji("🐟"), revision = 0x01020304).encode()
-        val expected = byteArrayOf(2, 'A'.code.toByte(), 'b'.code.toByte(), 0x12, 0x34, 0x56, 1, 2, 3, 4, 1, 4) +
+        val bytes = Profile("Ab", 0x123456, Avatar.Emoji("🐟"), revision = 0x00020304).encode()
+        val expected = byteArrayOf(2, 'A'.code.toByte(), 'b'.code.toByte(), 0x12, 0x34, 0x56, 0, 2, 3, 4, 1, 4) +
             "🐟".toByteArray()
         assertArrayEquals(expected, bytes)
+    }
+
+    /** Review B2: a revision past 2^24 is refused, so nobody can push a contact's revision to the top for good. */
+    @Test fun revisionsStopAtTwoToTheTwentyFour() {
+        val top = Profile("Kofi", 0x1E88E5, Avatar.Letter, Profile.MAX_REVISION)
+        assertEquals(Profile.MAX_REVISION, Profile.decode(top.encode())!!.revision)
+        val over = top.encode().also { b -> val at = 1 + 4 + 3; b[at] = 0x01; b[at + 1] = 0; b[at + 2] = 0; b[at + 3] = 1 }
+        assertNull("2^24 + 1", Profile.decode(over))
+        val max = top.encode().also { b -> val at = 1 + 4 + 3; for (i in 0..3) b[at + i] = 0xFF.toByte() }
+        assertNull("0xFFFFFFFF", Profile.decode(max))
     }
 
     @Test fun malformedProfilesAreRefused() {
@@ -68,7 +78,7 @@ class ProfileTest {
         val second = first.changed("Kofi", 0xE53935, Avatar.Emoji("🐟"))
         assertEquals(2L, second.revision)
         assertEquals(3L, second.changed("Kofi Mensah", 0xE53935, Avatar.Emoji("🐟")).revision)
-        assertTrue("no wraparound", runCatching { Profile("K", 0, revision = 0xffffffffL).changed("L", 0, Avatar.Letter) }.isFailure)
+        assertTrue("no wraparound", runCatching { Profile("K", 0, revision = Profile.MAX_REVISION).changed("L", 0, Avatar.Letter) }.isFailure)
     }
 
     /** Decision 49: any single emoji Android 8.0 can draw, which is Unicode Emoji 5.0. */

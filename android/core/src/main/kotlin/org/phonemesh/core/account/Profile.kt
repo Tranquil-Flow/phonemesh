@@ -66,7 +66,11 @@ class Profile(val name: String, val colour: Int, val avatar: Avatar = Avatar.Let
         const val MAX_NAME_BYTES = 40
         const val PHOTO_ID = 8
         const val MAX_AVATAR = 32
-        const val MAX_REVISION = 0xffffffffL
+        /**
+         * 2^24: one change an hour for about 1,900 years. A higher number is refused, so nobody holding a contact's
+         * session for a moment can push their revision to the top and freeze their profile (review B2).
+         */
+        const val MAX_REVISION = 1L shl 24
         const val LETTER = 0
         const val EMOJI = 1
         const val PHOTO = 2
@@ -98,7 +102,7 @@ class Profile(val name: String, val colour: Int, val avatar: Avatar = Avatar.Let
             fun u(n: Int): Long { var v = 0L; repeat(n) { v = (v shl 8) or (bytes[at++].toLong() and 0xff) }; return v }
             val colour = u(3).toInt()
             val revision = u(4)
-            if (revision < 1) return null
+            if (revision !in 1..MAX_REVISION) return null
             val kind = u(1).toInt()
             val avatar = bytes.copyOfRange(at + 1, bytes.size)
             val chosen = when (kind) {

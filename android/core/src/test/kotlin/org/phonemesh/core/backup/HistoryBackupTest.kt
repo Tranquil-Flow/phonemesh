@@ -71,6 +71,24 @@ class HistoryBackupTest {
     private fun msg(id: Long, chat: Long = 1, out: Boolean = true, status: Int = 1, text: String = "x", reply: Long = 0, picture: Long = 0) =
         HistoryBackup.Message(id, chat, out, 0, null, text, null, 0, status, reply, false, 0, picture)
 
+    /** Review A-03: a family past its declared count is refused at once, before the index or the reader sees it. */
+    @Test fun aFamilyPastItsDeclaredCountStopsAtOnce() {
+        val s = hex("stream")
+        val messagesAt = 6 + 2 + 33 + 8 + 8 + (2 + 3) + 3 + 8 + 8 + 2 + 4 + 4
+        assertEquals(4, java.nio.ByteBuffer.wrap(s, messagesAt, 4).int)
+        val hostile = s.copyOf().also { java.nio.ByteBuffer.wrap(it).putInt(messagesAt, 1) }
+        val got = ArrayList<HistoryBackup.Record>()
+        assertNull(read(hostile, got))
+        assertEquals("only the declared message reached the reader", 1, got.count { it is HistoryBackup.Message })
+        // Moving on before a family is complete is refused too: say 2 contacts while there is 1.
+        val contactsAt = messagesAt - 8
+        val short = s.copyOf().also { java.nio.ByteBuffer.wrap(it).putInt(contactsAt, 2) }
+        val seen = ArrayList<HistoryBackup.Record>()
+        assertNull(read(short, seen))
+        assertTrue("no chat reached the reader", seen.none { it is HistoryBackup.Chat })
+        assertTrue("the writer refuses an extra record as it comes", runCatching { write(manifest(messages = 3)) }.isFailure)
+    }
+
     @Test fun theRulesRefuseWhatTheSpecForbids() {
         refused { it[3] = msg(1, chat = 9, out = false, status = 0) }                      // unknown chat
         refused { it[3] = msg(1, out = false, status = 3) }                                 // incoming must be received

@@ -120,12 +120,22 @@ object HistoryBackup {
             need(m.ownName.toByteArray(Charsets.UTF_8).size in 1..ContactsBackup.MAX_NAME_BYTES && m.ownColour in 0..0xFFFFFF)
         }
 
+        private fun declared(type: Int): Int = when (type) {
+            CONTACT -> m.contacts; CHAT -> m.chats; MESSAGE -> m.messages; REACTION -> m.reactions; PICTURE -> m.pictures
+            else -> 0
+        }
+
+        /** Each family stays within its declared count, and is complete before the next family starts (review A-03). */
         private fun next(type: Int, id: Long) {
             need(type >= rank)
-            if (type > rank) { rank = type; lastId = 0 }
+            if (type > rank) {
+                for (t in maxOf(rank, CONTACT) until type) need(seen[t - 1] == declared(t))
+                rank = type; lastId = 0
+            }
             need(id > lastId)
             lastId = id
             seen[type - 1]++
+            need(seen[type - 1] <= declared(type))
         }
 
         fun accept(r: Record) {
@@ -197,7 +207,7 @@ object HistoryBackup {
         init {
             frame(MANIFEST, RecordWriter().apply {
                 val m = manifest
-                u16(SCHEMA); point(m.sourceIdentity); u64(m.createdAt); u64(m.generation); str(m.ownName, 1, ContactsBackup.MAX_NAME_BYTES)
+                u16(SCHEMA); identity(m.sourceIdentity); u64(m.createdAt); u64(m.generation); name(m.ownName, ContactsBackup.MAX_NAME_BYTES)
                 rgb(m.ownColour); u64(m.scopeStart); u64(m.scopeEnd); u16(m.scopeFlags)
                 u32(m.contacts); u32(m.chats); u32(m.messages); u32(m.reactions); u32(m.pictures); u32(m.missingPictures)
             }.bytes())
@@ -225,7 +235,7 @@ object HistoryBackup {
     private fun encode(r: Record): Pair<Int, ByteArray> = when (r) {
         is Contact -> CONTACT to RecordWriter().apply {
             val c = r.contact
-            u64(c.id); point(c.identity); blob(c.card); str(c.savedName, 1, ContactsBackup.MAX_NAME_BYTES); rgb(c.colour)
+            u64(c.id); point(c.identity); blob(c.card); name(c.savedName, ContactsBackup.MAX_NAME_BYTES); rgb(c.colour)
             u8(if (c.historicalMet) 1 else 0); optstr(c.voice, ContactsBackup.MAX_VOICE_BYTES); u64(c.addedAt)
         }.bytes()
         is Chat -> CHAT to RecordWriter().apply { u64(r.id); u8(r.kind); u64(r.contactId); str(r.title, 0, 256); u8(if (r.pinned) 1 else 0) }.bytes()
@@ -271,7 +281,7 @@ object HistoryBackup {
         need(firstType == MANIFEST)
         val m = RecordReader(mp).run {
             need(u16() == SCHEMA)
-            val manifest = Manifest(point(), u64(), u64(), str(1, ContactsBackup.MAX_NAME_BYTES), rgb(), u64(), u64(), u16(),
+            val manifest = Manifest(identity(), u64(), u64(), name(ContactsBackup.MAX_NAME_BYTES), rgb(), u64(), u64(), u16(),
                 u32(), u32(), u32(), u32(), u32(), u32())
             end(); manifest
         }
@@ -292,7 +302,7 @@ object HistoryBackup {
 
     private fun decode(type: Int, p: RecordReader): Record {
         val r = when (type) {
-            CONTACT -> Contact(ContactsBackup.Contact(p.u64(), p.point(), p.blob(256), p.str(1, ContactsBackup.MAX_NAME_BYTES), p.rgb(),
+            CONTACT -> Contact(ContactsBackup.Contact(p.u64(), p.point(), p.blob(256), p.name(ContactsBackup.MAX_NAME_BYTES), p.rgb(),
                 p.flag(), p.optstr(ContactsBackup.MAX_VOICE_BYTES), p.u64()))
             CHAT -> Chat(p.u64(), p.u8(), p.u64(), p.str(0, 256), p.flag())
             MESSAGE -> {

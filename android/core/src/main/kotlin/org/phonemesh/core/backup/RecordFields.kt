@@ -5,6 +5,8 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.security.MessageDigest
+import org.phonemesh.core.account.Names
+import org.phonemesh.core.crypto.P256
 
 /** Fields of saved-copy records (backup spec 5.5), shared by contacts-only and full chat copies. Big-endian. */
 internal class RecordBad : Exception()
@@ -36,6 +38,10 @@ internal class RecordWriter {
         u16(b.size); raw(b)
     }
     fun optstr(s: String?, max: Int) = if (s == null) u16(ABSENT) else str(s, 0, max)
+    /** A person's name: the app's name rules ([Names.valid]: NFC, no control, format or bidi characters) and a byte cap. */
+    fun name(s: String, max: Int) { require(Names.valid(s)) { "not a name" }; str(s, 1, max) }
+    /** An identity that must be a point on the curve. */
+    fun identity(p: ByteArray) { require(P256.decompress(p) != null) { "not an identity" }; point(p) }
 }
 
 internal class RecordReader(bytes: ByteArray) {
@@ -64,6 +70,8 @@ internal class RecordReader(bytes: ByteArray) {
         need(displayable(s))
         return s
     }
+    fun name(max: Int): String = str(1, max).also { need(Names.valid(it)) }
+    fun identity(): ByteArray = point().also { need(P256.decompress(it) != null) }
     fun end() = need(!b.hasRemaining())
 
     private fun utf8(raw: ByteArray): String = try {

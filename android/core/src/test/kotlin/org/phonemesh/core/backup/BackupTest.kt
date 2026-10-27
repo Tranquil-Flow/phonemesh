@@ -188,6 +188,39 @@ class BackupTest {
         assertNull(ContactsBackup.decode(plain.copyOfRange(0, endAt) + extra + plain.copyOfRange(endAt, plain.size)))
     }
 
+    /** The copy re-closed with a valid END after [patch] changed bytes before END (contacts-only layout). */
+    private fun reclose(plain: ByteArray, patch: (ByteArray) -> Unit): ByteArray {
+        val endAt = plain.size - (6 + 48)
+        val before = plain.copyOfRange(0, endAt).also(patch)
+        val records = 1 + ContactsBackup.decode(plain)!!.contacts.size
+        val end = java.nio.ByteBuffer.allocate(48).putLong(records.toLong()).putLong(before.size.toLong())
+            .put(java.security.MessageDigest.getInstance("SHA-256").digest(before)).array()
+        return before + byteArrayOf(0xFF.toByte(), 0, 0, 0, 0, 48) + end
+    }
+
+    /** Review A-04: names follow the app's name rules and the source identity is a curve point, both ways. */
+    @Test fun namesFollowTheNameRulesAndTheSourceIsAnIdentity() {
+        val c = copy()
+        assertNotNull("re-closing an untouched copy keeps it valid", ContactsBackup.decode(reclose(ContactsBackup.encode(c)) {}))
+        fun bad(name: String) = ContactsBackup.Copy(c.manifest, listOf(ContactsBackup.Contact(1, g, g, name, 0, false, null, 0)))
+        for (name in listOf("Kof\u00AD", "Kofi\u202E", "e\u0301", " ")) {
+            assertTrue(name, runCatching { ContactsBackup.encode(bad(name)) }.isFailure)
+        }
+        assertTrue(runCatching { ContactsBackup.encode(ContactsBackup.Copy(ContactsBackup.Manifest(g, 0, 0, "A\u200F", 0), emptyList())) }.isFailure)
+        val offCurve = g.copyOf().also { it[0] = 5 }
+        assertTrue(runCatching { ContactsBackup.encode(ContactsBackup.Copy(ContactsBackup.Manifest(offCurve, 0, 0, "A", 0), emptyList())) }.isFailure)
+        // Reading: the same rules, with a correctly re-closed END, so only the rule can refuse.
+        val plain = ContactsBackup.encode(ContactsBackup.Copy(c.manifest, listOf(ContactsBackup.Contact(1, g, g, "Kofii", 0, false, null, 0))))
+        val at = plain.indexOfSlice("Kofii".toByteArray())
+        val hidden = reclose(plain) { b -> "Kof\u00AD".toByteArray().copyInto(b, at) }
+        assertNull("a soft hyphen hides in a name", ContactsBackup.decode(hidden))
+        val sourceAt = 6 + 2
+        val wrongSource = reclose(plain) { b -> b[sourceAt] = 5 }
+        assertNull("the source identity is a point", ContactsBackup.decode(wrongSource))
+    }
+
+    private fun ByteArray.indexOfSlice(s: ByteArray): Int = (0..size - s.size).first { i -> s.indices.all { this[i + it] == s[it] } }
+
     @Test fun cardsMustBeTheirsAndIdentitiesUnique() {
         val c = copy()
         fun with(vararg contacts: ContactsBackup.Contact) = ContactsBackup.Copy(c.manifest, contacts.toList())

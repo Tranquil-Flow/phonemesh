@@ -48,7 +48,7 @@ object ContactsBackup {
         }
         val m = copy.manifest
         frame(MANIFEST, RecordWriter().apply {
-            u16(SCHEMA); point(m.sourceIdentity); u64(m.createdAt); u64(m.generation); str(m.ownName, 1, MAX_NAME_BYTES)
+            u16(SCHEMA); identity(m.sourceIdentity); u64(m.createdAt); u64(m.generation); name(m.ownName, MAX_NAME_BYTES)
             rgb(m.ownColour); u64(0); u64(0); u16(0); u32(copy.contacts.size); repeat(5) { u32(0) }
         }.bytes())
         var last = 0L
@@ -57,7 +57,7 @@ object ContactsBackup {
             last = c.id
             require(validCard(c.identity, c.card)) { "contact ${c.id} has a card that is not theirs" }
             frame(CONTACT, RecordWriter().apply {
-                u64(c.id); point(c.identity); blob(c.card); str(c.savedName, 1, MAX_NAME_BYTES); rgb(c.colour)
+                u64(c.id); point(c.identity); blob(c.card); name(c.savedName, MAX_NAME_BYTES); rgb(c.colour)
                 u8(if (c.historicalMet) 1 else 0); optstr(c.voice, MAX_VOICE_BYTES); u64(c.addedAt)
             }.bytes())
         }
@@ -86,10 +86,10 @@ object ContactsBackup {
         val (firstType, m) = next()
         need(firstType == MANIFEST)
         need(m.u16() == SCHEMA)
-        val source = m.point()
+        val source = m.identity()
         val created = m.u64()
         val generation = m.u64()
-        val ownName = m.str(1, MAX_NAME_BYTES)
+        val ownName = m.name(MAX_NAME_BYTES)
         val ownColour = m.rgb()
         need(m.u64() == 0L && m.u64() == 0L && m.u16() == 0)
         val count = m.u32()
@@ -109,7 +109,7 @@ object ContactsBackup {
             val card = c.blob(256)
             need(validCard(identity, card))
             need(seen.add(identity.toList()))
-            val name = c.str(1, MAX_NAME_BYTES)
+            val name = c.name(MAX_NAME_BYTES)
             val colour = c.rgb()
             val met = when (c.u8()) { 0 -> false; 1 -> true; else -> throw RecordBad() }
             val voice = c.optstr(MAX_VOICE_BYTES)

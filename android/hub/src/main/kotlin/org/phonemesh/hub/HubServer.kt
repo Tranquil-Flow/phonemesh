@@ -66,8 +66,11 @@ class HubServer(private val hub: Hub, private val mailbox: Mailbox, private val 
         val wait = (q["wait"]?.toLongOrNull() ?: 0).coerceIn(0, 30)
         val codes = ex.requestBody.readNBytes(MAX_CODES * 17 + 1).toString(Charsets.US_ASCII)
             .lineSequence().map { it.trim().lowercase() }.filter { CODE.matches(it) }.take(MAX_CODES).toSet()
+        hub.listened(codes)
         val found = mailbox.await(since, codes, q["hellos"] == "1", q["shared"] == "1", wait * 1000)
         reply(ex, 200, found.joinToString("") { "${it.seq} ${it.port} ${Mailbox.hex(it.bytes)}\n" })
+        // Answered in full: what this phone took over Wi-Fi need not go by radio (AE7).
+        hub.fetched(found.filter { it.kind == Mailbox.Kind.CODE }.map { it.port to it.bytes })
     }
 
     private fun handle(ex: HttpExchange, body: (HttpExchange) -> Unit) {

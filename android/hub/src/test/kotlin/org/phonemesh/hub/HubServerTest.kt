@@ -85,6 +85,23 @@ class HubServerTest {
         assertEquals(405, call("/send?port=301").first)
     }
 
+    /** AE7: a phone on the hub's Wi-Fi gets its mail there, and the hub spends no radio time on it. */
+    @Test fun mailFetchedOverWifiIsNotSentByRadio() {
+        val code = Mailbox.hex(Packets.code(4)).toByteArray()
+        assertEquals(200 to "", call("/mail?since=0&wait=0", code))
+        assertEquals(200 to "stored\n", call("/send?port=301", Packets.message(4, 228)))
+        hub.tick()
+        assertTrue("held for the phone on the Wi-Fi", radio.sent.isEmpty())
+        val got = call("/mail?since=0&wait=0", code).second
+        assertTrue(got.trim().endsWith(Mailbox.hex(Packets.message(4, 228))))
+        repeat(3) { hub.tick() }
+        assertTrue("fetched: never aired", radio.sent.isEmpty())
+        assertTrue(hub.waiting().isEmpty())
+        // Mail for a phone not on the Wi-Fi goes by radio at once.
+        call("/send?port=301", Packets.message(5)); hub.tick()
+        assertEquals(1, radio.sent.size)
+    }
+
     /** Two phones with a real session: one hands a sealed message to the hub, the other's long poll gets it and opens it. */
     @Test fun aRealMessageGoesThroughTheHub() {
         val a = SoftKeys.generate(); val b = SoftKeys.generate()

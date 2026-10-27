@@ -104,6 +104,52 @@ class HubTest {
         assertEquals(2115.584, Airtime().millis(228), 0.001)
     }
 
+    // ---- AE7: same-hub Wi-Fi delivery first
+
+    private fun codeOf(bytes: ByteArray) = Mailbox.hex(org.phonemesh.core.wire.WireV2.parse(bytes)!!.header.code)
+
+    @Test fun mailForAPhoneOnTheWifiIsNotAiredOnceItIsFetched() {
+        val hub = hub()
+        val packet = message(5, 228)
+        hub.listened(setOf(codeOf(packet)))
+        assertEquals(Hub.Sent.STORED, hub.fromPhone("sender", 301, packet))
+        run(hub, 60)
+        assertTrue("waits for the phone on the Wi-Fi", radio.sent.none { it.first == 301 })
+        hub.fetched(listOf(301 to packet))
+        run(hub, 600)
+        assertTrue("fetched over Wi-Fi: no radio time spent", radio.sent.none { it.first == 301 })
+        assertTrue(logs.any { "fetched over Wi-Fi" in it })
+        val other = message(9, 228)
+        hub.fromPhone("sender", 301, other)
+        run(hub, 3)
+        assertTrue("the radio still works for everything else", radio.sent.any { it.second.contentEquals(other) })
+    }
+
+    @Test fun notFetchedInTimeItGoesByRadio() {
+        val hub = hub()
+        val packet = message(6, 40)
+        hub.listened(setOf(codeOf(packet)))
+        hub.fromPhone("sender", 301, packet)
+        run(hub, 100)
+        assertTrue(radio.sent.none { it.first == 301 })
+        run(hub, 40)
+        assertTrue("after the grace, the radio", radio.sent.any { it.first == 301 && it.second.contentEquals(packet) })
+    }
+
+    @Test fun mailForAPhoneNotOnTheWifiGoesAtOnceAndOldListeningExpires() {
+        val hub = hub()
+        val away = message(7, 40)
+        hub.listened(setOf(codeOf(message(8, 40))))
+        hub.fromPhone("sender", 301, away)
+        run(hub, 3)
+        assertTrue(radio.sent.any { it.second.contentEquals(away) })
+        now += Hub.LISTEN_FRESH_MILLIS + 1
+        val later = message(8, 40)
+        hub.fromPhone("sender", 301, later)
+        run(hub, 3)
+        assertTrue("a phone not heard from lately is not waited for", radio.sent.any { it.second.contentEquals(later) })
+    }
+
     @Test fun aPhoneCannotFillTheQueueForever() {
         val hub = hub()
         repeat(Hub.MAX_QUEUED) { assertEquals(Hub.Sent.STORED, hub.fromPhone("p", 301, message(it))) }

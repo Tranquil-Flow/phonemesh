@@ -28,6 +28,8 @@ class Hub(
     private var turn = 0
     /** Radio time each sender used in the last hour, for fairness (not persisted: a restart starts everyone equal). */
     private val usedBy = HashMap<String, DutyCycle>()
+    /** Recipient codes phones on this hub's Wi-Fi asked for, and when (AE7). Memory only: codes, no phone address. */
+    private val listening = HashMap<String, Long>()
     private var radioFreeAt = outbox.freeAt
     private var storageRetryAt = 0L
     private val uncertain = HashSet<Outgoing>()
@@ -83,11 +85,41 @@ class Hub(
             return Sent.ALREADY
         }
         if ((queues[phone]?.size ?: 0) >= MAX_QUEUED || outbox.entries.size >= Outbox.MAX_PENDING) return Sent.BUSY
+        // AE7: when the recipient's phone is on this hub's Wi-Fi, give it a moment to fetch the packet before radio.
+        val local = port == WireV2.PORT && mailbox.classify(port, bytes)?.second?.let { code ->
+            listening[code]?.let { now - it <= LISTEN_FRESH_MILLIS }
+        } == true
+        val holdUntil = if (local) now + LOCAL_GRACE_MILLIS else 0L
         // Write-ahead phone intent precedes mailbox publication and therefore precedes HTTP 200.
-        outbox.add(Outbox.Entry(phone, port, bytes, clock()))
-        queues.getOrPut(phone) { ArrayDeque() }.addLast(Outgoing(port, bytes, id))
+        outbox.add(Outbox.Entry(phone, port, bytes, clock(), retryAt = holdUntil))
+        queues.getOrPut(phone) { ArrayDeque() }.addLast(Outgoing(port, bytes, id, holdUntil))
         mailbox.put(port, bytes, clock())
         return Sent.STORED
+    }
+
+    /** A phone on the Wi-Fi asked for mail to [codes] (hex): packets for them may wait for that phone (AE7). */
+    @Synchronized fun listened(codes: Set<String>) {
+        val now = clock()
+        listening.entries.removeAll { now - it.value > LISTEN_FRESH_MILLIS }
+        for (code in codes.take(MAX_LISTENING)) listening[code.lowercase()] = now
+        while (listening.size > MAX_LISTENING) listening.remove(listening.minByOrNull { it.value }!!.key)
+    }
+
+    /**
+     * A phone on the Wi-Fi took these packets (AE7): its own receipt, not the hub, will tell the sender. Packets still
+     * waiting for the radio are not aired; one already handed to the radio is not affected. A sender's later retry
+     * (no receipt yet) still goes by radio, as before.
+     */
+    @Synchronized fun fetched(packets: List<Pair<Int, ByteArray>>) {
+        for ((port, bytes) in packets) {
+            if (port != WireV2.PORT) continue
+            val id = Outbox.key(port, bytes)
+            val queued = queues.values.flatMap { it.toList() }.filter { it.id == id && it !in uncertain && it !in completed }
+            if (queued.isEmpty()) continue
+            outbox.remove(id)
+            queued.forEach(::discard)
+            log("fetched over Wi-Fi; not aired")
+        }
     }
 
     private fun mayRetry(id: String, firstStored: Long, now: Long): Boolean {
@@ -228,5 +260,10 @@ class Hub(
         const val APP_SHARE_PERCENT = 5
         /** Packets below this many bytes go first: receipts, acknowledgements and most texts. */
         const val SHORT_BYTES = 128
+        /** How long a packet for a phone on the Wi-Fi waits for it before the radio (AE7). */
+        const val LOCAL_GRACE_MILLIS = 120_000L
+        /** A phone counts as on the Wi-Fi for this long after it last asked for mail (it asks every 30 s or less). */
+        const val LISTEN_FRESH_MILLIS = 90_000L
+        const val MAX_LISTENING = 4_000
     }
 }

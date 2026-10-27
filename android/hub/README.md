@@ -196,6 +196,12 @@ pieces. Among phones, the one that used the least radio time in the last hour go
 Phones' packets together get at most **180 seconds an hour** (5 %), inside `duty`, so
 relays and acknowledgements keep room. The hub cannot read private mail, so packet size
 is the only sign of what a packet is.
+
+When the recipient's phone is on the hub's Wi-Fi (it asked for mail in the last 90
+seconds), a new private packet for it waits up to **2 minutes** for that phone to fetch
+it. A packet fetched over Wi-Fi is not sent by radio; the recipient's receipt tells the
+sender as usual. A later resend by the sender still goes by radio. The hub keeps the
+recipient codes it was asked for in memory only, for 90 seconds, with no phone address.
 Atomic replacement and file sync support process-restart recovery, not sudden
 power-loss safety (the directory is not synced), exactly-once radio submission or
 guaranteed delivery. A crash around serial submission can cause a duplicate attempt.

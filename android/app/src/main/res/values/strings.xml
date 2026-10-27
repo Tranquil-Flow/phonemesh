@@ -307,6 +307,15 @@
     <string name="picture_open">Open</string>
     <string name="picture_forward_title">Forward this picture</string>
     <string name="picture_time">About %1$d seconds on the radio</string>
+    <string name="radio_time_one">About 1 second on the radio</string>
+    <string name="radio_time_minute">About 1 minute on the radio</string>
+    <string name="radio_time_minutes">About %1$d minutes on the radio</string>
+    <string name="radio_time_unknown">Radio settings are unknown.</string>
+    <string name="radio_time_title">Radio time</string>
+    <string name="radio_time_estimate">Radio time is an estimate.</string>
+    <string name="radio_time_not_delivery">This is not a delivery time.</string>
+    <string name="radio_time_shared">Everyone shares this radio.</string>
+    <string name="radio_time_others">Other messages can make yours wait.</string>
     <string name="picture_heavy">Uses much of this hour\'s radio time</string>
     <string name="picture_arriving">Picture arriving: %1$d%%</string>
     <string name="picture_sending">Sending picture: %1$d%%</string>

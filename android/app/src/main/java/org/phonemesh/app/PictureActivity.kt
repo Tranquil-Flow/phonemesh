@@ -292,12 +292,12 @@ class PictureActivity : ScreenActivity() {
         showPictureControls(true)
         // The other phone's pixels, enlarged smoothly: what it will show.
         preview.setImageDrawable(BitmapDrawable(resources, picture.preview).apply { isFilterBitmap = true })
-        val seconds = core.pictureSeconds(picture)
-        info.text = getString(R.string.picture_time, ceil(seconds).toInt().coerceAtLeast(1))
+        val seconds = core.pictureSeconds(chatId, picture)
+        info.text = Looks.radioTime(this, org.phonemesh.core.RadioTime.shown(seconds))
         info.setTextColor(palette.text)
-        heavy.visibility = if (seconds > HEAVY_SECONDS) View.VISIBLE else View.GONE
+        heavy.visibility = if (seconds != null && seconds > HEAVY_SECONDS) View.VISIBLE else View.GONE
         details.text = "${picture.width}×${picture.height} px · ${picture.bytes.size} B + ${picture.sketch.size} B sketch · " +
-            "q${picture.quality} · ${"%.1f".format(seconds)} s · ${core.radioShape().let { "SF${it.sf}/${it.bandwidthKhz.toInt()}" }}"
+            "q${picture.quality} · ${seconds?.let { "%.1f".format(it) } ?: "?"} s · ${core.knownShape()?.let { "SF${it.sf}/${it.bandwidthKhz.toInt()}" } ?: "?"}"
         Ui.enable(sendButton, true)
     }
 

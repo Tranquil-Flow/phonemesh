@@ -41,6 +41,7 @@ import org.phonemesh.core.PackStore
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.LoraAirtime
 import org.phonemesh.core.LoraShape
+import org.phonemesh.core.RadioTime
 import org.phonemesh.core.PictureAssembler
 import org.phonemesh.core.PictureCodec
 import org.phonemesh.core.PictureSender
@@ -1790,15 +1791,52 @@ class AppCore private constructor(
         return chat.kind == ChatKind.PERSON && history.sessionRow(chat.address) != null
     }
 
-    /** The connected radio's modulation for time-on-air estimates; LongFast (the default) when unknown. */
-    fun radioShape(): LoraShape = (if (connected) radio.modemPreset() else null)?.let { LoraAirtime.preset(it) } ?: LoraAirtime.DEFAULT
+    /**
+     * The connected radio's modulation for radio-time estimates. Null when no radio is connected or its setting is not
+     * one Meshtastic names: the airtime meter never guesses LongFast (airtime spec 6.1).
+     */
+    fun knownShape(): LoraShape? = (if (connected) radio.modemPreset() else null)?.let { LoraAirtime.preset(it) }
 
-    /** Estimated seconds on air for [picture], one hop, every packet with its acknowledgement. */
-    fun pictureSeconds(picture: PreparedPicture): Double {
+    /**
+     * Radio time of [picture] sent to [chatId]'s person now (airtime meter, AM3 A): the packets [sendPicture] would
+     * seal, key and riding receipt included, each sent once on one hop. Null when the radio setting or session is
+     * unknown. Nothing is sealed or kept.
+     */
+    fun pictureSeconds(chatId: Long, picture: PreparedPicture): Double? {
+        val shape = knownShape() ?: return null
+        val chat = history.chat(chatId)?.takeIf { it.kind == ChatKind.PERSON } ?: return null
         val packets = PictureWire.splitV2(0, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
-        // Each packet also carries wire v2's kind byte, header and tag.
-        val overhead = 1 + org.phonemesh.core.wire.WireV2.PLAIN_HEADER + org.phonemesh.core.crypto.Aead.TAG
-        return LoraAirtime.pictureSeconds(packets.map { PictureWire.encodeV2(it).size + overhead }, radioShape())
+        val bodies = packets.map { p -> PictureWire.encodeV2(p).let { if (p is PictureWire.Head) Body.PictureHead(it) else Body.PicturePart(it) } }
+        val sizes = runCatching { postman.sizes(AppMailStore.idOf(chat.address), bodies) }.getOrNull() ?: return null
+        return RadioTime.seconds(sizes, shape)
+    }
+
+    /**
+     * Radio time of [chatId]'s draft as [send] would put it on the radio now (airtime meter, AM1-AM2 A): the same body
+     * or post bytes, priced on the connected radio's setting. Null when there is no sendable draft;
+     * [RadioTime.Shown.Unknown] when the setting (or a person's session) is unknown. Nothing is sealed or kept.
+     */
+    fun draftRadioTime(chatId: Long): RadioTime.Shown? {
+        val text = drafts[chatId]?.trim().orEmpty()
+        if (fitFor(chatId, text) != DraftFit.FITS) return null
+        val chat = history.chat(chatId)?.takeIf { it.kind != ChatKind.DIRECT } ?: return null
+        val shape = knownShape() ?: return RadioTime.Shown.Unknown
+        val language = currentLanguage().tag
+        val replyTo = replyTarget(chatId)?.packetId
+        val payload = runCatching {
+            when {
+                chat.kind == ChatKind.PERSON -> postman.sizes(AppMailStore.idOf(chat.address), listOf(personBody(text, language, replyTo)))
+                    ?.let { RadioTime.PRIVATE_PORT to it }
+                replyTo != null && replyTo < REF_FLOOR ->
+                    RadioTime.TEXT_PORT to listOf(MessageCodec.encode(text, language).toByteArray(Charsets.UTF_8).size)
+                else -> sharedIdentity()?.let { id ->
+                    val kind = if (replyTo != null) SharedPost.Kind.REPLY else SharedPost.Kind.TEXT
+                    MeshRadio.SHARED_CHAT_PORT to listOf(
+                        sharedFrame(id, kind, language, text, replyTo?.let { AppMailStore.refBytes(it) }, System.currentTimeMillis()).size)
+                }
+            }
+        }.getOrNull()
+        return RadioTime.shown(payload?.let { (port, sizes) -> RadioTime.seconds(sizes, shape, port) })
     }
 
     /**

@@ -55,6 +55,22 @@ class Postman(
             send(contact, if (packet is PictureWire.Head) Body.PictureHead(bytes) else Body.PicturePart(bytes), messageId, now)
         }
 
+    /**
+     * The packet sizes [bodies] would have if sent to [contact] now, in order (airtime meter): the key announcement
+     * and a riding receipt as [seal] would add them. Nothing is sealed, stepped or stored. Null without a session.
+     */
+    fun sizes(contact: AccountId, bodies: List<Body>): List<Int>? {
+        val state = store.session(contact) ?: return null
+        val ack = Ratchet.ack(state)
+        val encoded = bodies.map { body ->
+            val plain = Body.encode(body).size
+            if (body !is Body.Receipt && ack != null && plain + Ack.SIZE <= WireV2.maxBody(false)) plain + Ack.SIZE else plain
+        }
+        return encoded.zip(Ratchet.keyed(state, encoded)) { size, keyed ->
+            (if (keyed) WireV2.KEYED_HEADER else WireV2.PLAIN_HEADER) + size + org.phonemesh.core.crypto.Aead.TAG
+        }
+    }
+
     private fun seal(contact: AccountId, state: SessionState, body: Body, messageId: Long?, now: Long, heldId: Long? = null): Out {
         // An acknowledgement is optional: a full-sized text/reply must not overflow merely because we heard mail.
         // Keep its quiet-period obligation when it cannot ride on this packet.

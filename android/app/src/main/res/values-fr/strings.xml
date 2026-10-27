@@ -303,6 +303,15 @@
     <string name="picture_open">Ouvrir</string>
     <string name="picture_forward_title">Transférer cette photo</string>
     <string name="picture_time">Environ %1$d secondes à la radio</string>
+    <string name="radio_time_one">Environ 1 seconde à la radio</string>
+    <string name="radio_time_minute">Environ 1 minute à la radio</string>
+    <string name="radio_time_minutes">Environ %1$d minutes à la radio</string>
+    <string name="radio_time_unknown">Les réglages radio sont inconnus.</string>
+    <string name="radio_time_title">Temps radio</string>
+    <string name="radio_time_estimate">Le temps radio est une estimation.</string>
+    <string name="radio_time_not_delivery">Ce n\'est pas un délai de réception.</string>
+    <string name="radio_time_shared">Tout le monde partage cette radio.</string>
+    <string name="radio_time_others">D\'autres messages peuvent faire attendre le vôtre.</string>
     <string name="picture_heavy">Prend beaucoup du temps radio de l\'heure</string>
     <string name="picture_arriving">Photo en route : %1$d %%</string>
     <string name="picture_sending">Envoi de la photo : %1$d %%</string>

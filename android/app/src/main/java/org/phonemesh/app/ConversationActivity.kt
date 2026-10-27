@@ -84,6 +84,7 @@ class ConversationActivity : ScreenActivity() {
     private lateinit var draftText: TextView
     private lateinit var draftEdit: EditText
     private lateinit var tooLong: TextView
+    private lateinit var radioTime: TextView
     private lateinit var cutNotice: View
     private lateinit var cutPanel: HowToPanel
     private lateinit var micBar: LinearLayout
@@ -319,6 +320,19 @@ class ConversationActivity : ScreenActivity() {
         draftBox.addView(draftText)
         draftBox.addView(draftEdit)
         draftBox.addView(tooLong)
+        // Airtime meter (AM2 A): how long the radio sends this draft, under it; tap for what that means.
+        radioTime = Ui.text(this, "", palette.text).apply {
+            tag = "draft_radio_time"
+            visibility = View.GONE
+            isClickable = true
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = Ui.dp(this@ConversationActivity, 48)
+            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_radio_on, 0, 0, 0)
+            compoundDrawablePadding = pad() / 2
+            compoundDrawableTintList = ColorStateList.valueOf(palette.text)
+            setOnClickListener { explainRadioTime() }
+        }
+        draftBox.addView(radioTime)
         later = Ui.button(this, palette, getString(R.string.later), R.drawable.ic_clock).apply {
             tag = "draft_later"
             setOnClickListener { askWhenToSend() }
@@ -706,6 +720,25 @@ class ConversationActivity : ScreenActivity() {
         playDraft.imageTintList = ColorStateList.valueOf(if (playing) palette.background else palette.onAccent)
         playDraft.contentDescription = getString(if (playing) R.string.stop_listening else R.string.listen)
         Ui.enable(playDraft, fit != DraftFit.EMPTY)
+        // Never over the region card or the cut notice, and not in a low window: Send must stay on screen (airtime spec 6.3).
+        val crowded = !roomy || core.region.blocksSending || core.region.phase != RegionPhase.Idle || cutNotice.visibility == View.VISIBLE
+        val time = if (crowded) null else core.draftRadioTime(chatId)
+        radioTime.visibility = if (time != null) View.VISIBLE else View.GONE
+        if (time != null) Looks.radioTime(this, time).let { radioTime.text = it; radioTime.contentDescription = it }
+    }
+
+    /** What the radio time means (airtime spec 6.2): an estimate of sending, not of arriving, on a shared radio. */
+    private fun explainRadioTime() {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(), pad() / 2, pad(), 0)
+        }
+        for (id in listOf(R.string.radio_time_estimate, R.string.radio_time_not_delivery, R.string.radio_time_shared, R.string.radio_time_others)) {
+            box.addView(Ui.text(this, getString(id), palette.text).apply { setPadding(0, pad() / 4, 0, pad() / 4) })
+        }
+        dialog?.dismiss()
+        dialog = Actions.readable(AlertDialog.Builder(this).setTitle(R.string.radio_time_title).setView(box)
+            .setPositiveButton(R.string.close, null).create()).apply { show() }
     }
 
     private fun renderMic(recordingHere: Boolean) {

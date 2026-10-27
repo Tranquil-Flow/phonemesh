@@ -138,6 +138,22 @@ object Ratchet {
         return Opened.NotMine
     }
 
+    /**
+     * Whether bodies of [sizes] bytes, sealed one after another from [state] now, would each carry the key
+     * announcement, exactly as [seal] decides, without stepping or making keys (the airtime meter's estimate).
+     */
+    fun keyed(state: SessionState, sizes: List<Int>): List<Boolean> {
+        var stepped = false
+        var heard = state.heard
+        return sizes.map { size ->
+            val fits = size <= WireV2.maxBody(true)
+            val stepDue = !stepped && state.mayStep && (heard || state.mustStep)
+            val stepNow = stepDue && (fits || state.mustStep)
+            if (stepNow) { stepped = true; heard = false }
+            fits && (stepped || state.announcing)
+        }
+    }
+
     /** "Delivered to their phone" for the chain this phone receives now; null before anything arrived in it. */
     fun ack(state: SessionState): Ack? {
         if (state.nr == 0L) return null

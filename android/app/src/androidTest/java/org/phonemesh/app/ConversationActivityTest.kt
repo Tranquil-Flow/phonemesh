@@ -382,6 +382,40 @@ class ConversationActivityTest {
         assertTrue(TestCore.radio.sent.isEmpty())
     }
 
+    /** Airtime meter AM1-AM2 A: a fitting draft shows its radio time on the radio's own setting, never a guess. */
+    @Test fun aDraftShowsItsRadioTimeOnlyWhileItFitsAndTheSettingIsKnown() {
+        TestCore.install()
+        val group = TestCore.onMain { core.groupChatId() }
+        TestCore.onMain { core.setDraft(group, "Bonjour") }
+        val a = open(group)
+        // A short shared post on LongFast: under a second, shown as one.
+        assertEquals("Environ 1 seconde à la radio", Views.textOf(Views.tagged(a, "draft_radio_time")!!))
+        Views.tap(a, "draft_text")
+        val edit = Views.tagged(a, "draft_edit") as EditText
+        // 150 letters make a post over 127 bytes: more than 1.4 s and under the 2.2 s of a full packet.
+        TestCore.onMain { edit.setText("a".repeat(150)) }
+        inst.waitForIdleSync()
+        assertEquals("Environ 2 secondes à la radio", Views.textOf(Views.tagged(a, "draft_radio_time")!!))
+        Views.finish(a)
+        // Typing cannot overflow (the field's filter); an old oversized draft can.
+        TestCore.onMain { core.setDraft(group, "a".repeat(300)) }
+        val long = open(group)
+        assertNotNull(Views.tagged(long, "too_long"))
+        assertNull("no time for a draft that cannot go", Views.tagged(long, "draft_radio_time"))
+        Views.finish(long)
+        TestCore.onMain { core.setDraft(group, "Bonjour"); TestCore.radio.modemPreset = "CUSTOM" }
+        val custom = open(group)
+        assertEquals("an unknown setting is not LongFast", "Les réglages radio sont inconnus.",
+            Views.textOf(Views.tagged(custom, "draft_radio_time")!!))
+        assertTrue("nothing was sent to price it", TestCore.radio.sent.isEmpty())
+        Views.tap(custom, "draft_radio_time")
+        inst.waitForIdleSync()
+        val explained = checkNotNull(custom.dialogForTest)
+        val lines = TestCore.onMain { Views.descendants(explained.window!!.decorView).mapNotNull { (it as? android.widget.TextView)?.text?.toString() } }
+        assertTrue(lines.toString(), "Ce n'est pas un délai de réception." in lines && "Le temps radio est une estimation." in lines)
+        assertEquals(emptyList<String>(), A11yCheck.problems(explained))
+    }
+
     @Test fun anOldOversizedDraftStaysIntactUntilDeleted() {
         TestCore.install()
         val group = TestCore.onMain { core.groupChatId() }

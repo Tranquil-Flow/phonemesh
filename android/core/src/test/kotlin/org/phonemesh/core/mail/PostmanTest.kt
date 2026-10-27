@@ -109,6 +109,29 @@ class PostmanTest {
     private fun text(s: String) = Body.Text("fr", s)
     private fun texts(got: List<Postman.Received?>) = got.mapNotNull { (it?.body as? Body.Text)?.text }
 
+    /** Airtime meter: the sizes estimated before sending are the sizes sent, including key and receipt. */
+    @Test fun estimatedSizesAreTheSizesSent() {
+        for (link in listOf(false, true)) {
+            val (a, b) = pair(link)
+            fun exchange(from: Side, to: Side, text: String) {
+                val out = from.postman.send(from.them, text(text), null, 0)!!
+                from.postman.transmitted(out.outboxId)
+                to.postman.receive(out.packet, 1_000)
+            }
+            val bodies = listOf(text("x"), text("y".repeat(150)), text("z".repeat(185)), Body.ProfileUpdate(
+                org.phonemesh.core.account.Profile("Awa", 0x123456, revision = 3)))
+            repeat(3) { round ->
+                for ((side, other) in listOf(a to b, b to a)) {
+                    val predicted = side.postman.sizes(side.them, bodies)!!
+                    val sent = bodies.map { body -> side.postman.send(side.them, body, null, 0)!!.also { side.postman.transmitted(it.outboxId) } }
+                    assertEquals("link=$link round $round", predicted, sent.map { it.packet.size })
+                    sent.forEach { other.postman.receive(it.packet, 1_000) }
+                }
+                exchange(a, b, "r$round")
+            }
+        }
+    }
+
     /** Profile spec PF5: a changed profile is a private body like a text, delivered once and acknowledged. */
     @Test fun aProfileUpdateIsDeliveredAndAcknowledged() {
         val (a, b) = pair()

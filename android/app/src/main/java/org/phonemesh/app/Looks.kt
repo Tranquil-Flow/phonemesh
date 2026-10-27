@@ -14,6 +14,15 @@ import org.phonemesh.core.DeliveryStatus
 data class StatusLook(val icon: Int, val color: Int, val label: Int, val showLabel: Boolean)
 
 object Looks {
+    /** Radio time as people read it (airtime spec 6.5): whole seconds, then whole minutes, or that the setting is unknown. */
+    fun radioTime(context: android.content.Context, shown: org.phonemesh.core.RadioTime.Shown): String = when (shown) {
+        is org.phonemesh.core.RadioTime.Shown.Seconds ->
+            if (shown.n == 1) context.getString(R.string.radio_time_one) else context.getString(R.string.picture_time, shown.n)
+        is org.phonemesh.core.RadioTime.Shown.Minutes ->
+            if (shown.n == 1) context.getString(R.string.radio_time_minute) else context.getString(R.string.radio_time_minutes, shown.n)
+        org.phonemesh.core.RadioTime.Shown.Unknown -> context.getString(R.string.radio_time_unknown)
+    }
+
     fun status(status: DeliveryStatus, palette: Palette): StatusLook = when (status) {
         DeliveryStatus.WAITING -> StatusLook(R.drawable.ic_clock, palette.muted, R.string.status_waiting, false)
         DeliveryStatus.SENT -> StatusLook(R.drawable.ic_sent, palette.text, R.string.status_sent, true)

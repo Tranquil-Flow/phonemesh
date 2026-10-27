@@ -291,6 +291,8 @@ class PostmanTest {
         // B is away for twenty hours: A's resends reach nobody, and its wait grows to hours.
         var now = 0L
         while (now < 20 * 3_600_000) { now += 60_000; a.postman.due(now) }
+        // Just after a resend, the next one is a whole (long) wait away.
+        do { now += 60_000 } while (a.postman.due(now).isEmpty())
         val waiting = a.postman.nextDue()!! - now
         assertTrue("a long wait by now: $waiting ms", waiting > 30 * 60_000)
         // B comes back and writes: A hears B, so the missed message goes within two minutes.
@@ -300,7 +302,6 @@ class PostmanTest {
         assertTrue("resent soon after B was heard", soon.any { it.packet.contentEquals(m.packet) })
         assertEquals("tu es là ?", (b.postman.receive(m.packet, now + 120_000)!!.body as Body.Text).text)
     }
-
     @Test fun afterThreeDaysAMessageIsMarkedFailed() {
         val (a, _) = pair()
         a.postman.send(a.them, text("loin"), 1, 0)

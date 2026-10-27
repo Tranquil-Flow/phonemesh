@@ -1,5 +1,22 @@
 # Android qualification record
 
+## v0.1.1 branch (not released), 2026-10-27
+
+**Not a release record.** Emulator only (API 35, software graphics); no phones, radios or microphone were used.
+
+- Full suite on `3f9e5ae` (767 tests, 40 batches): 38 batches pass. `SharingTest` needs two voice packs in the app's
+  files folder; with both there it passes (6/6) on `11e3d81`. `PictureLooksTest` does not finish on this emulator:
+  `ncnnViewsWorkFromSeveralThreadsAndFromTheWorker` stops the app (SIGABRT in ncnn's OpenMP runtime) and
+  `theOneTimeTrialSaysHowFarItIsThenNeverRunsAgain` does not end. v0.1.0 built from its tag does the same on this
+  emulator today, and neither file changed since v0.1.0, so this is not a v0.1.1 change; it still needs a check on
+  an emulator with host graphics or a phone. The other 29 tests of that batch pass on `11e3d81`.
+- On `11e3d81`: `check.sh` CHECK_OK (arm64 16,613,918 B, armeabi-v7a 14,604,216 B unsigned); JVM core 500, hub 89;
+  the app classes that use resend timing: MailPersistence, AccountsFlow, History 74; AppCore, HubPaths, HubVoice
+  76; PersonChat, PersonPicture, PictureCore 67; ConversationActivity 78.
+- Each feature commit had its own `check.sh` and the instrumentation of every class it reaches (progress record
+  kept with the owner's receipts). Recovery formats and group keys match independent Python implementations byte
+  for byte. Crypto review of recovery, backup, profiles and group keys: **open**.
+
 ## v0.1.0 release (rc5) — 2026-10-25
 
 **Released as v0.1.0 on 2026-10-25.** Public certificate `ef8557c6…`; arm64-v8a `0ba276aa9043fa5e656c6644638cb5101b301ab038f62b65eece73a629ceb21b`, armeabi-v7a `e2addcde4134e240749ed81929a6a80eb1d76a20c435ae86757bb444b845303c`. On the API 35 emulator the public APK installed fresh and updated the earlier public v0.1-rc build with its data kept (shallow: that build had only reached first run), and Android verified the add-me App Link against the deployed `assetlinks.json`. rc5 is rc4 plus the owner-approved hub retry recovery (accounts spec decision 24) and documentation.

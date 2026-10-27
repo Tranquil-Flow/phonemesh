@@ -26,7 +26,8 @@ class GroupThroughHubTest {
         val amaId = id(ama); val kofiId = id(kofi)
         val group = ByteArray(16) { 9 }
         val a = GroupMember(amaId, id(amaSk), { P256.sign(amaSk.private, it) }, group)
-        val k = GroupMember(kofiId, id(kofiSk), { P256.sign(kofiSk.private, it) }, group)
+        // Kofi said Join to Ama's invitation, so he takes his first key only from her (GK4).
+        val k = GroupMember(kofiId, id(kofiSk), { P256.sign(kofiSk.private, it) }, group, amaId)
         val list = GroupRoster("Puits", 0x123456, listOf(GroupRoster.Member(amaId, true, id(amaSk)), GroupRoster.Member(kofiId, false, id(kofiSk))))
         val out = a.newEpoch(list, 0)
         assertTrue(k.receiveKey(amaId, GroupKey.decode(out.keys.values.single())!!, 0))

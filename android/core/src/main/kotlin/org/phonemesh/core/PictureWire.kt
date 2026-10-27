@@ -41,6 +41,13 @@ object PictureWire {
     const val PART_BYTES_V2 = 198
     const val MAX_PARTS_V2 = 17
 
+    /**
+     * Limits for picture packets inside a private group packet (draft GK4): the 139-byte group body less the op, the
+     * body kind and the 4-byte part header leaves [PART_BYTES_GROUP]; a 3,200-byte picture takes [MAX_PARTS_GROUP].
+     */
+    const val PART_BYTES_GROUP = 133
+    const val MAX_PARTS_GROUP = 25
+
     sealed class Packet { abstract val id: Int }
 
     data class Head(
@@ -112,6 +119,13 @@ object PictureWire {
      * [PART_BYTES_V2] and up to [MAX_PARTS_V2]; a head must count its parts by 198. Port 300 keeps [decode].
      */
     fun decodeV2(bytes: ByteArray): Packet? = decode(bytes, PART_BYTES_V2, MAX_PARTS_V2)
+
+    /** [split] for a private group packet: parts of [PART_BYTES_GROUP]. */
+    fun splitGroup(id: Int, codec: PictureCodec, width: Int, height: Int, picture: ByteArray, sketch: ByteArray): List<Packet> =
+        split(id, codec, width, height, picture, sketch, PART_BYTES_GROUP)
+
+    /** [decode] for a private group packet: parts of at most [PART_BYTES_GROUP], up to [MAX_PARTS_GROUP]. */
+    fun decodeGroup(bytes: ByteArray): Packet? = decode(bytes, PART_BYTES_GROUP, MAX_PARTS_GROUP)
 
     /** The same bytes as [encode], named for the port 301 context; [splitV2] makes the packets. */
     fun encodeV2(packet: Packet): ByteArray = encode(packet)

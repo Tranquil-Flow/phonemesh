@@ -15,6 +15,9 @@ class GroupReader(
 ) {
     var next: Long = next
         private set
+    /** The chain position of the packet [open] last returned (not saved). */
+    var lastOpened: Long = -1
+        private set
     private val skipped = LinkedHashMap<Long, GroupCipher.Step>()
     private var window: List<GroupCipher.Step>? = null
 
@@ -32,6 +35,7 @@ class GroupReader(
         skipped.entries.firstOrNull { it.value.code.contentEquals(code) }?.let { (seq, step) ->
             val body = GroupCipher.open(group, epoch, seq, step, identity, signer, packet) ?: return null
             skipped.remove(seq)
+            lastOpened = seq
             return body
         }
         val steps = window()
@@ -39,6 +43,7 @@ class GroupReader(
         if (i < 0) return null
         val body = GroupCipher.open(group, epoch, next + i, steps[i], identity, signer, packet) ?: return null
         // Only a genuine packet moves the chain: a forged code cannot make us skip or forget keys.
+        lastOpened = next + i
         for (j in 0 until i) skipped[next + j] = steps[j]
         while (skipped.size > MAX_SKIPPED) skipped.remove(skipped.keys.first())
         chain = steps[i].next
@@ -49,6 +54,14 @@ class GroupReader(
 
     /** Missed packets still readable, oldest first. */
     fun missed(): List<Long> = skipped.keys.toList()
+
+    /** Positions read so far as a receipt says them: the highest read (-1: none) and which of the 32 below are missing. */
+    fun received(): Pair<Long, Long> {
+        val highest = next - 1
+        var missing = 0L
+        for (i in 0 until 32) { val seq = highest - 1 - i; if (seq >= 0 && skipped.containsKey(seq)) missing = missing or (1L shl i) }
+        return highest to missing
+    }
 
     fun encode(): ByteArray {
         val out = ByteArrayOutputStream()

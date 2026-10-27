@@ -27,8 +27,8 @@ sealed class Body {
     /** One piece (picture head or part bytes) of a contact's photo avatar; never a chat picture (decision 50). */
     class AvatarPiece(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
     /**
-     * A private group body for this one person (kinds 10-13, [org.phonemesh.core.group.GroupControl]): an epoch key, a
-     * signing key, a removal notice or a resend request. [wipe] clears a key's secret once the group has taken it.
+     * A private group body for this one person (kinds 10-15, [org.phonemesh.core.group.GroupControl]): an epoch key, a
+     * signing key, a removal notice, a resend request, an invitation or a leaving notice. [wipe] clears a key's secret once the group has taken it.
      */
     class Group(val kind: Int, bytes: ByteArray) : Body() {
         val bytes: ByteArray = bytes.copyOf()
@@ -46,7 +46,7 @@ sealed class Body {
         const val PROFILE = 8
         const val AVATAR = 9
         const val GROUP_KEY = 10
-        const val GROUP_LAST = 13
+        const val GROUP_LAST = 15
         const val REF = 4
         const val MAX_EMOJI = 32
         private const val WITH_ACK = 0x80

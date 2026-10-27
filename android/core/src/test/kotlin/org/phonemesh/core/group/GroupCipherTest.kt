@@ -47,6 +47,9 @@ class GroupCipherTest {
         val packet = GroupCipher.seal(group, epoch, 0, s, identity, hex("plain"), ::sign)
         File(System.getProperty("java.io.tmpdir"), "group-kotlin-packet.txt").writeText(packet.joinToString("") { "%02x".format(it) })
         assertEquals(9 + hex("plain").size + 64 + 16, packet.size)
+        val h = GroupCipher.step(GroupCipher.chain0(group, epoch, hex("secret"), identity, hub = true))
+        val hubPacket = GroupCipher.seal(group, epoch, 0, h, identity, hex("hubPlain"), ::sign)
+        File(System.getProperty("java.io.tmpdir"), "group-kotlin-hub-packet.txt").writeText(hubPacket.joinToString("") { "%02x".format(it) })
     }
 
     @Test fun aMemberWithTheGroupKeyCannotWriteAsAnother() {

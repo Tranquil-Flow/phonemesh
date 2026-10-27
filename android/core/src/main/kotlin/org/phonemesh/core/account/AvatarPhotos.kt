@@ -19,12 +19,14 @@ object AvatarPhotos {
     fun id(webp: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(webp).copyOf(Profile.PHOTO_ID)
 
     /** The encoded pieces (head, then parts) for [webp], [width] x [height], with its colour [sketch]. */
-    fun pieces(webp: ByteArray, width: Int, height: Int, sketch: ByteArray): List<ByteArray> {
+    fun pieces(webp: ByteArray, width: Int, height: Int, sketch: ByteArray, group: Boolean = false): List<ByteArray> {
         require(webp.size in 1..MAX_BYTES) { "a photo avatar is 1..$MAX_BYTES bytes" }
         require(width in 1..MAX_SIDE && height in 1..MAX_SIDE) { "a photo avatar is at most $MAX_SIDE px a side" }
         val id = id(webp)
         val pictureId = ((id[0].toInt() and 0xFF) shl 8) or (id[1].toInt() and 0xFF)
-        return PictureWire.splitV2(pictureId, PictureCodec.WEBP, width, height, webp, sketch).map { PictureWire.encodeV2(it) }
+        val packets = if (group) PictureWire.splitGroup(pictureId, PictureCodec.WEBP, width, height, webp, sketch)
+            else PictureWire.splitV2(pictureId, PictureCodec.WEBP, width, height, webp, sketch)
+        return packets.map { PictureWire.encodeV2(it) }
     }
 
     /** A complete, checked photo. */
@@ -34,11 +36,11 @@ object AvatarPhotos {
     }
 
     /**
-     * The photo [pieces] make, or null while any is missing or when they do not make an avatar: not one head, a
+     * The photo [pieces] make ([group]: pieces sized for a group packet), or null while any is missing or when they do not make an avatar: not one head, a
      * different picture's part, not WebP, too big, or a CRC that fails. Duplicates are fine; order does not matter.
      */
-    fun join(pieces: Collection<ByteArray>): Photo? {
-        val decoded = pieces.mapNotNull { PictureWire.decodeV2(it) }
+    fun join(pieces: Collection<ByteArray>, group: Boolean = false): Photo? {
+        val decoded = pieces.mapNotNull { if (group) PictureWire.decodeGroup(it) else PictureWire.decodeV2(it) }
         if (decoded.size != pieces.size) return null
         val head = decoded.filterIsInstance<PictureWire.Head>().distinct().singleOrNull() ?: return null
         if (head.codec != PictureCodec.WEBP || head.totalBytes !in 1..MAX_BYTES) return null

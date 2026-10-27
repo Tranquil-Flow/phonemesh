@@ -1,7 +1,8 @@
-# Private group keys, draft GK3 (decisions 47 and 66)
+# Private group keys, draft GK4 (decisions 47, 66, 69, 72, 74)
 
-Status: DRAFT. Independent crypto review (decisions 41 and 47) OPEN: an agent review (lanes A-D) is done and its
-group findings are fixed below; a human review is still needed. Not used by the app yet. Code:
+Status: DRAFT. An agent review (lanes A-D) of GK3 is done and its group findings are fixed below; GK4 adds what the
+app needs (section "GK4 additions") and gets a fresh agent review before v0.1.2 (decision 76). A human review is
+skipped for now (decision 68). Code:
 `android/core/src/main/kotlin/org/phonemesh/core/group/`. Vectors: `android/core/src/test/resources/group/`, made by
 an independent Python implementation written from this note (Python also verified a packet the Kotlin made).
 
@@ -17,6 +18,8 @@ One shared group secret renewed on each join/leave, per-sender chains derived fr
   session.
 - Sender chain start: `CK0 = HKDF-SHA256(salt = "phonemesh group v1" || group || u32(epoch), ikm = S,
   info = "phonemesh group chain" || IK33(sender), 32)`.
+- Hub chain start (GK4): the same with info `"phonemesh group hub chain" || IK33(sender)`. Each member has this second
+  chain for what goes only through a hub, so people who only hear the radio never see gaps in the radio chain.
 - Step at position n: `M = HKDF-Expand(PRK = HMAC(CK_n, 0x01), "phonemesh group message", 52)`;
   key = M[0:32], nonce = M[32:44], code = M[44:52]; `CK_{n+1} = HMAC(CK_n, 0x02)`. Each key/nonce used once.
 
@@ -55,10 +58,12 @@ identity key, or by a key that the identity key certifies, proves authorship to 
 
 - **Group key** (body kind 10, 119 bytes, receipted like a text): version 2 | group 16 | epoch u32 | secret 32 |
   list digest 16 | parent digest 16 | list part count | the admin's signing key 33.
-- **Member list**, sent once to everyone as group packets on the admin's new chain. Bytes: version 2 | name length |
-  UTF-8 name (1-24 bytes) | colour RGB | count (2-20) | count x (flags: 1 admin, 0 member | IK33 | SK33). Each packet
-  body: op 2 | index | count | up to 136 list bytes. Twenty people take 11 packets. App messages are op 1.
-- **Digest**, chained to the list before: first 16 bytes of SHA-256(`"phonemesh group roster v2"` || group ||
+- **Member list**, sent once to everyone as group packets on the admin's new chain. Bytes (GK4, version 3): version 3 |
+  name length | UTF-8 name (1-24 bytes) | colour RGB | picture kind (0 letter, 1 emoji, 2 photo) | picture length |
+  picture (emoji UTF-8 up to 32, or the photo's 8-byte id) | flags (1: new members see recent messages, else 0) |
+  count (2-20) | count x (flags: 1 admin, 0 member | IK33 | SK33). Each packet body: op 2 | index | count | up to 136
+  list bytes. Twenty people take 11 packets.
+- **Digest**, chained to the list before: first 16 bytes of SHA-256(`"phonemesh group roster v3"` || group ||
   u32(epoch) || parent digest || list bytes). The first epoch's parent is 16 zero bytes.
 - **Safety code**: first 8 bytes of SHA-256(`"phonemesh group safety v1"` || group || u32(epoch) || digest). Equal
   codes mean the same list.
@@ -75,8 +80,8 @@ identity key, or by a key that the identity key certifies, proves authorship to 
   checks.
 - Members of the new list may still write in the old epoch for 72 hours. Their packets are read and marked as old.
   Packets from people no longer on the list are not read.
-- Nobody gets earlier messages ("New members see recent messages" stays off). Each phone keeps only the chains derived
-  from a secret, not the secret.
+- Nobody gets earlier messages unless an admin turns on "New members see recent messages" (GK4, decision 74). Each
+  phone keeps only the chains derived from a secret and a tag of it, not the secret.
 - Cost of one change for N people: N-1 private packets plus at most 11 group packets.
 
 ### Two admins at once (review C3)
@@ -104,6 +109,40 @@ epoch, and then stops sending and reading. A phone that receives a list without 
 - A phone asks hubs for its own next codes together with everyone else's, so a hub cannot name a sender by which
   codes their phone did not ask for (review C6).
 
+## GK4 additions (v0.1.2)
+
+- **Ops**, the first byte of every group packet body: 1 message (an app body, the same bytes as a private one),
+  2 list part, 3 profile (the member's own profile bytes, as cards carry them; decision 72), 4 receipt, 5 shared
+  recent message (decision 74), 6 member photo piece, 7 group photo piece. Lists come only from a waiting key's
+  admin. Other ops are read and handed to the app; unknown ops are dropped.
+- **Receipt** (op 4, radio chain): count | count x (sender's index in the epoch's list | highest position read u32 |
+  missing u32, bit i set when position highest - 1 - i was not read). At most 15 entries. A phone sends one after
+  reading other people's packets (never for receipts alone), with the senders it read since the last one first.
+  A sender counts a member as having its packet at position n when that member's entry covers n: at or below the
+  highest, and within the 32 below it, not missing. "Delivered to N of M": M is the other members at sending time.
+- **Shared** (op 5, hub chain only): author account id 8 | time in seconds u32 | app body (up to 126 bytes). An admin
+  who adds people to a group with the flag on shares the last 7 days, at most 50 messages, after the new list. Only
+  a phone that is new on that list shows them, as shared by that admin.
+- **Pictures**: a message picture is its head on the radio chain (the colour sketch, one packet) and its parts on the
+  hub chain, 133 picture bytes each. A member photo (decision 64) goes wholly on the hub chain; the group photo's head
+  goes on the radio chain and its parts on the hub chain (decision 69).
+- **Invitation** (private body kind 14): version 1 | group 16 | the admin's signing key 33 | people invited (2-20) |
+  name length | name | RGB | picture kind | picture length | picture. Shown with Join and Ignore. Join sends the
+  signing key back (kind 11). A phone takes its first key only from the admin who invited it.
+- **Leaving** (private body kind 15): version 1 | group 16 | epoch u32, from a member of the list held, to one admin:
+  the first admin on the list other than the sender, so only one admin acts. The leaver stops at once. The last admin
+  first starts an epoch making the chosen person an admin, then leaves the same way (decision 72).
+- **Who must know whom**: keys, removal notices and leaving notices go over private sessions. So an admin starts an
+  epoch only when every other member is its contact; otherwise the change is refused and the screens ask the admin to
+  add that person first. Ordinary members need not know each other. A removal notice goes only to a removed person the
+  admin has as a contact; one it does not know finds out when keys stop coming. A leaving member tells the first admin
+  on the list it has as a contact.
+- **Batching**: an admin gathers joins and leavings for 60 seconds into one epoch (each epoch costs a private key packet
+  per member plus the list). A phone that has waited 10 minutes for a list asks that admin once to send it again.
+- **One list, two secrets**: each phone keeps a tag of the epoch secret (first 16 bytes of SHA-256(`"phonemesh group
+  secret tag v1"` || group || u32(epoch) || S)). A checked key for the epoch held with the same list but another
+  secret is a conflict too, since its holders could not read each other.
+
 ## Review findings
 
 From the agent review (lane C), all in core with tests and mutants:
@@ -126,4 +165,4 @@ From the agent review (lane C), all in core with tests and mutants:
    it only when phones compare.
 5. **Codes:** an 8-byte code at 20 members x window 20 means about 400 expected codes per phone plus pairwise ones.
    Is the collision rate acceptable?
-6. **Not designed yet:** receipts, group photo, full pictures, screens.
+6. **GK4:** receipts, hub chains, shared recent messages, invitations and leaving (section above).

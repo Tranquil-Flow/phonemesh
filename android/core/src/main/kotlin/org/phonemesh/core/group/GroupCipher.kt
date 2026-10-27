@@ -30,6 +30,7 @@ object GroupCipher {
 
     private val DOMAIN = "phonemesh group v1".toByteArray()
     private val CHAIN_INFO = "phonemesh group chain".toByteArray()
+    private val HUB_CHAIN_INFO = "phonemesh group hub chain".toByteArray()
     private val MESSAGE_INFO = "phonemesh group message".toByteArray()
     private val SIG_DOMAIN = "phonemesh group sig v2".toByteArray()
     private const val MIN_PACKET = WireV2.PLAIN_HEADER + Aead.TAG + 1 + SIGNATURE
@@ -37,11 +38,15 @@ object GroupCipher {
     /** One chain position: the message key, nonce and on-air code for it, and the next position. */
     class Step(val key: ByteArray, val nonce: ByteArray, val code: ByteArray, val next: ByteArray)
 
-    /** The first chain key of the member with [identity] (33-byte compressed P-256) in this group epoch. */
-    fun chain0(group: ByteArray, epoch: Long, secret: ByteArray, identity: ByteArray): ByteArray {
+    /**
+     * The first chain key of the member with [identity] (33-byte compressed P-256) in this group epoch. [hub] gives
+     * their second chain, for what goes only through a hub (full pictures, photos, recent messages; draft GK4), so
+     * people who only hear the radio never see gaps in the first chain.
+     */
+    fun chain0(group: ByteArray, epoch: Long, secret: ByteArray, identity: ByteArray, hub: Boolean = false): ByteArray {
         require(group.size == GROUP_ID && secret.size == SECRET && identity.size == P256.POINT)
         require(epoch in 1..0xFFFF_FFFFL)
-        return Hkdf.derive(DOMAIN + group + Bytes.u32(epoch), secret, CHAIN_INFO + identity, 32)
+        return Hkdf.derive(DOMAIN + group + Bytes.u32(epoch), secret, (if (hub) HUB_CHAIN_INFO else CHAIN_INFO) + identity, 32)
     }
 
     fun step(chain: ByteArray): Step {

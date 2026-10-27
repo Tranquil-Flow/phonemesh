@@ -34,6 +34,22 @@ Per sender: chain at the next unread position, look-ahead window 20, at most 64 
 moves the chain only after its signature and tag check, so a forged code cannot make a reader skip or forget keys.
 A writer must durably store `chainAfterNext()` before the packet leaves (no key reuse after a crash).
 
+## Members, admins and epochs (GK2)
+
+- Every epoch is started by an admin of the epoch before it (or by the creator). The admin sends each other member a
+  70-byte key over their private session: version 1 | group id 16 | epoch u32 | secret 32 | roster digest 16 |
+  roster part count. A person being removed gets no key.
+- The member list goes once to everyone as signed group packets on the admin's new chain. Roster bytes: version 1 |
+  name length | UTF-8 name (1-24 bytes) | colour RGB | count (2-20) | count x (flags: 1 admin, 0 member | IK33).
+  Each packet body: op 2 | index | count | up to 136 roster bytes; 20 people take 6 packets. App messages are op 1.
+- Digest: first 16 bytes of SHA-256("phonemesh group roster v1" || group || u32(epoch) || roster bytes).
+- A phone takes a new epoch only when the key came from an admin of the list it has (or it has none yet), the epoch
+  is newer, the rebuilt list matches the digest, the sender is an admin of the new list, and the phone is on it.
+  Otherwise it keeps its epoch; a phone that finds itself off the list stops sending and reading new messages.
+- A new member gets no earlier messages ("New members see recent messages" stays off). Each phone keeps only the
+  chains derived from a secret, not the secret.
+- Cost of one change for N people: N-1 private packets plus at most 6 group packets.
+
 ## Questions for the reviewer
 
 1. **Deniability:** signing with the long-term identity key lets any member prove to outsiders who wrote a message.
@@ -44,5 +60,6 @@ A writer must durably store `chainAfterNext()` before the packet leaves (no key 
    for this threat model (members are trusted not to leak, not trusted not to impersonate)?
 4. Codes are derived from the chain: does an 8-byte code risk collisions with pairwise codes at 20 members x window
    20 (expected codes per phone grow to ~400 + pairwise)?
-5. Not yet designed: roster distribution (20 x 33-byte identities does not fit one packet), admin changes, join
-   history (off by default), receipts, group photo and full pictures.
+5. An offline member misses a key and stays in the old epoch: how does a phone ask an admin again, and how long
+   do others keep reading the old epoch? Not designed: receipts, group photo, full pictures, storage, screens.
+6. Admins are trusted not to send different lists to different members; digests catch it only when phones compare.

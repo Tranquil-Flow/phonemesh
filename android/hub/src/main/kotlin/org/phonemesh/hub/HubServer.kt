@@ -23,8 +23,13 @@ import javax.net.ssl.SSLContext
  * - `POST /mail?since=N&wait=S&hellos=1&shared=1`: the body lists recipient codes in hex, one per line (a body, not
  *   the address, so code lists are never in a URL or a log). Answers mail after seq N, waiting up to S seconds
  *   (at most 30) for some to arrive: one `seq port hex` line each.
+ * - `/updates/v1/...`: signed updates the operator imported, read only ([UpdateRoutes]).
  */
-class HubServer(private val hub: Hub, private val mailbox: Mailbox, private val name: String, private val tls: Tls, port: Int) {
+class HubServer(
+    private val hub: Hub, private val mailbox: Mailbox, private val name: String, private val tls: Tls, port: Int,
+    /** The hub's data folder, for the read-only update routes ([UpdateRoutes]); null serves none. */
+    updatesDir: File? = null,
+) {
     private val server = HttpsServer.create(InetSocketAddress(port), 0)
     private val pool = Executors.newFixedThreadPool(32)
 
@@ -34,6 +39,7 @@ class HubServer(private val hub: Hub, private val mailbox: Mailbox, private val 
         server.createContext("/hello") { handle(it) { ex -> reply(ex, 200, "phonemesh-hub 1\nname $name\nlatest ${mailbox.latest()}\n") } }
         server.createContext("/send") { handle(it, ::send) }
         server.createContext("/mail") { handle(it, ::mail) }
+        updatesDir?.let { d -> val routes = UpdateRoutes(d); server.createContext("/updates/v1/") { handle(it, routes::handle) } }
     }
 
     val port: Int get() = server.address.port

@@ -34,7 +34,7 @@ fun main(args: Array<String>) {
     })
     hub = Hub(mailbox, radio, duty = DutyCycle(config.duty), log = log, outbox = outbox)
     radio.start()
-    val server = HubServer(hub, mailbox, config.name, tls, config.port)
+    val server = HubServer(hub, mailbox, config.name, tls, config.port, updatesDir = config.dir)
     server.start()
     log("hub '${config.name}' on port ${server.port}, ${mailbox.size()} letters kept for ${config.days} days")
     log("hub card: ${HubCard(config.wifi, config.wifiPassword, config.port, tls.pin).encode()}")

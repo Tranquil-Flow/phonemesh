@@ -197,6 +197,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         if (oldVersion < 17) for (column in listOf("profile_sent", "profile_sent_at")) {
             if (!hasColumn(db, "contacts", column)) db.execSQL("ALTER TABLE contacts ADD COLUMN $column INTEGER NOT NULL DEFAULT 0")
         }
+        // Saved people from a restored copy (account recovery RC5 A): kept apart from contacts, to add again.
+        if (oldVersion < 18) db.execSQL(
+            "CREATE TABLE IF NOT EXISTS recovered_contacts (identity BLOB PRIMARY KEY, card BLOB NOT NULL, name TEXT NOT NULL, " +
+                "colour INTEGER NOT NULL, met_before INTEGER NOT NULL, voice TEXT, added INTEGER NOT NULL, archive BLOB NOT NULL, " +
+                "restored INTEGER NOT NULL)",
+        )
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -291,6 +297,52 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     fun contactRow(accountId: String): ContactRow? =
         readableDatabase.query("contacts", null, "account_id = ?", arrayOf(accountId), null, null, null).use { c -> if (c.moveToFirst()) c.contact() else null }
+
+    /** A person from a restored copy: [metBefore] is history from the old phone, never trust on this one. */
+    class RecoveredRow(
+        val identity: ByteArray, val card: ByteArray, val name: String, val colour: Int, val metBefore: Boolean, val voice: String?,
+        val added: Long,
+    )
+
+    fun recoveredRows(): List<RecoveredRow> =
+        readableDatabase.query("recovered_contacts", null, null, null, null, null, "name").use { c ->
+            buildList {
+                while (c.moveToNext()) add(RecoveredRow(
+                    c.getBlob(c.getColumnIndexOrThrow("identity")), c.getBlob(c.getColumnIndexOrThrow("card")),
+                    c.getString(c.getColumnIndexOrThrow("name")), c.getInt(c.getColumnIndexOrThrow("colour")),
+                    c.getInt(c.getColumnIndexOrThrow("met_before")) == 1,
+                    c.getString(c.getColumnIndexOrThrow("voice")), c.getLong(c.getColumnIndexOrThrow("added")),
+                ))
+            }
+        }
+
+    /** Adds the people not saved yet (by full identity) in one transaction; returns how many were new. */
+    fun addRecovered(rows: List<RecoveredRow>, archive: ByteArray, at: Long): Int {
+        val db = writableDatabase
+        var added = 0
+        db.beginTransaction()
+        try {
+            for (r in rows) {
+                val values = ContentValues().apply {
+                    put("identity", r.identity); put("card", r.card); put("name", r.name); put("colour", r.colour)
+                    put("met_before", if (r.metBefore) 1 else 0); put("voice", r.voice); put("added", r.added)
+                    put("archive", archive); put("restored", at)
+                }
+                if (db.insertWithOnConflict("recovered_contacts", null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1L) added++
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return added
+    }
+
+    fun removeRecovered(identity: ByteArray) {
+        writableDatabase.compileStatement("DELETE FROM recovered_contacts WHERE identity = ?").use {
+            it.bindBlob(1, identity)
+            it.executeUpdateDelete()
+        }
+    }
 
     fun contactRows(): List<ContactRow> =
         readableDatabase.query("contacts", null, null, null, null, null, "added").use { c -> buildList { while (c.moveToNext()) add(c.contact()) } }
@@ -839,7 +891,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 17
+        const val VERSION = 18
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */
         private const val OLD_COLOURS = "CASE colour WHEN 0 THEN ${0xE53935} WHEN 1 THEN ${0xFB8C00} WHEN 2 THEN ${0xFDD835} " +

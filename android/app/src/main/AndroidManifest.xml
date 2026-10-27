@@ -58,6 +58,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".EmojiActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".RecoveryActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".NameActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RadioActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />

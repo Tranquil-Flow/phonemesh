@@ -38,6 +38,18 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = prefs.getBoolean(FIRST_MESSAGE_SENT, false)
         set(value) { prefs.edit().putBoolean(FIRST_MESSAGE_SENT, value).apply() }
 
+    /** When a saved copy last opened with its card on this phone (ms; 0: never). Not proof it works elsewhere. */
+    var recoveryChecked: Long
+        get() = prefs.getLong("recovery_checked", 0L)
+        set(value) { prefs.edit().putLong("recovery_checked", value).apply() }
+
+    /** The next saved copy's number (backup spec 5.5 generation): only goes up, gaps allowed. */
+    fun nextRecoveryGeneration(): Long {
+        val next = prefs.getLong("recovery_generation", 0L) + 1
+        prefs.edit().putLong("recovery_generation", next).commit()
+        return next
+    }
+
     /** The add-someone step was completed, even if its contact is later removed. */
     var firstPersonAdded: Boolean
         get() = prefs.getBoolean(FIRST_PERSON_ADDED, false)

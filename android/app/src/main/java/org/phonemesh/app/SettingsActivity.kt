@@ -41,6 +41,10 @@ class SettingsActivity : ScreenActivity() {
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
         column.addView(languageRow())
         column.addView(hubRow())
+        column.addView(Ui.button(this, palette, getString(R.string.recovery_title), R.drawable.ic_lock).apply {
+            tag = "settings_recovery"
+            setOnClickListener { RecoveryActivity.open(this@SettingsActivity) }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
         column.addView(section(R.string.settings_appearance))
         themes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         column.addView(themes)

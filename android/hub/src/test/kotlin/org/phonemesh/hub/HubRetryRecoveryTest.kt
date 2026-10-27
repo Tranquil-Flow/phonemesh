@@ -112,7 +112,9 @@ class HubRetryRecoveryTest {
         val privateSends = radio.sent.count { it.first == 301 }
         now += 120_000
         h.onData(301, packet, "copy")
-        h.fromPhone("wifi", 301, Packets.hello(2)); h.fromPhone("wifi", 303, Packets.shared("hello")); h.tick()
+        h.fromPhone("wifi", 301, Packets.hello(2)); h.fromPhone("wifi", 303, Packets.shared("hello"))
+        // AE4: the hub's own acknowledgement may go first; give the radio time for everything queued.
+        repeat(3) { h.tick(); now += 5_000 }
         assertEquals("only the demanded hello replays; radio-heard copies never start work", privateSends + 1, radio.sent.count { it.first == 301 })
         assertEquals("shared posts keep single forwarding", 1, radio.sent.count { it.first == 303 })
     }

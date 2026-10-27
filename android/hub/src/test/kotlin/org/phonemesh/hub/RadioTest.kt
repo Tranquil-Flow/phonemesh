@@ -35,7 +35,7 @@ class RadioTest {
     /** Checked against the Semtech formula in field-mesh-communications-planning's lora_airtime.py (LongFast). */
     @Test fun airtimeMatchesTheSemtechFormula() {
         val airtime = Airtime()
-        for ((bytes, ms) in listOf(1 to 436.224, 36 to 681.984, 202 to 1910.784, 228 to 2115.584)) assertEquals(ms, airtime.millis(bytes), 0.01)
+        for ((bytes, ms) in listOf(1 to 436.224, 36 to 681.984, 202 to 1951.744, 228 to 2115.584)) assertEquals(ms, airtime.millis(bytes), 0.01)
     }
 
     private fun fromRadio(build: MeshProtos.FromRadio.Builder.() -> Unit) = Framing.frame(MeshProtos.FromRadio.newBuilder().apply(build).build().toByteArray())

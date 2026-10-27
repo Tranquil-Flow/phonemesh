@@ -61,6 +61,49 @@ class HubTest {
         assertTrue("budget comes back as the hour moves on", radio.sent.size > sent)
     }
 
+    // ---- AE4: seconds on air, short first, fair share, 180 s an hour for phones
+
+    @Test fun shortPacketsGoBeforeFullOnesAndTheQuietSenderBeforeTheBusyOne() {
+        val hub = hub()
+        repeat(6) { hub.fromPhone("pictures", 301, message(it, 228)) }
+        hub.fromPhone("text", 301, message(50, 60))
+        repeat(2) { hub.fromPhone("pictures", 301, message(60 + it, 40)) }
+        run(hub, 120)
+        val sizes = radio.sent.map { it.second.size }
+        assertEquals("the three short packets first", listOf(40, 60, 40).sorted(), sizes.take(3).sorted())
+        assertTrue("then the full ones", sizes.drop(3).all { it == 228 })
+    }
+
+    @Test fun phonesGetAtMost180SecondsAnHourAndAcknowledgementsStillGo() {
+        val hub = hub()
+        repeat(Hub.MAX_QUEUED) { hub.fromPhone("p${it % 4}", 301, message(it, 228)) }
+        run(hub, 3600)
+        val millis = Airtime().millis(228)
+        val sent = radio.sent.count { it.first == 301 }
+        assertTrue("$sent full packets of $millis ms: within 180 s", sent * millis <= 180_000 && (sent + 1) * millis > 180_000)
+        repeat(30) { hub.onData(301, message(1_000 + it), "snr=5") }
+        run(hub, 60)
+        assertTrue("the hub's own acknowledgements are not held by the phones' share", radio.sent.any { it.first == HubAck.PORT })
+    }
+
+    @Test fun eachSenderGetsAboutTheSameRadioTime() {
+        val hub = hub()
+        repeat(60) { hub.fromPhone("big", 301, message(it, 228)) }
+        repeat(60) { hub.fromPhone("small", 301, message(100 + it, 140)) }
+        run(hub, 3600)
+        val big = radio.sent.count { it.second.size == 228 } * Airtime().millis(228)
+        val small = radio.sent.count { it.second.size == 140 } * Airtime().millis(140)
+        // Within two full packets: the hour's window rolls during the run and the last airing may not fit.
+        assertTrue("fair by seconds, not by packets: $big vs $small", kotlin.math.abs(big - small) <= 2 * Airtime().millis(228))
+        assertTrue("small packets got more airings", radio.sent.count { it.second.size == 140 } > radio.sent.count { it.second.size == 228 })
+    }
+
+    @Test fun airtimeCountsTheFirmwaresFraming() {
+        // Firmware 2.7.26: 23 bytes around a payload below 128 bytes, 24 from 128 (LongFast, as the phone's meter).
+        assertEquals(927.744, Airtime().millis(69), 0.001)
+        assertEquals(2115.584, Airtime().millis(228), 0.001)
+    }
+
     @Test fun aPhoneCannotFillTheQueueForever() {
         val hub = hub()
         repeat(Hub.MAX_QUEUED) { assertEquals(Hub.Sent.STORED, hub.fromPhone("p", 301, message(it))) }

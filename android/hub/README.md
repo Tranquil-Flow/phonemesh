@@ -174,8 +174,8 @@ mailbox acceptance is not a promise that the radio or recipient received anythin
 
 When a phone resubmits the same private port-301 packet, the hub may forward its exact
 ciphertext once more: at most once a minute per full packet digest across addresses
-and process restarts. The sender retains its existing retry delays (2, then 10, then
-30 minutes and every 30 minutes thereafter, up to three days), stopping on an
+and process restarts. The sender's retry delays start at about 2 minutes and double up to about
+4 hours, at most 24 retries in up to three days, stopping on an
 authenticated recipient receipt. The hub never decrypts or adds a cleartext retry
 marker, never refreshes the stored message's sequence/time/retention, and never
 starts a periodic rebroadcast loop. Shared port-303 posts keep single forwarding.
@@ -189,6 +189,13 @@ refusal retains work with backoff; an uncertain write retains the intent but par
 until process recovery or a later eligible explicit resubmission by a phone, rather
 than repeatedly transmitting it in the same process. Storage failures retain work for
 retry. There is **no periodic mailbox rebroadcast**.
+
+The radio queue counts seconds on air, not packets. The hub's own acknowledgements go
+first, then short packets (receipts and most texts) before full ones such as picture
+pieces. Among phones, the one that used the least radio time in the last hour goes next.
+Phones' packets together get at most **180 seconds an hour** (5 %), inside `duty`, so
+relays and acknowledgements keep room. The hub cannot read private mail, so packet size
+is the only sign of what a packet is.
 Atomic replacement and file sync support process-restart recovery, not sudden
 power-loss safety (the directory is not synced), exactly-once radio submission or
 guaranteed delivery. A crash around serial submission can cause a duplicate attempt.

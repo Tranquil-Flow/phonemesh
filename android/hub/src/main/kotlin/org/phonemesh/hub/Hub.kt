@@ -17,6 +17,8 @@ class Hub(
     private val log: (String) -> Unit = {},
     private val outbox: Outbox = Outbox(),
 ) : RadioListener {
+    /** Radio time for phones' packets (AE4): 180 s an hour to start, inside the legal [duty], room left for relays. */
+    private val share = DutyCycle(APP_SHARE_PERCENT)
     class Outgoing(val port: Int, bytes: ByteArray, val id: String? = null, var retryAt: Long = 0) {
         val bytes: ByteArray = bytes.copyOf()
     }
@@ -24,6 +26,8 @@ class Hub(
     /** Outgoing radio packets by who gave them (a phone's address, or [HUB] for acknowledgements), served in turn. */
     private val queues = LinkedHashMap<String, ArrayDeque<Outgoing>>()
     private var turn = 0
+    /** Radio time each sender used in the last hour, for fairness (not persisted: a restart starts everyone equal). */
+    private val usedBy = HashMap<String, DutyCycle>()
     private var radioFreeAt = outbox.freeAt
     private var storageRetryAt = 0L
     private val uncertain = HashSet<Outgoing>()
@@ -35,7 +39,8 @@ class Hub(
         private set
 
     init {
-        outbox.reservations.forEach { duty.record(it.at, it.millis) }
+        // After a restart the phones' share counts every charged airing, the hub's own too: never less than was used.
+        outbox.reservations.forEach { duty.record(it.at, it.millis); share.record(it.at, it.millis) }
         for (entry in outbox.entries) {
             require(mailbox.classify(entry.port, entry.bytes) != null) { "invalid outbox packet" }
             // A restart never shortens the per-packet cooldown: a write charged just before a crash may have aired.
@@ -126,7 +131,7 @@ class Hub(
             }
             if (pendingAcks.isNotEmpty() && now - oldestAck >= ACK_MILLIS) flushAcks()
             if (now < radioFreeAt) return
-            val next = nextInTurn(now) ?: return
+            val next = nextFair(now) ?: return
             val packet = next.second
             // Recover a crash/append failure between intent and mailbox commit before sending any bytes.
             if (packet.id != null) {
@@ -139,6 +144,8 @@ class Hub(
             // Charge even uncertain writes and definitely refused writes conservatively. No restart bypass.
             outbox.reserve(now, millis, freeAt, duty.windowMillis, packet.id)
             duty.record(now, millis)
+            if (next.first != HUB) share.record(now, millis)
+            usedBy.getOrPut(next.first) { DutyCycle(100) }.record(now, millis)
             radioFreeAt = freeAt
             try {
                 radio.broadcast(packet.port, packet.bytes)
@@ -177,15 +184,27 @@ class Hub(
     /** Packets waiting for the radio, per sender. */
     @Synchronized fun waiting(): Map<String, Int> = queues.filterValues { it.isNotEmpty() }.mapValues { it.value.size }
 
-    private fun nextInTurn(now: Long): Pair<String, Outgoing>? {
+    /**
+     * The next packet (radio-airtime decision 53, AE4): the hub's own acknowledgements first; then short packets
+     * (receipts and most texts; the hub cannot read private mail, so size is the only sign) before full ones (picture
+     * pieces); among senders, whoever had the least radio time in the last hour, ties in turn. Phones' packets only
+     * while their [share] allows; acknowledgements only need the legal [duty].
+     */
+    private fun nextFair(now: Long): Pair<String, Outgoing>? {
         val senders = queues.keys.toList()
-        for (i in senders.indices) {
+        if (senders.isEmpty()) return null
+        val ready = senders.indices.mapNotNull { i ->
             val sender = senders[(turn + i) % senders.size]
-            val packet = queues.getValue(sender).firstOrNull { it !in uncertain && it !in completed && now >= it.retryAt } ?: continue
-            turn = (turn + i + 1) % senders.size
-            return sender to packet
+            val packets = queues.getValue(sender).filter { it !in uncertain && it !in completed && now >= it.retryAt }
+                .filter { sender == HUB || share.allows(now, airtime.millis(it.bytes.size)) }
+            if (packets.isEmpty()) null else Triple(i, sender, packets)
         }
-        return null
+        if (ready.isEmpty()) return null
+        val short = ready.mapNotNull { (i, s, p) -> p.firstOrNull { it.bytes.size < SHORT_BYTES }?.let { Triple(i, s, it) } }
+        val pool = short.ifEmpty { ready.map { (i, s, p) -> Triple(i, s, p.first()) } }
+        val pick = pool.minWith(compareBy({ if (it.second == HUB) 0 else 1 }, { usedBy[it.second]?.used(now) ?: 0.0 }, { it.first }))
+        turn = (turn + pick.first + 1) % senders.size
+        return pick.second to pick.third
     }
 
     private fun flushAcks() {
@@ -205,5 +224,9 @@ class Hub(
         const val FAILURE_BACKOFF_MILLIS = 5_000L
         /** Per packet, across phones and restarts; below the phone's first 2-minute retry so honest retries get through. */
         const val RETRY_COOLDOWN_MILLIS = 60_000L
+        /** Phones' share of each hour (AE4): 5 % is 180 s, half the EU 868 / Togo 10 % ceiling. */
+        const val APP_SHARE_PERCENT = 5
+        /** Packets below this many bytes go first: receipts, acknowledgements and most texts. */
+        const val SHORT_BYTES = 128
     }
 }

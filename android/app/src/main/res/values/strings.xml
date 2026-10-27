@@ -554,4 +554,7 @@
     <string name="recovery_add_again">Add again</string>
     <string name="recovery_file_failed">The file could not be saved.</string>
     <string name="recovery_read_failed">The file could not be opened.</string>
+    <string name="recovery_working">Working on the saved copy…</string>
+    <string name="recovery_more">And %1$d more.</string>
+    <string name="recovery_keep_failed">These people could not be kept.</string>
 </resources>

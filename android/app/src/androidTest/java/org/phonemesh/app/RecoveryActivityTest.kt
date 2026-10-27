@@ -78,6 +78,7 @@ class RecoveryActivityTest {
         answer(Intent.ACTION_CREATE_DOCUMENT)
         Views.tap(a, "recovery_save")
         until { copy.length() > 120 }
+        until { Views.tagged(a, "recovery_try") != null }
         assertNull("the card is gone from the screen once saved", Views.tagged(a, "recovery_words"))
 
         answer(Intent.ACTION_OPEN_DOCUMENT)

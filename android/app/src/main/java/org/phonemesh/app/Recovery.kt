@@ -6,6 +6,7 @@ import org.phonemesh.core.backup.BackupFile
 import org.phonemesh.core.backup.ContactsBackup
 import org.phonemesh.core.backup.RecoveryKey
 import org.phonemesh.core.crypto.P256
+import java.text.Normalizer
 
 /**
  * Contacts-only saved copies (account recovery RC1-RC5 A, backup purpose 0). Making one reads this phone's name and
@@ -27,10 +28,10 @@ object Recovery {
         var id = 0L
         val seen = HashSet<List<Byte>>()
         val contacts = history.contactRows().mapNotNull { c ->
-            if (c.card.size < 35) return@mapNotNull null
-            val identity = c.card.copyOfRange(2, 35)
-            if (P256.decompress(identity) == null || !seen.add(identity.toList())) return@mapNotNull null
-            val card = if (ContactCard.decode(c.card)?.identity?.contentEquals(identity) == true) c.card else identity
+            // A contact added from a hello is kept as their bare identity, not a card (review A-02): both shapes count.
+            val identity = identityOf(c.card) ?: return@mapNotNull null
+            if (!seen.add(identity.toList())) return@mapNotNull null
+            val card = if (c.card.size > IDENTITY && ContactCard.decode(c.card)?.identity?.contentEquals(identity) == true) c.card else identity
             ContactsBackup.Contact(
                 ++id, identity, card, displayName(c.name), c.colour and 0xFFFFFF, c.met,
                 c.voice?.takeIf { it.toByteArray(Charsets.UTF_8).size <= ContactsBackup.MAX_VOICE_BYTES }, maxOf(0L, c.added),
@@ -62,14 +63,24 @@ object Recovery {
      */
     fun restore(history: History, opened: Opened.Ok, now: Long): Int {
         val own = history.accountRow()?.identity
-        val live = history.contactRows().mapNotNull { r -> r.card.takeIf { it.size >= 35 }?.copyOfRange(2, 35)?.toList() }.toSet()
+        val live = history.contactRows().mapNotNull { r -> identityOf(r.card)?.toList() }.toSet()
+        // Saved people stay bounded however many copies are restored: at most one copy's worth (review A-01).
+        val room = maxOf(0, ContactsBackup.MAX_CONTACTS - history.recoveredRows().size)
         val rows = opened.copy.contacts
             .filter { c -> own == null || !c.identity.contentEquals(own) }
             .filter { c -> c.identity.toList() !in live }
+            .take(room)
             .map { c -> History.RecoveredRow(c.identity, c.card, c.savedName, c.colour, c.historicalMet, c.voice, c.addedAt) }
         return history.addRecovered(rows, opened.archiveId, now)
     }
 
+    /** The identity of a saved contact row: a whole card or the bare key ([Accounts.identityOf]); null if neither. */
+    private fun identityOf(card: ByteArray): ByteArray? =
+        if (card.size == IDENTITY || card.size >= 2 + IDENTITY) Accounts.identityOf(card).takeIf { P256.decompress(it) != null } else null
+
+    /** A name the copy's name rules take (review A-04): fitted, and "?" when nothing valid is left. */
     private fun displayName(name: String): String =
-        Names.fit(name.filter { it.code >= 0x20 && it.code != 0x7F }, ContactsBackup.MAX_NAME_BYTES).ifEmpty { "?" }
+        Names.fit(Normalizer.normalize(name, Normalizer.Form.NFC), ContactsBackup.MAX_NAME_BYTES).takeIf { Names.valid(it) } ?: "?"
+
+    private const val IDENTITY = 33
 }

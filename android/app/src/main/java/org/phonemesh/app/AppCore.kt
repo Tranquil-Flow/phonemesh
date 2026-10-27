@@ -561,16 +561,17 @@ class AppCore private constructor(
         return decodeAvatar(webp)
     }
 
-    private val photoCache = HashMap<String, android.graphics.Bitmap>()
+    /** One photo per contact, the one their profile names now: a contact sending new photos replaces it (review B1). */
+    private val photoCache = HashMap<String, Pair<String, android.graphics.Bitmap>>()
 
     /** The photo [accountId] chose, when this phone holds the one [avatar] names; null shows their letter. */
     fun photoOf(accountId: String, avatar: org.phonemesh.core.account.Avatar): android.graphics.Bitmap? {
         val wanted = avatar as? org.phonemesh.core.account.Avatar.Photo ?: return null
-        val key = "$accountId:$wanted"
-        synchronized(photoCache) { photoCache[key]?.let { return it } }
+        val key = wanted.toString()
+        synchronized(photoCache) { photoCache[accountId]?.takeIf { it.first == key }?.let { return it.second } }
         val webp = history.avatarPhoto(accountId)?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it).contentEquals(wanted.id) } ?: return null
         val bitmap = decodeAvatar(webp) ?: return null
-        synchronized(photoCache) { photoCache[key] = bitmap }
+        synchronized(photoCache) { photoCache[accountId] = key to bitmap }
         return bitmap
     }
 

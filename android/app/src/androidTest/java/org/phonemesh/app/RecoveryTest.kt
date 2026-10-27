@@ -43,6 +43,23 @@ class RecoveryTest {
         assertEquals("restoring on the same phone adds nobody", 0, Recovery.restore(core.history, opened, 2))
     }
 
+    /** Review A-02: a contact added from a hello is kept as their bare identity; the kit must hold them too. */
+    @Test fun contactsAddedFromAHelloAreInTheKitAndNotRestoredTwice() {
+        TestCore.install()
+        PersonFixture.meet()
+        val yaw = PersonFixture.Bea("Yaw", 0x00838F)
+        val identity = yaw.qr.card.identity
+        assertEquals(33, identity.size)
+        core.history.putContact(History.ContactRow(yaw.account, identity, "Yaw", 0x00838F, false, null, 7, null))
+        val key = RecoveryKey.generate()
+        val opened = Recovery.open(Recovery.export(core.history, key, 1_800_000_000_000, 1)!!, key) as Recovery.Opened.Ok
+        assertEquals("both people are in the kit", listOf("Bea", "Yaw"), opened.copy.contacts.map { it.savedName }.sorted())
+        val saved = opened.copy.contacts.single { it.savedName == "Yaw" }
+        assertArrayEquals(identity, saved.identity)
+        assertArrayEquals("a bare identity stays bare", identity, saved.card)
+        assertEquals("restoring on the same phone adds nobody, bare identities included", 0, Recovery.restore(core.history, opened, 2))
+    }
+
     @Test fun aRestoreOnANewPhoneKeepsThePeopleApartAndSendsNothing() {
         TestCore.install()
         val (bea, _) = PersonFixture.meet()

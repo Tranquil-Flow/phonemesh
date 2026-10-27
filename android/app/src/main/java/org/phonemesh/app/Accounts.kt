@@ -79,7 +79,7 @@ class Accounts(
                 }
                 try {
                     history.transaction {
-                        keepContact(code.card.encode(), code.card.profile, met = true, told = true)
+                        keepContact(code.card.encode(), code.card.profile, met = true, told = true, scanned = true)
                         check(store.installQrSession(account, state))
                         store.pendingRequests.retire(account)
                         Added.Contact(account, history.personChat(account.toString(), code.card.name).id, met = true)
@@ -187,13 +187,15 @@ class Accounts(
 
     /**
      * Keeps [profile] unless the contact already has a newer one (an old card scanned again). [told]: they got this
-     * phone's current profile in the same exchange (QR, or the hello), so no update needs to follow.
+     * phone's current profile in the same exchange (QR, or the hello), so no update needs to follow. [scanned]: their
+     * signed card was just scanned in person, so it wins whatever revision is stored: a profile pushed to a high
+     * revision by someone who briefly held their phone is repaired by meeting again (review B2).
      */
-    private fun keepContact(card: ByteArray, profile: Profile, met: Boolean, told: Boolean = false) {
+    private fun keepContact(card: ByteArray, profile: Profile, met: Boolean, told: Boolean = false, scanned: Boolean = false) {
         val account = AccountId.of(identityOf(card)).toString()
         val old = history.contactRow(account)
         val known = old?.profile?.let { Profile.decode(it) }
-        val kept = if (known != null && known.revision > profile.revision) known else profile
+        val kept = if (!scanned && known != null && known.revision > profile.revision) known else profile
         history.putContact(History.ContactRow(account, card, kept.name, kept.colour, met || old?.met == true, old?.voice,
             old?.added ?: now(), kept.encode()))
         if (told) store.profile()?.let { history.setProfileSent(account, it.revision, 0L) }

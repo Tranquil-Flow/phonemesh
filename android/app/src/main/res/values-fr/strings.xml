@@ -550,4 +550,7 @@
     <string name="recovery_add_again">Ajouter à nouveau</string>
     <string name="recovery_file_failed">Le fichier n\'a pas pu être enregistré.</string>
     <string name="recovery_read_failed">Le fichier n\'a pas pu être ouvert.</string>
+    <string name="recovery_working">Travail sur la copie…</string>
+    <string name="recovery_more">Et %1$d de plus.</string>
+    <string name="recovery_keep_failed">Impossible de garder ces personnes.</string>
 </resources>

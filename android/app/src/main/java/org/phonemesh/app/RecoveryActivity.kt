@@ -7,17 +7,22 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import org.phonemesh.core.backup.RecoveryKey
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Recovery kit (account recovery spec 5.3-5.4, RC1-RC6 A; backup purpose 0). Make a kit: a card with a QR code and
  * twelve words, and a file saved somewhere else; then try the saved file with the card, which marks it checked.
  * Restore: open a saved file with its card and keep the people, to add again on this phone. The key exists only while
- * its card is shown and is never stored (RC6: keeping it is off).
+ * its card is shown and is never stored (RC6: keeping it is off). Reading, sealing, opening and keeping run on one worker
+ * thread with a progress bar, never on the screen's thread (review A-01).
  */
 class RecoveryActivity : ScreenActivity() {
     private enum class Step { START, CARD, SAVED, CHECK, RESTORE, FOUND }
@@ -27,6 +32,8 @@ class RecoveryActivity : ScreenActivity() {
     private var key: RecoveryKey? = null
     private var file: ByteArray? = null
     private var found: Recovery.Opened.Ok? = null
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "recovery").apply { isDaemon = true } }
+    private var busyViews: List<View> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,9 +50,46 @@ class RecoveryActivity : ScreenActivity() {
     }
 
     override fun onDestroy() {
+        worker.shutdownNow()
         key = null
         file = null
         super.onDestroy()
+    }
+
+    /**
+     * Runs [job] on the worker while the screen shows a progress bar and takes no taps; then [done] on the screen's
+     * thread, or the sentence [failed] when the job threw. Nothing comes back once the screen is closed.
+     */
+    private fun <T> work(failed: Int, job: () -> T, done: (T) -> Unit) {
+        if (busyViews.isNotEmpty()) return
+        busy(true)
+        worker.execute {
+            val result = runCatching(job)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                busy(false)
+                result.fold(done) { core.note(UiText(failed)) }
+            }
+        }
+    }
+
+    private fun busy(on: Boolean) {
+        if (on) {
+            val bar = ProgressBar(this).apply { isIndeterminate = true; tag = "recovery_busy" }
+            val text = Ui.text(this, getString(R.string.recovery_working), palette.text)
+            body.addView(bar, 0)
+            body.addView(text, 0)
+            busyViews = listOf(text, bar)
+        } else {
+            busyViews.forEach(body::removeView)
+            busyViews = emptyList()
+        }
+        enable(body, !on)
+    }
+
+    private fun enable(view: View, on: Boolean) {
+        view.isEnabled = on
+        if (view is ViewGroup) for (i in 0 until view.childCount) enable(view.getChildAt(i), on)
     }
 
     private fun line(id: Int, vararg args: Any, bold: Boolean = false) =
@@ -89,7 +133,7 @@ class RecoveryActivity : ScreenActivity() {
         val saved = core.history.recoveredRows()
         if (saved.isNotEmpty()) {
             line(R.string.recovery_saved_people, bold = true)
-            for (person in saved) {
+            for (person in saved.take(SHOWN)) {
                 body.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -102,6 +146,7 @@ class RecoveryActivity : ScreenActivity() {
                     })
                 })
             }
+            if (saved.size > SHOWN) line(R.string.recovery_more, saved.size - SHOWN)
         }
     }
 
@@ -142,16 +187,20 @@ class RecoveryActivity : ScreenActivity() {
     private fun foundPeople() {
         val ok = found ?: run { step = Step.START; build(); return }
         line(R.string.recovery_found, ok.copy.contacts.size, bold = true)
-        for (c in ok.copy.contacts) body.addView(Ui.content(Ui.text(this, c.savedName, palette.text)))
+        for (c in ok.copy.contacts.take(SHOWN)) body.addView(Ui.content(Ui.text(this, c.savedName, palette.text)))
+        if (ok.copy.contacts.size > SHOWN) line(R.string.recovery_more, ok.copy.contacts.size - SHOWN)
         line(R.string.recovery_new_identity)
         line(R.string.recovery_compare)
         action("recovery_keep", R.string.recovery_keep, R.drawable.ic_check, filled = true) {
-            Recovery.restore(core.history, ok, System.currentTimeMillis())
-            found = null
-            file = null
-            step = Step.START
-            build()
-            core.note(UiText(R.string.recovery_kept))
+            val history = core.history
+            val now = System.currentTimeMillis()
+            work(R.string.recovery_keep_failed, { Recovery.restore(history, ok, now) }) {
+                found = null
+                file = null
+                step = Step.START
+                build()
+                core.note(UiText(R.string.recovery_kept))
+            }
         }
     }
 
@@ -165,7 +214,11 @@ class RecoveryActivity : ScreenActivity() {
     private fun open(typed: String) {
         val bytes = file ?: return
         val entered = keyFrom(typed) ?: run { core.note(UiText(R.string.recovery_bad_words)); return }
-        when (val o = Recovery.open(bytes, entered)) {
+        work(R.string.recovery_read_failed, { Recovery.open(bytes, entered) }) { o -> opened(o) }
+    }
+
+    private fun opened(o: Recovery.Opened) {
+        when (o) {
             is Recovery.Opened.Failed -> core.note(UiText(problemText(o.problem)))
             is Recovery.Opened.Ok -> if (step == Step.CHECK) {
                 core.settings.recoveryChecked = System.currentTimeMillis()
@@ -215,7 +268,7 @@ class RecoveryActivity : ScreenActivity() {
         if (resultCode != Activity.RESULT_OK || uri == null) return
         when (requestCode) {
             REQUEST_CREATE -> save(uri)
-            REQUEST_CHECK, REQUEST_RESTORE -> read(uri)?.let {
+            REQUEST_CHECK, REQUEST_RESTORE -> work(R.string.recovery_read_failed, { read(uri) }) {
                 file = it
                 step = if (requestCode == REQUEST_CHECK) Step.CHECK else Step.RESTORE
                 build()
@@ -225,18 +278,23 @@ class RecoveryActivity : ScreenActivity() {
 
     private fun save(uri: Uri) {
         val shown = key ?: return
-        val bytes = Recovery.export(core.history, shown, System.currentTimeMillis(), core.settings.nextRecoveryGeneration())
-        val written = bytes != null && runCatching {
-            checkNotNull(contentResolver.openOutputStream(uri, "wt")).use { it.write(bytes) }
-        }.isSuccess
-        if (!written) { core.note(UiText(R.string.recovery_file_failed)); return }
-        // The card is now only on paper: the check below asks for it again (RC4 A).
-        key = null
-        step = Step.SAVED
-        build()
+        val history = core.history
+        val resolver = contentResolver
+        val now = System.currentTimeMillis()
+        val generation = core.settings.nextRecoveryGeneration()
+        work(R.string.recovery_file_failed, {
+            val bytes = checkNotNull(Recovery.export(history, shown, now, generation)) { "no name yet" }
+            checkNotNull(resolver.openOutputStream(uri, "wt")).use { it.write(bytes) }
+        }) {
+            // The card is now only on paper: the check below asks for it again (RC4 A).
+            key = null
+            step = Step.SAVED
+            build()
+        }
     }
 
-    private fun read(uri: Uri): ByteArray? = runCatching {
+    /** On the worker: the whole file, at most [MAX_FILE] bytes; throws when it cannot be read. */
+    private fun read(uri: Uri): ByteArray =
         checkNotNull(contentResolver.openInputStream(uri)).use { input ->
             val out = java.io.ByteArrayOutputStream()
             val buffer = ByteArray(8192)
@@ -248,7 +306,6 @@ class RecoveryActivity : ScreenActivity() {
             }
             out.toByteArray()
         }
-    }.getOrNull() ?: run { core.note(UiText(R.string.recovery_read_failed)); null }
 
     companion object {
         const val MIME = "application/octet-stream"
@@ -256,6 +313,8 @@ class RecoveryActivity : ScreenActivity() {
         private const val REQUEST_CHECK = 42
         private const val REQUEST_RESTORE = 43
         private const val MAX_FILE = 16 * 1024 * 1024 + 4096
+        /** Names listed on screen at most; the rest are counted (review A-01). */
+        private const val SHOWN = 50
 
         fun open(activity: Activity) = activity.startActivity(Intent(activity, RecoveryActivity::class.java))
     }

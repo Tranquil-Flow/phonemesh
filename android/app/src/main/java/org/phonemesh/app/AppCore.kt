@@ -79,7 +79,7 @@ class AppCore private constructor(
     fun interface Observer { fun onCoreChange(change: Change) }
     data class FoundRadio(val address: String, val name: String, val rssi: Int)
     /** [colour] and [met]: a person chat's contact (accounts); null for radio chats. [old]: a radio-addressed chat, read-only. */
-    data class ChatRow(val chat: Chat, val title: String, val last: Message?, val peopleHeard: Int?, val colour: Int? = null, val met: Boolean? = null) {
+    data class ChatRow(val chat: Chat, val title: String, val last: Message?, val peopleHeard: Int?, val colour: Int? = null, val met: Boolean? = null, val face: Face? = null) {
         val old: Boolean get() = chat.kind == ChatKind.DIRECT
     }
 
@@ -495,12 +495,21 @@ class AppCore private constructor(
         ChatRow(
             chat, contact?.name ?: chatTitle(chat), history.lastMessage(chat.id),
             if (chat.kind == ChatKind.GROUP) peopleHeard(chat.id) else null,
-            contact?.colour, contact?.met,
+            contact?.colour, contact?.met, contact?.let { Face.of(it) },
         )
     }.sortedBy { it.old }
 
-    /** The contact colour of a person chat, for avatars; null otherwise. */
+    /** The contact colour of a person chat; null otherwise. */
     fun chatColour(chat: Chat): Int? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.colour else null
+
+    /** What a person chat's avatar shows; null for other chats. */
+    fun chatFace(chat: Chat): Face? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.let { Face.of(it) } else null
+
+    /** What others see for this phone; null before a name is saved. */
+    fun ownFace(): Face? = accounts.profile()?.let { Face.of(it) }
+
+    /** This phone's chosen picture: a letter until another is chosen. */
+    fun ownAvatar(): org.phonemesh.core.account.Avatar = accounts.profile()?.avatar ?: org.phonemesh.core.account.Avatar.Letter
 
     /** A radio's name for screens: "Radio EE01" when it has none (blank, missing, or just its address). */
     fun radioLabel(name: String?, address: String?): String =
@@ -2145,6 +2154,12 @@ class AppCore private constructor(
     /** Saves the name and colour, making the account's keys the first time. */
     fun saveAccount(name: String, colour: Int) {
         accounts.setName(name, colour)
+        changed(Change.MESSAGES)
+    }
+
+    /** Saves the name, colour (RGB) and picture: a new profile revision when something changed (decisions 48-49). */
+    fun saveProfile(name: String, colour: Int, avatar: org.phonemesh.core.account.Avatar) {
+        accounts.setProfile(name, colour, avatar)
         changed(Change.MESSAGES)
     }
 

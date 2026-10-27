@@ -15,6 +15,7 @@ import org.phonemesh.core.account.AccountId
 class ContactActivity : ScreenActivity() {
     private var chatId = 0L
     private lateinit var name: TextView
+    private lateinit var avatar: android.widget.FrameLayout
     private lateinit var met: TextView
     private lateinit var choices: LinearLayout
     private lateinit var restart: LinearLayout
@@ -33,7 +34,8 @@ class ContactActivity : ScreenActivity() {
             setPadding(pad(), 0, pad(), pad())
         }
         column.addView(backBar(getString(R.string.contact_details)))
-        column.addView(Looks.avatar(this, palette, ChatKind.PERSON, 48, core.chatColour(chat)))
+        avatar = Looks.avatar(this, palette, ChatKind.PERSON, 48, core.chatFace(chat)) as android.widget.FrameLayout
+        column.addView(avatar)
         name = Ui.content(Ui.text(this, "", palette.text, 24f, bold = true)).apply { tag = "contact_name" }
         column.addView(name)
         met = Ui.text(this, "", palette.muted).apply { tag = "contact_met" }
@@ -78,6 +80,7 @@ class ContactActivity : ScreenActivity() {
         val row = chat?.takeIf { it.kind == ChatKind.PERSON }?.let { core.history.contactRow(it.address) }
             ?: run { finish(); return }
         name.text = row.name
+        Looks.show(avatar, palette, ChatKind.PERSON, 48, Face.of(row))
 
         met.setText(if (row.met) R.string.safety_met else R.string.not_met)
         restart.visibility = if (core.history.outbox(row.accountId).any { it.state == "FAILED" }) View.VISIBLE else View.GONE

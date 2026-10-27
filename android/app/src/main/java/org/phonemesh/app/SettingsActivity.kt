@@ -153,7 +153,8 @@ class SettingsActivity : ScreenActivity() {
         hubValue.text = core.settings.hubCard?.let { org.phonemesh.core.hub.HubCard.parse(it)?.wifi } ?: getString(R.string.hub_none)
         val account = core.account()
         nameValue.text = account?.first ?: getString(R.string.name_unset)
-        nameDot.background = if (account != null) Ui.circle(AccountColours.argb(account.second)) else Ui.outline(this, palette.background, palette.outline, radiusDp = 16)
+        nameDot.background = core.ownFace()?.let { FaceDrawable(it, palette.outline, Ui.dp(this, 2).toFloat(), FaceDrawable::canDraw) }
+            ?: Ui.outline(this, palette.background, palette.outline, radiusDp = 16)
         helpers.visibility = if (core.connected) View.VISIBLE else View.GONE
         renderThemes()
         val downloads = core.downloads()

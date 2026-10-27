@@ -57,6 +57,7 @@
                 <data android:scheme="https" android:host="tranquil-flow.github.io" android:pathPrefix="/phonemesh/add" />
             </intent-filter>
         </activity>
+        <activity android:name=".EmojiActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".NameActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".RadioActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />

@@ -183,7 +183,8 @@ class ConversationActivity : ScreenActivity() {
             setPadding(pad() / 4, 0, pad() / 2, 0)
         }
         bar.addView(backButton())
-        bar.addView(Looks.avatar(this, palette, chat.kind, 40, core.chatColour(chat)).apply {
+        bar.addView(Looks.avatar(this, palette, chat.kind, 40, core.chatFace(chat)).apply {
+            tag = "title_avatar"
             (layoutParams as LinearLayout.LayoutParams).marginStart = pad() / 4
         })
         title = Ui.content(Ui.text(this, "", palette.text, 20f, bold = true).apply {

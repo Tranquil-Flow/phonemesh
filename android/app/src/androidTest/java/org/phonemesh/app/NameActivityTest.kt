@@ -130,4 +130,80 @@ class NameActivityTest {
         Views.waitUntil { value.text.toString() == "Awa B" }
         assertEquals("changing the name keeps the keys", identity, TestCore.onMain { core.accounts.identity.toList() })
     }
+
+    /** Decision 48: any colour from the wheel is saved as it is, and the preview shows it. */
+    @Test fun aColourFromTheWheelIsSavedAndPreviewed() {
+        TestCore.install(named = false)
+        val screen = Views.start(NameActivity::class.java)
+        type(screen, "Esi")
+        Views.tap(screen, "name_more_colours")
+        val wheel = Views.tagged(screen, "colour_wheel") as ColourWheel
+        assertEquals(emptyList<String>(), A11yCheck.problems(screen))
+        // The right edge of the wheel is pure red at the wheel's lightness.
+        val picked = TestCore.onMain { wheel.pick(wheel.width - 1f, wheel.height / 2f); wheel.rgb }
+        assertEquals(android.graphics.Color.HSVToColor(floatArrayOf(0f, 1f, wheel.lightness)) and 0xFFFFFF, picked)
+        assertTrue("a wheel colour is enough to save", enabled(screen, "name_save"))
+        Views.tap(screen, "name_save")
+        Views.waitUntil { screen.isFinishing }
+        assertEquals("Esi" to picked, TestCore.onMain { core.account() })
+        assertEquals(org.phonemesh.core.account.Avatar.Letter, TestCore.onMain { core.ownAvatar() })
+    }
+
+    /** Decision 49: an emoji every supported phone draws, chosen or typed, becomes the picture; others are refused. */
+    @Test fun anEmojiIsChosenForThePictureAndSaved() {
+        TestCore.install(named = false)
+        val screen = Views.start(NameActivity::class.java)
+        type(screen, "Kofi")
+        Views.tap(screen, "colour_3")
+        Views.tap(screen, "picture_emoji")
+        Views.waitUntil { resumedNow() is EmojiActivity }
+        val emoji = Views.resumed() as EmojiActivity
+        assertEquals(emptyList<String>(), A11yCheck.problems(emoji))
+        val typed = Views.tagged(emoji, "emoji_type") as EditText
+        TestCore.onMain { typed.setText("🥰"); typed.onEditorAction(android.view.inputmethod.EditorInfo.IME_ACTION_DONE) }
+        val problem = TestCore.onMain { Views.descendants(emoji.window.decorView).first { it.tag == "emoji_problem" } }
+        Views.waitUntil { problem.visibility == View.VISIBLE }
+        assertFalse("an emoji newer than Android 8.0 stays on the screen", emoji.isFinishing)
+        TestCore.onMain { typed.setText("🐟"); typed.onEditorAction(android.view.inputmethod.EditorInfo.IME_ACTION_DONE) }
+        Views.waitUntil { resumedNow() === screen }
+        assertTrue(Views.tagged(screen, "picture_emoji")!!.let { v -> TestCore.onMain { v.isSelected } })
+        Views.tap(screen, "name_save")
+        Views.waitUntil { screen.isFinishing }
+        val profile = TestCore.onMain { core.accounts.profile()!! }
+        assertEquals(org.phonemesh.core.account.Avatar.Emoji("🐟"), profile.avatar)
+        assertEquals(0x43A047, profile.colour)
+        assertEquals("the card carries the picture", profile, TestCore.onMain { core.accounts.card().profile })
+    }
+
+    @Test fun theEmojiGridShowsEmojiEveryPhoneDrawsAndATapChoosesOne() {
+        TestCore.install(named = false)
+        val screen = Views.start(NameActivity::class.java)
+        Views.tap(screen, "picture_emoji")
+        Views.waitUntil { resumedNow() is EmojiActivity }
+        val emoji = Views.resumed() as EmojiActivity
+        val grid = Views.tagged(emoji, "emoji_grid") as android.widget.GridView
+        val count = TestCore.onMain { grid.adapter.count }
+        assertTrue("about 1,500 emoji without skin tones: $count", count in 1200..1700)
+        assertEquals("😀", TestCore.onMain { grid.adapter.getItem(0) })
+        // A real finger: down then up on the second cell, entering at the window like a touch on the screen.
+        TestCore.onMain {
+            val cell = grid.getChildAt(1)
+            val at = IntArray(2).also { cell.getLocationInWindow(it) }
+            val x = at[0] + cell.width / 2f; val y = at[1] + cell.height / 2f
+            val down = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0)
+                emoji.window.decorView.dispatchTouchEvent(event)
+                event.recycle()
+            }
+        }
+        Views.waitUntil { resumedNow() === screen }
+        val tile = Views.tagged(screen, "picture_emoji")!!
+        Views.waitUntil { tile.isSelected }
+        type(screen, "Ama")
+        Views.tap(screen, "colour_1")
+        Views.tap(screen, "name_save")
+        Views.waitUntil { screen.isFinishing }
+        assertEquals("the tapped emoji is the picture", org.phonemesh.core.account.Avatar.Emoji("😁"), TestCore.onMain { core.ownAvatar() })
+    }
 }

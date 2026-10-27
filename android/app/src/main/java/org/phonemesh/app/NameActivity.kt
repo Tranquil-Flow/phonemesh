@@ -1,5 +1,7 @@
 package org.phonemesh.app
 
+import android.widget.SeekBar
+import org.phonemesh.core.account.Avatar
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -21,9 +23,10 @@ import org.phonemesh.core.RecordGesture
 import org.phonemesh.core.account.Names
 
 /**
- * The person's own name and colour (accounts spec, "On the screen"; plan step 10). They say their name: the voice
- * writes it down, it shows for correcting and is read back. Then they pick a colour. Typing works too, for when no
- * voice is downloaded yet. Saving makes the account's keys the first time.
+ * The person's own name, colour and picture (accounts spec, "On the screen"; plan step 10; decisions 48-49). They say
+ * their name: the voice writes it down, it shows for correcting and is read back. Then they pick a colour (eight
+ * named ones, or any on the wheel) and a picture: their first letter or an emoji. A preview shows what others see.
+ * Typing works too, for when no voice is downloaded yet. Saving makes the account's keys the first time.
  */
 class NameActivity : ScreenActivity() {
     private lateinit var field: EditText
@@ -35,7 +38,14 @@ class NameActivity : ScreenActivity() {
     private lateinit var save: View
     private lateinit var listen: View
     private val swatches = ArrayList<View>()
+    /** RGB, or -1 before one is picked. */
     private var colour = -1
+    private var avatar: Avatar = Avatar.Letter
+    private lateinit var preview: FrameLayout
+    private lateinit var wheelBox: LinearLayout
+    private lateinit var wheel: ColourWheel
+    private lateinit var lightness: SeekBar
+    private val pictures = LinkedHashMap<String, LinearLayout>()
     private var pressedAt = 0L
     private var wasRecording = false
     private val tick = object : Runnable {
@@ -48,7 +58,9 @@ class NameActivity : ScreenActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val saved = core.account()
-        colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second?.let { AccountColours.indexOf(it) } ?: -1
+        colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second ?: -1
+        avatar = savedInstanceState?.getString(STATE_EMOJI)?.let { e -> runCatching { Avatar.Emoji(e) }.getOrNull() }
+            ?: if (savedInstanceState?.getBoolean(STATE_LETTER) == true) Avatar.Letter else core.ownAvatar()
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), pad())
@@ -112,6 +124,14 @@ class NameActivity : ScreenActivity() {
         column.addView(problem)
         column.addView(Ui.text(this, getString(R.string.name_check), palette.muted).apply { tag = "name_check" })
 
+        val previewRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        preview = Looks.avatar(this, palette, ChatKind.PERSON, PREVIEW_DP, null) as FrameLayout
+        preview.tag = "name_preview"
+        previewRow.addView(preview)
+        previewRow.addView(Ui.text(this, getString(R.string.name_preview), palette.text, bold = true),
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
+        column.addView(previewRow, full().apply { topMargin = pad() })
+
         column.addView(Ui.text(this, getString(R.string.name_colour), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
         val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         AccountColours.all.chunked(4).forEachIndexed { rowIndex, colours ->
@@ -126,6 +146,63 @@ class NameActivity : ScreenActivity() {
             grid.addView(row, full())
         }
         column.addView(grid)
+        column.addView(Ui.button(this, palette, getString(R.string.name_more_colours), null).apply {
+            tag = "name_more_colours"
+            setOnClickListener {
+                wheelBox.visibility = if (wheelBox.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                if (colour >= 0) wheel.show(colour)
+                lightness.progress = ((wheel.lightness - ColourWheel.MIN_LIGHTNESS) / (1 - ColourWheel.MIN_LIGHTNESS) * 100).toInt()
+            }
+        }, full().apply { topMargin = pad() / 2 })
+        wheelBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        wheel = ColourWheel(this, palette.outline) { picked -> colour = picked; render() }.apply {
+            tag = "colour_wheel"
+            contentDescription = getString(R.string.colour_wheel)
+            isClickable = true
+        }
+        wheelBox.addView(wheel, LinearLayout.LayoutParams(Ui.dp(this, WHEEL_DP), Ui.dp(this, WHEEL_DP)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = pad() / 2
+        })
+        wheelBox.addView(Ui.text(this, getString(R.string.colour_lightness), palette.text), full())
+        lightness = SeekBar(this).apply {
+            tag = "colour_lightness"
+            contentDescription = getString(R.string.colour_lightness)
+            max = 100
+            minimumHeight = Ui.dp(this@NameActivity, 48)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    wheel.lightness = ColourWheel.MIN_LIGHTNESS + (1 - ColourWheel.MIN_LIGHTNESS) * progress / 100f
+                    colour = wheel.rgb
+                    render()
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+                override fun onStopTrackingTouch(bar: SeekBar?) = Unit
+            })
+        }
+        wheelBox.addView(lightness, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 48)))
+        column.addView(wheelBox, full())
+
+        column.addView(Ui.text(this, getString(R.string.name_picture), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
+        val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (key in listOf(PICTURE_LETTER, PICTURE_EMOJI)) {
+            val tile = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                tag = "picture_$key"
+                minimumHeight = Ui.dp(this@NameActivity, 96)
+                setOnClickListener { if (key == PICTURE_LETTER) { avatar = Avatar.Letter; render() } else chooseEmoji() }
+            }
+            pictures[key] = tile
+            choices.addView(tile, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (key != PICTURE_LETTER) marginStart = pad() / 2
+                topMargin = pad() / 2
+            })
+        }
+        column.addView(choices, full())
 
         save = Ui.button(this, palette, getString(R.string.name_save), R.drawable.ic_check, filled = true).apply {
             tag = "name_save"
@@ -140,6 +217,8 @@ class NameActivity : ScreenActivity() {
         super.onSaveInstanceState(outState)
         outState.putString(STATE_NAME, field.text.toString())
         outState.putInt(STATE_COLOUR, colour)
+        (avatar as? Avatar.Emoji)?.let { outState.putString(STATE_EMOJI, it.text) }
+        outState.putBoolean(STATE_LETTER, avatar == Avatar.Letter)
     }
 
     override fun onStop() {
@@ -153,7 +232,7 @@ class NameActivity : ScreenActivity() {
         tag = "colour_$index"
         isClickable = true
         contentDescription = getString(colour.name)
-        setOnClickListener { this@NameActivity.colour = index; render() }
+        setOnClickListener { this@NameActivity.colour = colour.rgb; render() }
         addView(View(this@NameActivity).apply { background = Ui.circle(colour.argb) },
             FrameLayout.LayoutParams(Ui.dp(this@NameActivity, SWATCH_DP), Ui.dp(this@NameActivity, SWATCH_DP), Gravity.CENTER))
         addView(Ui.icon(this@NameActivity, R.drawable.ic_check, colour.on, 36).apply { tag = "colour_check" },
@@ -191,13 +270,43 @@ class NameActivity : ScreenActivity() {
         }
     }
 
+    private fun chooseEmoji() {
+        @Suppress("DEPRECATION")
+        startActivityForResult(EmojiActivity.intent(this), REQUEST_EMOJI)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EMOJI || resultCode != RESULT_OK) return
+        val emoji = data?.getStringExtra(EmojiActivity.EXTRA_EMOJI) ?: return
+        avatar = runCatching { Avatar.Emoji(emoji) }.getOrNull() ?: return
+        render()
+    }
+
+    /** One picture choice: what it would show, its name, and a thick outline when chosen. */
+    private fun renderPicture(key: String, shows: Face?, label: String, chosen: Boolean) {
+        val tile = pictures[key] ?: return
+        tile.removeAllViews()
+        tile.isSelected = chosen
+        tile.contentDescription = label
+        tile.background = Ui.ripple(Ui.outline(this, if (chosen) palette.accent else palette.surface, palette.outline,
+            strokeDp = if (chosen) 3 else 2), Ui.pressedOf(palette.text))
+        tile.addView(Looks.avatar(this, palette, ChatKind.PERSON, 48, shows))
+        tile.addView(Ui.text(this, label, if (chosen) palette.onAccent else palette.text, bold = true).apply {
+            gravity = Gravity.CENTER
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        })
+    }
+
     /** What the person said or typed, made valid; null when nothing usable is there. */
     private fun cleaned(): String? = Names.clean(field.text.toString()).takeIf { it.isNotEmpty() }
 
     private fun onSave() {
         val name = cleaned() ?: return
-        if (!Names.valid(name) || name.toByteArray(Charsets.UTF_8).size > Names.MAX_BYTES || colour !in AccountColours.all.indices) return
-        core.saveAccount(name, AccountColours.all[colour].rgb)
+        if (!Names.valid(name) || name.toByteArray(Charsets.UTF_8).size > Names.MAX_BYTES || colour !in 0..0xFFFFFF) return
+        core.saveProfile(name, colour, avatar)
         finish()
     }
 
@@ -233,8 +342,17 @@ class NameActivity : ScreenActivity() {
         }
         problem.visibility = if (problem.text.isEmpty()) View.GONE else View.VISIBLE
         Ui.enable(listen, name != null && voice)
-        swatches.forEachIndexed { i, v -> v.findViewWithTag<View>("colour_check").visibility = if (i == colour) View.VISIBLE else View.INVISIBLE }
-        Ui.enable(save, name != null && !tooLong && !invalid && colour in AccountColours.all.indices)
+        swatches.forEachIndexed { i, v ->
+            v.findViewWithTag<View>("colour_check").visibility = if (AccountColours.all[i].rgb == colour) View.VISIBLE else View.INVISIBLE
+        }
+        val shown = colour.takeIf { it >= 0 } ?: AccountStore.UNKNOWN_COLOUR
+        val label = name?.takeIf { !tooLong && !invalid } ?: "?"
+        Looks.show(preview, palette, ChatKind.PERSON, PREVIEW_DP, Face(label, shown, avatar))
+        renderPicture(PICTURE_LETTER, Face(label, shown, Avatar.Letter), getString(R.string.name_picture_letter), avatar == Avatar.Letter)
+        // Before one is chosen, a smile shows what the choice is about.
+        renderPicture(PICTURE_EMOJI, Face(label, shown, avatar as? Avatar.Emoji ?: Avatar.Emoji(HINT_EMOJI)), getString(R.string.name_picture_emoji),
+            avatar is Avatar.Emoji)
+        Ui.enable(save, name != null && !tooLong && !invalid && colour in 0..0xFFFFFF)
     }
 
     companion object {
@@ -242,6 +360,14 @@ class NameActivity : ScreenActivity() {
         private const val SWATCH_DP = 56
         private const val STATE_NAME = "name"
         private const val STATE_COLOUR = "colour"
+        private const val REQUEST_EMOJI = 42
+        private const val STATE_EMOJI = "emoji"
+        private const val STATE_LETTER = "letter"
+        private const val PICTURE_LETTER = "letter"
+        private const val PICTURE_EMOJI = "emoji"
+        private const val PREVIEW_DP = 64
+        private const val WHEEL_DP = 240
+        private const val HINT_EMOJI = "🙂"
         private const val REQUEST_MIC = 41
 
         fun open(context: Context) = context.startActivity(Intent(context, NameActivity::class.java))

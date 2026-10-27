@@ -85,7 +85,7 @@ class AddSomeoneActivity : ScreenActivity() {
         background = Ui.outline(this@AddSomeoneActivity, palette.surface, palette.outline)
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = p / 2 }
         val head = LinearLayout(this@AddSomeoneActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        head.addView(View(this@AddSomeoneActivity).apply { background = Ui.circle(AccountColours.argb(request.colour)) },
+        head.addView(Looks.avatar(this@AddSomeoneActivity, palette, ChatKind.PERSON, 40, Face.of(request.hello.profile)),
             LinearLayout.LayoutParams(Ui.dp(this@AddSomeoneActivity, 40), Ui.dp(this@AddSomeoneActivity, 40)))
         head.addView(Ui.text(this@AddSomeoneActivity, getString(R.string.add_wants_to_talk, request.name), palette.text, 20f, bold = true),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = p })

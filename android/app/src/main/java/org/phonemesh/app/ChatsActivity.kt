@@ -484,7 +484,7 @@ class ChatsActivity : ScreenActivity() {
             tag = "chat:${chat.id}"
             contentDescription = item.title
         }
-        row.addView(Looks.avatar(this, palette, chat.kind, 56, item.colour))
+        row.addView(Looks.avatar(this, palette, chat.kind, 56, item.face))
         val middle = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad() / 2, 0)

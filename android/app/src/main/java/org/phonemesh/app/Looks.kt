@@ -24,21 +24,38 @@ object Looks {
         DeliveryStatus.QUEUED -> StatusLook(R.drawable.ic_clock, palette.muted, R.string.waiting_radio, true)
     }
 
-    /** Group: rounded square, people on yellow. Private: circle with a person. */
-    /** [colour]: a person's chosen colour (accounts), filling the circle. */
-    fun avatar(context: Context, palette: Palette, kind: ChatKind, sizeDp: Int, colour: Int? = null): View = FrameLayout(context).apply {
+    /**
+     * Group: rounded square, people on yellow. Private: the person's [face] (their colour and their letter or emoji,
+     * spec decisions 48-49), or a plain circle with a person when not known.
+     */
+    fun avatar(context: Context, palette: Palette, kind: ChatKind, sizeDp: Int, face: Face? = null): View = FrameLayout(context).apply {
         val size = Ui.dp(context, sizeDp)
         layoutParams = LinearLayout.LayoutParams(size, size)
-        background = when {
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        show(this, palette, kind, sizeDp, face)
+    }
+
+    /** Draws [kind] and [face] into an [avatar] again (a profile changed while the screen is open). */
+    fun show(view: FrameLayout, palette: Palette, kind: ChatKind, sizeDp: Int, face: Face?) {
+        val context = view.context
+        view.removeAllViews()
+        val drawn = if (kind == ChatKind.PERSON && face != null) {
+            FaceDrawable(face, palette.outline, Ui.dp(context, 2).toFloat(), FaceDrawable::canDraw)
+        } else null
+        view.background = when {
             kind == ChatKind.GROUP -> Ui.outline(context, palette.accent, palette.outline, radiusDp = sizeDp / 4)
-            colour != null -> Ui.circle(AccountColours.argb(colour)).apply { setStroke(Ui.dp(context, 2), palette.outline) }
+            drawn != null -> drawn
             else -> Ui.circle(palette.surface).apply { setStroke(Ui.dp(context, 2), palette.outline) }
         }
+        if (drawn?.drawn != null) return
+        val ink = when {
+            kind == ChatKind.GROUP -> palette.onAccent
+            face != null -> 0xFF000000.toInt() or org.phonemesh.core.account.ProfileColours.letterOn(face.colour)
+            else -> palette.text
+        }
         val icon = Ui.dp(context, sizeDp / 2)
-        addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person,
-            if (kind == ChatKind.GROUP) palette.onAccent else if (colour != null) android.graphics.Color.WHITE else palette.text, sizeDp / 2),
+        view.addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person, ink, sizeDp / 2),
             FrameLayout.LayoutParams(icon, icon, Gravity.CENTER))
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     }
 
     /** The people-heard badge of a group: a bold count beside a people icon. Fill it with [showPeople]; the caller sets the tag. */

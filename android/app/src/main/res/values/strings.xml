@@ -333,6 +333,16 @@
     <string name="name_no_voice">No voice yet. Type your name.</string>
     <string name="name_check">Is it right? You can change it.</string>
     <string name="name_colour">Pick your colour</string>
+    <string name="name_more_colours">More colours</string>
+    <string name="colour_wheel">Colour wheel</string>
+    <string name="colour_lightness">Lighter or darker</string>
+    <string name="name_picture">Pick your picture</string>
+    <string name="name_picture_letter">Letter</string>
+    <string name="name_picture_emoji">Emoji</string>
+    <string name="name_preview">This is what others see.</string>
+    <string name="emoji_title">Choose an emoji</string>
+    <string name="emoji_type">Or type one here</string>
+    <string name="emoji_not_allowed">Some phones cannot show that one.</string>
     <string name="name_save">Save</string>
     <string name="name_too_long">Too long. Use a shorter name.</string>
     <string name="name_invalid">This name cannot be used.</string>

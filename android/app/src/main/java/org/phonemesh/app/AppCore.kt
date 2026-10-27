@@ -41,6 +41,7 @@ import org.phonemesh.core.PackStore
 import org.phonemesh.core.PeopleHeard
 import org.phonemesh.core.LoraAirtime
 import org.phonemesh.core.LoraShape
+import org.phonemesh.core.RadioAllowance
 import org.phonemesh.core.RadioTime
 import org.phonemesh.core.PictureAssembler
 import org.phonemesh.core.PictureCodec
@@ -968,6 +969,23 @@ class AppCore private constructor(
 
     private data class MailFlight(val packetId: Long, val outboxId: Long)
     private val mailQueue = LinkedHashSet<Long>()
+    /** This phone's private mail on air in the last hour, at most 180 s (AE4 in-app backstop); kept across restarts. */
+    private val allowance = RadioAllowance.decode(settings.radioAllowance)
+    private val allowanceRoom = Runnable { pumpMail() }
+
+    /** Milliseconds on air for [bytes] of private mail on the radio's setting (LongFast, the default, when unknown). */
+    private fun mailMillis(bytes: Int) = RadioTime.seconds(listOf(bytes), knownShape() ?: LoraAirtime.DEFAULT) * 1000.0
+
+    /** True when the radio allowance has room for this mail now; otherwise the queue waits and tries again then. */
+    internal fun allowanceRoomFor(bytes: Int, now: Long = System.currentTimeMillis()): Boolean {
+        val room = allowance.nextRoom(now, mailMillis(bytes)) ?: return true
+        main.removeCallbacks(allowanceRoom)
+        main.postDelayed(allowanceRoom, room - now)
+        return false
+    }
+
+    /** Radio time this phone's private mail used in the last hour, in milliseconds. */
+    fun radioAllowanceUsed(now: Long = System.currentTimeMillis()): Double = allowance.used(now)
     private var mailFlight: MailFlight? = null
     private var mailBlocked = false
     private val mailStalled = Runnable { pauseMail() }
@@ -985,13 +1003,17 @@ class AppCore private constructor(
         if (!mayTransmit() || mailBlocked || mailFlight != null || draining != null) return
         while (mailQueue.isNotEmpty()) {
             val id = mailQueue.first()
-            mailQueue.remove(id)
-            val row = history.outboxRow(id) ?: continue
+            val row = history.outboxRow(id)
             // A QR replacement or a peer receipt can retire queued work before its turn.
-            if (row.state !in setOf("WAITING", "SENT", "HUB")) continue
+            if (row == null || row.state !in setOf("WAITING", "SENT", "HUB")) { mailQueue.remove(id); continue }
+            // AE4 backstop: past 180 s this hour, the packet keeps its place and goes when there is room again.
+            if (!allowanceRoomFor(row.packet.size)) return
+            mailQueue.remove(id)
             val packetId = try {
                 radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, row.packet, PRIMARY_CHANNEL)
             } catch (_: RuntimeException) { pauseMail(); return }
+            allowance.record(System.currentTimeMillis(), mailMillis(row.packet.size))
+            settings.radioAllowance = allowance.encode()
             mailFlight = MailFlight(packetId, id)
             main.postDelayed(mailStalled, DRAIN_WAIT_MS)
             return

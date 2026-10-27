@@ -522,6 +522,24 @@ class PersonChatTest {
         assertEquals(DeliveryStatus.DELIVERED, TestCore.onMain { core.history.message(message.id)!!.status })
     }
 
+    /** AE4 backstop: past 180 s of private mail on air this hour, even after a restart, a message waits for room. */
+    @Test fun pastThreeMinutesOnTheRadioThisHourAMessageWaits() {
+        val (_, chatId) = meet()
+        // Written as the app stores it (a minified app keeps no setter the app itself never calls from outside).
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences(TestCore.PREFS, android.content.Context.MODE_PRIVATE).edit()
+            .putString("radio_allowance", "${System.currentTimeMillis()}:180000.0").commit()
+        TestCore.restart()
+        TestCore.onMain { TestCore.radio.connected(true) }
+        TestCore.radio.broadcasts.clear()
+        TestCore.onMain { core.setDraft(chatId, "Plus tard") }
+        assertTrue(TestCore.onMain { core.send(chatId) })
+        Thread.sleep(1_000)
+        assertTrue("held by this phone's radio allowance", TestCore.radio.broadcasts.isEmpty())
+        assertEquals(180_000.0, TestCore.onMain { core.radioAllowanceUsed() }, 1.0)
+        assertEquals(1, TestCore.onMain { core.history.messages(chatId).count { it.text == "Plus tard" } })
+    }
+
     @Test fun aReceiptNotifiesObserversAfterUpdatingDelivery() {
         val (bea, chatId) = meet()
         TestCore.onMain { core.setDraft(chatId, "Bonjour Bea"); core.send(chatId) }

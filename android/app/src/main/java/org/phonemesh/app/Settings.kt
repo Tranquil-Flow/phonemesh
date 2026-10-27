@@ -33,6 +33,11 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = ThemeMode.of(prefs.getString(THEME, null))
         set(value) { prefs.edit().putString(THEME, value.key).apply() }
 
+    /** This phone's private mail on air in the last hour ([org.phonemesh.core.RadioAllowance.encode]). */
+    var radioAllowance: String?
+        get() = prefs.getString(RADIO_ALLOWANCE, null)
+        set(value) { prefs.edit().putString(RADIO_ALLOWANCE, value).apply() }
+
     /** True once any message was sent: the hello step is done and the "Hold to talk" hint stops. */
     var firstMessageSent: Boolean
         get() = prefs.getBoolean(FIRST_MESSAGE_SENT, false)
@@ -148,6 +153,7 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         const val PREFS = "phonemesh"
         const val OLD_PREFS = "MainActivity"
         private const val LANGUAGE = "language"
+        private const val RADIO_ALLOWANCE = "radio_allowance"
         private const val ENGINE = "engine"
         private const val RADIO_ADDRESS = "radioAddress"
         private const val RADIO_NAME = "radioName"

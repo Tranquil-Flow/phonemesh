@@ -164,6 +164,16 @@ From handover 3 and the owner on 2026-10-14:
 66. Group messages are deniable to outsiders: each member's group signing key reaches the admin over their private
     session and everyone else in the roster, never signed by an identity key (owner, 2026-10-27; design in
     `docs/specs/2026-10-27-private-group-keys-draft.md`).
+67. v0.1.1 is released now without private groups; groups and hub updates come in v0.1.2. Then the demo moves to the
+    v0.1.1 release (owner, 2026-10-27; replaces decision 34's split for groups).
+68. The human cryptography sign-off asked for in decisions 41 and 47 is skipped for now. The agent review (decision
+    59) and its fixes stand for v0.1.1 (owner, 2026-10-27).
+69. Group photos and full pictures in groups follow decision 64: they go only through a hub and never on a radio.
+    Members elsewhere see the colour sketch, one radio packet (owner, 2026-10-27).
+70. Update signing keys: the owner runs a key-making script on an offline machine and hands over only the two public
+    keys, catalog and recovery (owner, 2026-10-27; how decision 61 is done).
+71. Group screens are shown as a clickable mockup (English and French) for review before they are built
+    (owner, 2026-10-27).
 
 ## What an outsider can and cannot learn
 

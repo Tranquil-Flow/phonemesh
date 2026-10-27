@@ -80,7 +80,7 @@ class ContactActivity : ScreenActivity() {
         val row = chat?.takeIf { it.kind == ChatKind.PERSON }?.let { core.history.contactRow(it.address) }
             ?: run { finish(); return }
         name.text = row.name
-        Looks.show(avatar, palette, ChatKind.PERSON, 48, Face.of(row))
+        Looks.show(avatar, palette, ChatKind.PERSON, 48, core.faceOf(row))
 
         met.setText(if (row.met) R.string.safety_met else R.string.not_met)
         restart.visibility = if (core.history.outbox(row.accountId).any { it.state == "FAILED" }) View.VISIBLE else View.GONE

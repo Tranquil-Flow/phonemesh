@@ -41,6 +41,8 @@ class NameActivity : ScreenActivity() {
     /** RGB, or -1 before one is picked. */
     private var colour = -1
     private var avatar: Avatar = Avatar.Letter
+    /** A photo chosen on this screen, not saved yet. */
+    private var photo: AppCore.AvatarDraft? = null
     private lateinit var preview: FrameLayout
     private lateinit var wheelBox: LinearLayout
     private lateinit var wheel: ColourWheel
@@ -59,7 +61,11 @@ class NameActivity : ScreenActivity() {
         super.onCreate(savedInstanceState)
         val saved = core.account()
         colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second ?: -1
+        photo = savedInstanceState?.getByteArray(STATE_PHOTO)?.let { webp ->
+            android.graphics.BitmapFactory.decodeByteArray(webp, 0, webp.size)?.let { core.draftOf(it) }
+        }
         avatar = savedInstanceState?.getString(STATE_EMOJI)?.let { e -> runCatching { Avatar.Emoji(e) }.getOrNull() }
+            ?: photo?.avatar
             ?: if (savedInstanceState?.getBoolean(STATE_LETTER) == true) Avatar.Letter else core.ownAvatar()
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -186,7 +192,7 @@ class NameActivity : ScreenActivity() {
 
         column.addView(Ui.text(this, getString(R.string.name_picture), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
         val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (key in listOf(PICTURE_LETTER, PICTURE_EMOJI)) {
+        for (key in listOf(PICTURE_LETTER, PICTURE_EMOJI, PICTURE_PHOTO)) {
             val tile = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -194,7 +200,13 @@ class NameActivity : ScreenActivity() {
                 isFocusable = true
                 tag = "picture_$key"
                 minimumHeight = Ui.dp(this@NameActivity, 96)
-                setOnClickListener { if (key == PICTURE_LETTER) { avatar = Avatar.Letter; render() } else chooseEmoji() }
+                setOnClickListener {
+                    when (key) {
+                        PICTURE_LETTER -> { avatar = Avatar.Letter; render() }
+                        PICTURE_EMOJI -> chooseEmoji()
+                        else -> choosePhoto()
+                    }
+                }
             }
             pictures[key] = tile
             choices.addView(tile, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -218,6 +230,7 @@ class NameActivity : ScreenActivity() {
         outState.putString(STATE_NAME, field.text.toString())
         outState.putInt(STATE_COLOUR, colour)
         (avatar as? Avatar.Emoji)?.let { outState.putString(STATE_EMOJI, it.text) }
+        photo?.takeIf { avatar is Avatar.Photo }?.let { outState.putByteArray(STATE_PHOTO, it.webp) }
         outState.putBoolean(STATE_LETTER, avatar == Avatar.Letter)
     }
 
@@ -270,6 +283,16 @@ class NameActivity : ScreenActivity() {
         }
     }
 
+    /** A photo from the phone (decision 50 D): at most one change a day, so say so before choosing. */
+    private fun choosePhoto() {
+        if (!core.photoChangeAllowed() && avatar !is Avatar.Photo) { core.note(UiText(R.string.photo_once_a_day)); return }
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }, REQUEST_PHOTO)
+    }
+
     private fun chooseEmoji() {
         @Suppress("DEPRECATION")
         startActivityForResult(EmojiActivity.intent(this), REQUEST_EMOJI)
@@ -279,6 +302,20 @@ class NameActivity : ScreenActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PHOTO && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            Thread {
+                val draft = core.prepareAvatar(uri)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (draft == null) { core.note(UiText(R.string.picture_failed)); return@runOnUiThread }
+                    photo = draft
+                    avatar = draft.avatar
+                    render()
+                }
+            }.start()
+            return
+        }
         if (requestCode != REQUEST_EMOJI || resultCode != RESULT_OK) return
         val emoji = data?.getStringExtra(EmojiActivity.EXTRA_EMOJI) ?: return
         avatar = runCatching { Avatar.Emoji(emoji) }.getOrNull() ?: return
@@ -306,7 +343,8 @@ class NameActivity : ScreenActivity() {
     private fun onSave() {
         val name = cleaned() ?: return
         if (!Names.valid(name) || name.toByteArray(Charsets.UTF_8).size > Names.MAX_BYTES || colour !in 0..0xFFFFFF) return
-        core.saveProfile(name, colour, avatar)
+        val chosen = photo?.takeIf { avatar == it.avatar }
+        if (chosen != null) { if (!core.saveProfilePhoto(name, colour, chosen)) return } else core.saveProfile(name, colour, avatar)
         finish()
     }
 
@@ -347,11 +385,13 @@ class NameActivity : ScreenActivity() {
         }
         val shown = colour.takeIf { it >= 0 } ?: AccountStore.UNKNOWN_COLOUR
         val label = name?.takeIf { !tooLong && !invalid } ?: "?"
-        Looks.show(preview, palette, ChatKind.PERSON, PREVIEW_DP, Face(label, shown, avatar))
+        val picture = if (avatar is Avatar.Photo) photo?.preview ?: core.ownPhoto() else null
+        Looks.show(preview, palette, ChatKind.PERSON, PREVIEW_DP, Face(label, shown, avatar, picture))
         renderPicture(PICTURE_LETTER, Face(label, shown, Avatar.Letter), getString(R.string.name_picture_letter), avatar == Avatar.Letter)
         // Before one is chosen, a smile shows what the choice is about.
         renderPicture(PICTURE_EMOJI, Face(label, shown, avatar as? Avatar.Emoji ?: Avatar.Emoji(HINT_EMOJI)), getString(R.string.name_picture_emoji),
             avatar is Avatar.Emoji)
+        renderPicture(PICTURE_PHOTO, Face(label, shown, avatar, picture), getString(R.string.name_picture_photo), avatar is Avatar.Photo)
         Ui.enable(save, name != null && !tooLong && !invalid && colour in 0..0xFFFFFF)
     }
 
@@ -365,6 +405,9 @@ class NameActivity : ScreenActivity() {
         private const val STATE_LETTER = "letter"
         private const val PICTURE_LETTER = "letter"
         private const val PICTURE_EMOJI = "emoji"
+        private const val PICTURE_PHOTO = "photo"
+        private const val REQUEST_PHOTO = 43
+        private const val STATE_PHOTO = "photo"
         private const val PREVIEW_DP = 64
         private const val WHEEL_DP = 240
         private const val HINT_EMOJI = "🙂"

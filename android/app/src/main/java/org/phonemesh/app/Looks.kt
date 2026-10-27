@@ -56,7 +56,7 @@ object Looks {
             drawn != null -> drawn
             else -> Ui.circle(palette.surface).apply { setStroke(Ui.dp(context, 2), palette.outline) }
         }
-        if (drawn?.drawn != null) return
+        if (drawn?.drawn != null || drawn?.photoShown == true) return
         val ink = when {
             kind == ChatKind.GROUP -> palette.onAccent
             face != null -> 0xFF000000.toInt() or org.phonemesh.core.account.ProfileColours.letterOn(face.colour)

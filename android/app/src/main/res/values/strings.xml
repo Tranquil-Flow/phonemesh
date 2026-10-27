@@ -348,6 +348,8 @@
     <string name="name_picture">Pick your picture</string>
     <string name="name_picture_letter">Letter</string>
     <string name="name_picture_emoji">Emoji</string>
+    <string name="name_picture_photo">Photo</string>
+    <string name="photo_once_a_day">You can change your photo once a day.</string>
     <string name="name_preview">This is what others see.</string>
     <string name="emoji_title">Choose an emoji</string>
     <string name="emoji_type">Or type one here</string>

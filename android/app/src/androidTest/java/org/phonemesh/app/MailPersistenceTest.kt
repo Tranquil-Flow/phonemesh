@@ -119,7 +119,7 @@ class MailPersistenceTest {
         a.history.writableDatabase.apply { execSQL("DROP TABLE IF EXISTS incoming_deadlines"); execSQL("DROP TABLE picture_pieces"); execSQL("DROP TABLE pending_requests"); execSQL("DROP TABLE picture_ids"); execSQL("DROP TABLE hub_custody"); execSQL("DROP TABLE hub_cursor"); version = 10 }
         a.history.close()
         val reopened = Phone(A, "Awa")
-        assertEquals(18, reopened.history.readableDatabase.version)
+        assertEquals(19, reopened.history.readableDatabase.version)
         assertArrayEquals(before, reopened.history.sessionRow(b.keys.accountId.toString())!!.second)
         assertEquals(1L, count(reopened.history, "incoming_held"))
         assertNull(reopened.mail.receive(packet, now + org.phonemesh.core.mail.MailStore.INCOMING_LIFETIME))
@@ -331,7 +331,7 @@ class MailPersistenceTest {
         a.history.writableDatabase.apply { execSQL("DROP TABLE incoming_held"); execSQL("DROP TABLE incoming_deadlines"); execSQL("DROP TABLE picture_pieces"); execSQL("DROP TABLE pending_requests"); execSQL("DROP TABLE picture_ids"); execSQL("DROP TABLE hub_custody"); execSQL("DROP TABLE hub_cursor"); version = 9 }
         a.history.close()
         val reopened = Phone(A, "Awa")
-        assertEquals(18, reopened.history.readableDatabase.version)
+        assertEquals(19, reopened.history.readableDatabase.version)
         assertEquals(0L, count(reopened.history, "incoming_held"))
         assertArrayEquals(state, reopened.history.sessionRow(contact.toString())!!.second)
         assertArrayEquals(sent.packet, reopened.mail.unsent().single().packet)
@@ -603,7 +603,7 @@ class MailPersistenceTest {
         db.version = 7
         a.history.close()
         val upgraded = Phone(A, "Awa")
-        assertEquals(18, upgraded.history.readableDatabase.version)
+        assertEquals(19, upgraded.history.readableDatabase.version)
         assertArrayEquals(identity, upgraded.keys.identity)
         assertEquals(listOf("kept bubble", "legacy receipt"), upgraded.history.messages(chat.id).map { it.text })
         val recovered = upgraded.mail.unsent().single()

@@ -343,6 +343,8 @@
     <string name="name_picture">Choisissez votre image</string>
     <string name="name_picture_letter">Lettre</string>
     <string name="name_picture_emoji">Emoji</string>
+    <string name="name_picture_photo">Photo</string>
+    <string name="photo_once_a_day">Une nouvelle photo par jour, au plus.</string>
     <string name="name_preview">Voici ce que les autres voient.</string>
     <string name="emoji_title">Choisissez un emoji</string>
     <string name="emoji_type">Ou tapez-en un ici</string>

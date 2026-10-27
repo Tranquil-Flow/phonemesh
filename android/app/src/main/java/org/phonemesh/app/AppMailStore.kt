@@ -79,6 +79,12 @@ class AppMailStore(private val history: History, private val store: AccountStore
                 is Body.Reaction -> history.addReaction(chat.id, person.accountId, body.emoji, refNumber(body.ref), incoming.at)
                 is Body.PictureHead, is Body.PicturePart -> incomingPictures.accept(chat, person.accountId, body, ref, incoming.at)
                 is Body.ProfileUpdate -> keepProfile(person, body.profile)
+                is Body.AvatarPiece -> history.keepAvatarPiece(person.accountId, body.bytes, incoming.at) { pieces ->
+                    // Any run of pieces from one head that makes a whole, checked photo (decision 50).
+                    pieces.indices.reversed().asSequence().mapNotNull { from ->
+                        org.phonemesh.core.account.AvatarPhotos.join(pieces.subList(from, pieces.size))?.webp
+                    }.firstOrNull()
+                }
                 else -> error("unsupported incoming body")
             }
         }

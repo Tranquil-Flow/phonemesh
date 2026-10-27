@@ -480,7 +480,7 @@ class AccountsFlowTest {
         b.history.writableDatabase.apply { execSQL("DROP TABLE picture_pieces"); execSQL("DROP TABLE pending_requests"); execSQL("DROP TABLE picture_ids"); execSQL("DROP TABLE hub_custody"); execSQL("DROP TABLE hub_cursor"); version = 11 }
         b.history.close()
         val reopened = Phone(B, "Bea", 5)
-        assertEquals(18, reopened.history.readableDatabase.version)
+        assertEquals(19, reopened.history.readableDatabase.version)
         assertTrue(reopened.flow.requests().isEmpty())
         assertEquals("Awa", reopened.history.contactRow(a.store.accountId.toString())!!.name)
         assertArrayEquals(packet, reopened.history.outbox(a.store.accountId.toString()).single().packet)

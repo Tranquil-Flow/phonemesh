@@ -203,6 +203,17 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
                 "colour INTEGER NOT NULL, met_before INTEGER NOT NULL, voice TEXT, added INTEGER NOT NULL, archive BLOB NOT NULL, " +
                 "restored INTEGER NOT NULL)",
         )
+        // Photo avatars (decision 50): pieces as they arrive, each contact's checked photo, this phone's own photo, and
+        // which photo each contact was sent.
+        if (oldVersion < 19) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS avatar_pieces (account_id TEXT NOT NULL, piece BLOB NOT NULL, at INTEGER NOT NULL)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS avatar_photos (account_id TEXT PRIMARY KEY, webp BLOB NOT NULL)")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS own_photo (id INTEGER PRIMARY KEY CHECK (id = 1), webp BLOB NOT NULL, width INTEGER NOT NULL, " +
+                    "height INTEGER NOT NULL, sketch BLOB NOT NULL, changed INTEGER NOT NULL)",
+            )
+            if (!hasColumn(db, "contacts", "photo_sent")) db.execSQL("ALTER TABLE contacts ADD COLUMN photo_sent BLOB")
+        }
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -297,6 +308,60 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
 
     fun contactRow(accountId: String): ContactRow? =
         readableDatabase.query("contacts", null, "account_id = ?", arrayOf(accountId), null, null, null).use { c -> if (c.moveToFirst()) c.contact() else null }
+
+    // ---- Photo avatars
+
+    class OwnPhoto(val webp: ByteArray, val width: Int, val height: Int, val sketch: ByteArray, val changed: Long)
+
+    fun ownPhoto(): OwnPhoto? = readableDatabase.query("own_photo", null, "id = 1", null, null, null, null).use { c ->
+        if (!c.moveToFirst()) null else OwnPhoto(
+            c.getBlob(c.getColumnIndexOrThrow("webp")), c.getInt(c.getColumnIndexOrThrow("width")),
+            c.getInt(c.getColumnIndexOrThrow("height")), c.getBlob(c.getColumnIndexOrThrow("sketch")),
+            c.getLong(c.getColumnIndexOrThrow("changed")),
+        )
+    }
+
+    fun setOwnPhoto(photo: OwnPhoto) {
+        writableDatabase.insertWithOnConflict("own_photo", null, ContentValues().apply {
+            put("id", 1); put("webp", photo.webp); put("width", photo.width); put("height", photo.height)
+            put("sketch", photo.sketch); put("changed", photo.changed)
+        }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** The checked photo [accountId] sent last, or null. */
+    fun avatarPhoto(accountId: String): ByteArray? =
+        readableDatabase.query("avatar_photos", arrayOf("webp"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { c -> if (c.moveToFirst()) c.getBlob(0) else null }
+
+    /**
+     * Keeps one photo piece from [accountId] and, once [join] makes a photo of the pieces held, keeps that photo and
+     * drops the pieces. At most [MAX_AVATAR_PIECES] pieces wait per contact; the oldest go first.
+     */
+    fun keepAvatarPiece(accountId: String, piece: ByteArray, at: Long, join: (List<ByteArray>) -> ByteArray?) {
+        val db = writableDatabase
+        db.insert("avatar_pieces", null, ContentValues().apply { put("account_id", accountId); put("piece", piece); put("at", at) })
+        db.execSQL(
+            "DELETE FROM avatar_pieces WHERE account_id = ? AND rowid NOT IN " +
+                "(SELECT rowid FROM avatar_pieces WHERE account_id = ? ORDER BY rowid DESC LIMIT $MAX_AVATAR_PIECES)",
+            arrayOf<Any>(accountId, accountId),
+        )
+        val pieces = db.query("avatar_pieces", arrayOf("piece"), "account_id = ?", arrayOf(accountId), null, null, "rowid")
+            .use { c -> buildList { while (c.moveToNext()) add(c.getBlob(0)) } }
+        // The newest head's photo: try the pieces from the newest head on (an older, unfinished photo is dropped).
+        val photo = join(pieces) ?: return
+        db.insertWithOnConflict("avatar_photos", null, ContentValues().apply { put("account_id", accountId); put("webp", photo) },
+            SQLiteDatabase.CONFLICT_REPLACE)
+        db.delete("avatar_pieces", "account_id = ?", arrayOf(accountId))
+    }
+
+    /** The id of the photo [accountId] was sent, or null. */
+    fun photoSent(accountId: String): ByteArray? =
+        readableDatabase.query("contacts", arrayOf("photo_sent"), "account_id = ?", arrayOf(accountId), null, null, null)
+            .use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getBlob(0) else null }
+
+    fun setPhotoSent(accountId: String, id: ByteArray) {
+        writableDatabase.update("contacts", ContentValues().apply { put("photo_sent", id) }, "account_id = ?", arrayOf(accountId))
+    }
 
     /** A person from a restored copy: [metBefore] is history from the old phone, never trust on this one. */
     class RecoveredRow(
@@ -891,7 +956,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 18
+        const val VERSION = 19
+        const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */
         private const val OLD_COLOURS = "CASE colour WHEN 0 THEN ${0xE53935} WHEN 1 THEN ${0xFB8C00} WHEN 2 THEN ${0xFDD835} " +

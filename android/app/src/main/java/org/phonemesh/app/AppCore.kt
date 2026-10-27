@@ -496,7 +496,7 @@ class AppCore private constructor(
         ChatRow(
             chat, contact?.name ?: chatTitle(chat), history.lastMessage(chat.id),
             if (chat.kind == ChatKind.GROUP) peopleHeard(chat.id) else null,
-            contact?.colour, contact?.met, contact?.let { Face.of(it) },
+            contact?.colour, contact?.met, contact?.let { faceOf(it) },
         )
     }.sortedBy { it.old }
 
@@ -504,10 +504,83 @@ class AppCore private constructor(
     fun chatColour(chat: Chat): Int? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.colour else null
 
     /** What a person chat's avatar shows; null for other chats. */
-    fun chatFace(chat: Chat): Face? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.let { Face.of(it) } else null
+    fun chatFace(chat: Chat): Face? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.let { faceOf(it) } else null
+
+    /** A contact's face, with their photo when this phone holds the one their profile names. */
+    fun faceOf(row: History.ContactRow): Face = Face.of(row).let { it.withPhoto(photoOf(row.accountId, it.avatar)) }
 
     /** What others see for this phone; null before a name is saved. */
-    fun ownFace(): Face? = accounts.profile()?.let { Face.of(it) }
+    fun ownFace(): Face? = accounts.profile()?.let { Face.of(it).withPhoto(ownPhoto()) }
+
+    // ---- Photo avatars (decision 50 D)
+
+    /** A photo chosen for this phone's picture, made ready: square, at most 64 px and 1 KB, as contacts get it. */
+    class AvatarDraft(val webp: ByteArray, val width: Int, val height: Int, val sketch: ByteArray, val preview: android.graphics.Bitmap) {
+        val avatar: org.phonemesh.core.account.Avatar.Photo
+            get() = org.phonemesh.core.account.Avatar.Photo(org.phonemesh.core.account.AvatarPhotos.id(webp))
+    }
+
+    /** Off the main thread: [uri] made into an avatar photo, or null when it cannot be read or made small enough. */
+    fun prepareAvatar(uri: android.net.Uri): AvatarDraft? {
+        val source = PictureMaker.load(app.contentResolver, uri, AVATAR_LOAD_SIDE) ?: return null
+        val side = minOf(source.width, source.height)
+        val square = android.graphics.Bitmap.createBitmap(source, (source.width - side) / 2, (source.height - side) / 2, side, side)
+        return draftOf(PictureMaker.shrink(square, org.phonemesh.core.account.AvatarPhotos.MAX_SIDE, grey = false))
+    }
+
+    /** [small] encoded at the best quality that fits 1 KB, decoded back as the preview (what contacts will see). */
+    fun draftOf(small: android.graphics.Bitmap): AvatarDraft? {
+        for (quality in AVATAR_QUALITIES) {
+            val webp = PictureMaker.webp(small, quality)
+            if (webp.size !in 1..org.phonemesh.core.account.AvatarPhotos.MAX_BYTES) continue
+            val preview = decodeAvatar(webp) ?: return null
+            return AvatarDraft(webp, small.width, small.height, PictureMaker.sketchOf(small), preview)
+        }
+        return null
+    }
+
+    /** At most one photo change a day (decision 50): whether a different photo may be saved now. */
+    fun photoChangeAllowed(now: Long = System.currentTimeMillis()): Boolean =
+        history.ownPhoto()?.let { now - it.changed >= PHOTO_GAP_MS } ?: true
+
+    /** Saves the profile with [photo] as its picture; false (nothing saved, a note says why) within a day of the last change. */
+    fun saveProfilePhoto(name: String, colour: Int, photo: AvatarDraft): Boolean {
+        val now = System.currentTimeMillis()
+        val same = history.ownPhoto()?.webp?.contentEquals(photo.webp) == true
+        if (!same && !photoChangeAllowed(now)) { note(UiText(R.string.photo_once_a_day)); return false }
+        if (!same) history.setOwnPhoto(History.OwnPhoto(photo.webp, photo.width, photo.height, photo.sketch, now))
+        saveProfile(name, colour, photo.avatar)
+        return true
+    }
+
+    /** This phone's photo when its profile shows one; null otherwise. */
+    fun ownPhoto(): android.graphics.Bitmap? {
+        val wanted = accounts.profile()?.avatar as? org.phonemesh.core.account.Avatar.Photo ?: return null
+        val webp = history.ownPhoto()?.webp?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it).contentEquals(wanted.id) } ?: return null
+        return decodeAvatar(webp)
+    }
+
+    private val photoCache = HashMap<String, android.graphics.Bitmap>()
+
+    /** The photo [accountId] chose, when this phone holds the one [avatar] names; null shows their letter. */
+    fun photoOf(accountId: String, avatar: org.phonemesh.core.account.Avatar): android.graphics.Bitmap? {
+        val wanted = avatar as? org.phonemesh.core.account.Avatar.Photo ?: return null
+        val key = "$accountId:$wanted"
+        synchronized(photoCache) { photoCache[key]?.let { return it } }
+        val webp = history.avatarPhoto(accountId)?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it).contentEquals(wanted.id) } ?: return null
+        val bitmap = decodeAvatar(webp) ?: return null
+        synchronized(photoCache) { photoCache[key] = bitmap }
+        return bitmap
+    }
+
+    /** A received photo as a bitmap, only when it is a picture of at most 64 px a side. */
+    private fun decodeAvatar(webp: ByteArray): android.graphics.Bitmap? {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(webp, 0, webp.size, bounds)
+        val max = org.phonemesh.core.account.AvatarPhotos.MAX_SIDE
+        if (bounds.outWidth !in 1..max || bounds.outHeight !in 1..max) return null
+        return android.graphics.BitmapFactory.decodeByteArray(webp, 0, webp.size)
+    }
 
     /** This phone's chosen picture: a letter until another is chosen. */
     fun ownAvatar(): org.phonemesh.core.account.Avatar = accounts.profile()?.avatar ?: org.phonemesh.core.account.Avatar.Letter
@@ -813,6 +886,7 @@ class AppCore private constructor(
             val out = postman.send(contact, body, messageId, now)
             if (out != null) push(out)
             profileAfterMessage(contact, now)?.let { push(it) }
+            photoAfterMessage(contact, now).forEach { push(it) }
             schedulePostman()
         }) runCatching { history.setStatus(messageId, DeliveryStatus.FAILED) }
     }
@@ -829,6 +903,22 @@ class AppCore private constructor(
         val out = postman.send(contact, Body.ProfileUpdate(own), null, now)
         history.setProfileSent(contact.toString(), own.revision, now)
         out
+    }
+
+    /**
+     * This phone's photo follows the next message to a contact who does not have it yet (decision 50 D): its pieces as
+     * ordinary private packets, kept, resent and acknowledged. Never on the shared chat. Nothing when the profile shows
+     * no photo.
+     */
+    private fun photoAfterMessage(contact: org.phonemesh.core.account.AccountId, now: Long): List<Postman.Out> = history.transaction {
+        val wanted = accounts.profile()?.avatar as? org.phonemesh.core.account.Avatar.Photo ?: return@transaction emptyList()
+        val own = history.ownPhoto()?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it.webp).contentEquals(wanted.id) }
+            ?: return@transaction emptyList()
+        if (history.photoSent(contact.toString())?.contentEquals(wanted.id) == true) return@transaction emptyList()
+        val outs = org.phonemesh.core.account.AvatarPhotos.pieces(own.webp, own.width, own.height, own.sketch)
+            .mapNotNull { postman.send(contact, Body.AvatarPiece(it), null, now) }
+        history.setPhotoSent(contact.toString(), wanted.id)
+        outs
     }
 
     private fun personBody(text: String, language: String, replyTo: Long?): Body =
@@ -1575,7 +1665,8 @@ class AppCore private constructor(
                             val message = history.addOutgoing(chat.id, planned.text, planned.language, now, planned.replyTo, plannedAt = planned.due)
                             val packet = postman.send(AppMailStore.idOf(chat.address), personBody(planned.text, planned.language, planned.replyTo), message.id, now)
                             if (!history.deletePlanned(planned.id)) throw org.phonemesh.core.mail.MailStore.Refused()
-                            listOfNotNull(packet, profileAfterMessage(AppMailStore.idOf(chat.address), now))
+                            listOfNotNull(packet, profileAfterMessage(AppMailStore.idOf(chat.address), now)) +
+                                photoAfterMessage(AppMailStore.idOf(chat.address), now)
                         }
                         out.forEach { push(it) }
                         schedulePostman()
@@ -1870,7 +1961,7 @@ class AppCore private constructor(
 
     private fun sealPicture(chat: Chat, messageId: Long, packets: List<PictureWire.Packet>, now: Long): List<Postman.Out> =
         postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull() +
-            listOfNotNull(profileAfterMessage(AppMailStore.idOf(chat.address), now))
+            listOfNotNull(profileAfterMessage(AppMailStore.idOf(chat.address), now)) + photoAfterMessage(AppMailStore.idOf(chat.address), now)
 
     /** Picture retry is for people only: the stored packets go again, byte for byte. Old radio chats never resend. */
     private fun resendPicture(message: Message): Boolean {
@@ -2465,6 +2556,9 @@ class AppCore private constructor(
     companion object {
         /** At most one profile update an hour to each contact (profile spec PF5). */
         const val PROFILE_GAP_MS = 60 * 60_000L
+        const val PHOTO_GAP_MS = 24 * 60 * 60_000L
+        private const val AVATAR_LOAD_SIDE = 256
+        private val AVATAR_QUALITIES = listOf(80, 65, 50, 35, 20, 10, 0)
         /** Person-chat references are numbers at or above this (radio packet ids are below). */
         private const val REF_FLOOR = 1L shl 40
 

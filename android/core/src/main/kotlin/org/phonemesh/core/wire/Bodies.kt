@@ -24,6 +24,9 @@ sealed class Body {
     /** A changed profile, sent once after the next message to each contact (profile spec, PF5). */
     data class ProfileUpdate(val profile: Profile) : Body()
 
+    /** One piece (picture head or part bytes) of a contact's photo avatar; never a chat picture (decision 50). */
+    class AvatarPiece(bytes: ByteArray) : Body() { val bytes: ByteArray = bytes.copyOf() }
+
     companion object {
         const val TEXT = 1
         const val REPLY = 2
@@ -33,6 +36,7 @@ sealed class Body {
         const val RECEIPT = 6
         const val HELLO = 7
         const val PROFILE = 8
+        const val AVATAR = 9
         const val REF = 4
         const val MAX_EMOJI = 32
         private const val WITH_ACK = 0x80
@@ -78,6 +82,10 @@ sealed class Body {
             is Receipt -> byteArrayOf(RECEIPT.toByte()) + body.ack.encode()
             is Hello -> byteArrayOf(HELLO.toByte()) + body.profile.encode()
             is ProfileUpdate -> byteArrayOf(PROFILE.toByte()) + body.profile.encode()
+            is AvatarPiece -> {
+                require(PictureWire.decodeV2(body.bytes) != null) { "not a picture piece" }
+                byteArrayOf(AVATAR.toByte()) + body.bytes
+            }
         }
 
         fun decode(bytes: ByteArray): Body? = try {
@@ -94,6 +102,7 @@ sealed class Body {
                 RECEIPT -> if (bytes.size != 1 + Ack.SIZE) null else Ack.decode(bytes.copyOfRange(1, bytes.size))?.let { Receipt(it) }
                 HELLO -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { Hello(it) }
                 PROFILE -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { ProfileUpdate(it) }
+                AVATAR -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) != null }?.let { AvatarPiece(it) }
                 else -> null
             }
         } catch (_: Refused) {

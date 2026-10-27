@@ -146,6 +146,20 @@ From handover 3 and the owner on 2026-10-14:
 57. Notifications for new messages (the app has none today) are considered for a later release; they would need the
     app to stay linked to a radio while closed, at a battery cost (owner, 2026-10-26).
 58. The Licences screen follows the app's language: English as well as French (owner, 2026-10-26).
+59. The v0.1.1 crypto review (decisions 41, 47) starts with independent review agents, one per area: recovery and
+    saved copies, card and profiles, private groups, signed updates. The owner decides on shipping from their reports
+    (owner, 2026-10-27).
+60. Saved-copy formats keep the changes made while building them: RGB colours, line breaks in message text, replies
+    only to an earlier message in the same chat, pictures only as WEBP containers, contacts-only copies read in memory
+    up to 16 MiB (owner, 2026-10-27).
+61. Update signing keys (decision 45) are made offline later, before hub updates ship (owner, 2026-10-27).
+62. Phones take voice and engine pack updates first; app updates come later. A phone always asks the person before
+    downloading an update (owner, 2026-10-27).
+63. No `v0.1.1-demo.2` pre-release: v0.1.1 is released properly, then the demo uses that release (owner, 2026-10-27).
+64. Photo avatars go only through a hub for now; people without a hub see the emoji or letter picture. This is a known
+    limitation to revisit later (owner, 2026-10-27).
+65. The radio settings profile (AE6) is checked against the firmware source first, then in a session on the owner's
+    radio, with each write approved (owner, 2026-10-27).
 
 ## What an outsider can and cannot learn
 

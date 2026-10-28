@@ -56,11 +56,15 @@ class GroupScreensTest {
         override fun invitations() = invites.values.toList()
         override fun newSigner(group: ByteArray): ByteArray { val k = P256.generate(); keys[group.toList()] = k.private; return P256.compress(k.public as ECPublicKey) }
         override fun sign(group: ByteArray, data: ByteArray) = P256.sign(keys.getValue(group.toList()), data)
-        override fun identityOf(account: AccountId) = if (account == bea.awa) awaIdentity else null
+        /** Others this phone has as contacts besides Awa (a third phone in some tests). */
+        val contacts = HashMap<AccountId, ByteArray>()
+        override fun identityOf(account: AccountId) = contacts[account] ?: if (account == bea.awa) awaIdentity else null
         override fun myProfile() = Profile(bea.name, bea.colour)
         override fun myPhotoPieces(): List<ByteArray> = emptyList()
         override fun groupPhotoPieces(group: ByteArray): List<ByteArray> = emptyList()
-        override fun recent(group: ByteArray, sinceMs: Long, max: Int): List<GroupShared> = emptyList()
+        var recentToShare: List<GroupShared> = emptyList()
+        var recentAsked: Pair<Long, Int>? = null
+        override fun recent(group: ByteArray, sinceMs: Long, max: Int): List<GroupShared> { recentAsked = sinceMs to max; return recentToShare }
         override fun commit(change: GroupPost.Change): Boolean {
             val g = change.group.toList()
             if (change.deleted) saved.remove(g) else change.saved?.let { saved[g] = it }
@@ -99,7 +103,7 @@ class GroupScreensTest {
 
     /** Everything Bea's phone has to send goes to Awa: private bodies through her Postman, group packets by radio. */
     private fun toAwa(now: Long) {
-        val private = beaGroups.private.toList(); beaGroups.private.clear()
+        val private = beaGroups.private.filter { it.first == bea.awa }; beaGroups.private.removeAll(private)
         for ((to, body) in private) PersonFixture.deliver(checkNotNull(beaPostman.send(to, body, null, now)).packet)
         val packets = beaGroups.packets.toList(); beaGroups.packets.clear()
         for (p in packets) if (!p.hubOnly) PersonFixture.deliver(p.sealed.packet)
@@ -253,6 +257,81 @@ class GroupScreensTest {
         until { TestCore.onMain { core.history.picture(bubble.id)?.file } != null }
         val file = java.io.File(context.filesDir, "pictures/" + TestCore.onMain { core.history.picture(bubble.id)!!.file })
         assertArrayEquals(bytes, file.readBytes())
+    }
+
+    @Test fun aNewMemberSeesRecentMessagesSharedByTheAdmin() {
+        prepare()
+        // Bea's group, which shares recent messages with new members, already has Cey (a third phone, its private
+        // bodies handed over directly); Bea has one message from last week's market day.
+        val cey = PersonFixture.Bea("Cey", 0x00838F)
+        val ceyGroups = BeaGroups(cey, ByteArray(0))
+        val beaId = bea.qr.card.accountId
+        val ceyId = cey.qr.card.accountId
+        beaGroups.contacts[ceyId] = cey.keys.identity
+        ceyGroups.contacts[beaId] = bea.keys.identity
+        fun between(t: Long) {
+            repeat(4) {
+                val toCey = beaGroups.private.filter { it.first == ceyId }; beaGroups.private.removeAll(toCey)
+                for ((_, body) in toCey) assertTrue(ceyGroups.post.takePrivate(beaId, body, t))
+                val toBea = ceyGroups.private.toList(); ceyGroups.private.clear()
+                for ((_, body) in toBea) assertTrue(beaGroups.post.takePrivate(ceyId, body, t))
+                for (p in beaGroups.packets.toList()) ceyGroups.post.receive(p.sealed.packet, t)
+                for (p in ceyGroups.packets.toList()) beaGroups.post.receive(p.sealed.packet, t)
+                ceyGroups.packets.clear()
+            }
+        }
+        val group = checkNotNull(beaGroups.post.create("Couture", 0x8E24AA, Avatar.Letter, true, listOf(ceyId), 1_000_000))
+        between(1_000_000)
+        assertTrue(ceyGroups.post.join(ceyGroups.invites.values.single(), 1_000_000))
+        between(1_000_000)
+        assertTrue(beaGroups.post.tick(1_000_000 + GroupPost.ADMIN_BATCH_MS + 1))
+        between(1_100_000)
+        assertEquals(GroupMember.State.ACTIVE, ceyGroups.post.member(group)?.state)
+        beaGroups.packets.clear()
+        // Now Bea invites Awa, who joins.
+        beaGroups.recentToShare = listOf(GroupShared(beaId.toBytes(), 1_900L, Body.encode(Body.Text("en-US", "Bread at six"))))
+        assertTrue(beaGroups.post.invite(group, listOf(bea.awa), 2_000_000))
+        toAwa(2_000_000)
+        until { TestCore.onMain { core.groupInvitations().size } == 1 }
+        val chatId = checkNotNull(TestCore.onMain { core.joinGroup(core.groupInvitations().single().first) })
+        // Awa's Join goes out through her radio queue; Bea's admin then batches it for a minute.
+        until(10_000) { toBea(2_000_000); beaGroups.saved[group.toList()]?.adminDue != null }
+        val due = beaGroups.saved[group.toList()]!!.adminDue!! + 1
+        beaGroups.packets.clear()
+        assertTrue(beaGroups.post.tick(due))
+        assertEquals("the engine asks for 7 days, at most 50", (due - GroupPost.RECENT_MS) to GroupPost.RECENT_MAX, beaGroups.recentAsked)
+        val shared = beaGroups.packets.filter { it.hubOnly }
+        assertTrue("the shared message goes only through a hub", shared.isNotEmpty())
+        // Everything reaches Awa, the hub-only packets as a hub would hand them over.
+        toAwa(2_100_000)
+        for (p in shared) PersonFixture.deliver(p.sealed.packet)
+        until { TestCore.onMain { core.history.messages(chatId).any { it.text == "Bread at six" } } }
+        val m = TestCore.onMain { core.history.messages(chatId).single { it.text == "Bread at six" } }
+        assertEquals(bea.account, m.sharedBy)
+        assertEquals(bea.account, m.senderId)
+        assertEquals("kept at its own time", 1_900_000L, m.time)
+        val conversation = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId))
+        until { Views.withText(conversation, "Shared by Bea") != null }
+        assertNotNull(group)
+    }
+
+    @Test fun anAdminSharesOnlyTextFromTheLastSevenDaysAtMostFifty() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        val now = System.currentTimeMillis()
+        TestCore.onMain {
+            core.history.addIncoming(chatId, bea.account, "Too old", "en-US", now - GroupPost.RECENT_MS - 60_000, false)
+            for (i in 1..55) core.history.addIncoming(chatId, bea.account, "News $i", "en-US", now - 1_000L * (60 - i), false)
+        }
+        val recent = TestCore.onMain { core.groupStore.recent(group, now - GroupPost.RECENT_MS, GroupPost.RECENT_MAX) }
+        assertEquals(GroupPost.RECENT_MAX, recent.size)
+        val texts = recent.map { (Body.decode(it.body) as Body.Text).text }
+        assertEquals("the newest 50", (6..55).map { "News $it" }, texts)
+        assertTrue(recent.all { org.phonemesh.core.account.AccountId.fromBytes(it.author).toString() == bea.account })
+        assertFalse("notes are never shared", texts.any { it.contains("joined") })
+        // With room for more, the message older than seven days still stays out.
+        val all = TestCore.onMain { core.groupStore.recent(group, now - GroupPost.RECENT_MS, 100) }
+        assertEquals((1..55).map { "News $it" }, all.map { (Body.decode(it.body) as Body.Text).text })
     }
 
     @Test fun anInvitationWaitsWithJoinAndIgnoreUntilChosen() {

@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -26,25 +28,52 @@ import java.util.concurrent.Executors
  * twelve words, and a file saved somewhere else; then try the saved file with the card, which marks it checked.
  * Restore: open a saved file with its card and keep the people, to add again on this phone. The key exists only while
  * its card is shown and is never stored (RC6: keeping it is off). Reading, sealing, opening and keeping run on one worker
- * thread with a progress bar, never on the screen's thread (review A-01).
+ * thread with a progress bar, never on the screen's thread (review A-01). What the visit holds, and the job that is
+ * running, live in [Held], not in the screen: recreating the screen (turning the phone, a new font size) keeps the
+ * card, the step and the job, and a result that arrives while no screen is attached is shown when one is (B4-6).
  */
 class RecoveryActivity : ScreenActivity() {
     private enum class Step { START, CARD, SAVED, CHECK, RESTORE, FOUND, RESTORED }
 
+    /** What one visit to this screen holds, kept in the process while the screen is recreated. */
+    private class Held {
+        var step = Step.START
+        var key: RecoveryKey? = null
+        var file: ByteArray? = null
+        var found: Recovery.Opened.Ok? = null
+        /** Set when the picked file is a full chat copy: it is read from here, one chunk at a time, never held whole. */
+        var chatUri: Uri? = null
+        var restored: ArchiveImport.Result.Saved? = null
+        @Volatile var cancelRequested = false
+        /** 0 nothing running, 1 a short job, 2 a long one with a Cancel button. */
+        @Volatile var busy = 0
+        @Volatile var percent = 0
+        var activity: RecoveryActivity? = null
+        val pending = ArrayDeque<RecoveryActivity.() -> Unit>()
+        val main = Handler(Looper.getMainLooper())
+        val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "recovery").apply { isDaemon = true } }
+
+        /** Runs [f] on the attached screen, or when the next one attaches. */
+        fun deliver(f: RecoveryActivity.() -> Unit) { main.post { val a = activity; if (a != null && !a.isDestroyed) a.f() else pending.addLast(f) } }
+    }
+
     private lateinit var body: LinearLayout
-    private var step = Step.START
-    private var key: RecoveryKey? = null
-    private var file: ByteArray? = null
-    private var found: Recovery.Opened.Ok? = null
-    /** Set when the picked file is a full chat copy: it is read from here, one chunk at a time, never held whole. */
-    private var chatUri: Uri? = null
-    private var restored: ArchiveImport.Result.Saved? = null
-    @Volatile private var cancelRequested = false
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "recovery").apply { isDaemon = true } }
+    private lateinit var held: Held
+    private var step: Step get() = held.step; set(v) { held.step = v }
+    private var key: RecoveryKey?
+        get() = held.key
+        set(v) { held.key?.takeIf { it !== v }?.wipe(); held.key = v }
+    private var file: ByteArray? get() = held.file; set(v) { held.file = v }
+    private var found: Recovery.Opened.Ok? get() = held.found; set(v) { held.found = v }
+    private var chatUri: Uri? get() = held.chatUri; set(v) { held.chatUri = v }
+    private var restored: ArchiveImport.Result.Saved? get() = held.restored; set(v) { held.restored = v }
     private var busyViews: List<View> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A recreated screen takes its visit back; a new visit (or one the system lost with the process) starts clean.
+        val kept = current
+        held = if (savedInstanceState != null && kept != null) kept else Held().also { current?.let(::release); current = it }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), pad())
@@ -54,31 +83,45 @@ class RecoveryActivity : ScreenActivity() {
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "recovery_body" }
         column.addView(body)
         show(ScrollView(this).apply { addView(column) })
+        held.activity = this
         build()
+        if (held.busy != 0) busy(true, cancellable = held.busy == 2)
+        while (held.pending.isNotEmpty()) held.pending.removeFirst().invoke(this)
+        // The card of a copy just saved opens it here (B4-2): the words are asked for, and a match is what marks it checked.
+        if (savedInstanceState == null) intent.data?.let { uri -> startCheck(uri) }
     }
 
     override fun onDestroy() {
-        cancelRequested = true
-        worker.shutdownNow()
-        key = null
-        file = null
-        chatUri = null
+        held.activity = null
+        if (isFinishing) release(held)
         super.onDestroy()
+    }
+
+    private fun release(h: Held) {
+        h.cancelRequested = true
+        h.key?.wipe()
+        h.key = null
+        h.file = null
+        h.chatUri = null
+        h.worker.shutdown()
+        if (current === h) current = null
     }
 
     /**
      * Runs [job] on the worker while the screen shows a progress bar and takes no taps; then [done] on the screen's
      * thread, or the sentence [failed] when the job threw. Nothing comes back once the screen is closed.
      */
-    private fun <T> work(failed: Int, job: () -> T, done: (T) -> Unit) {
+    private fun <T> work(failed: Int, job: () -> T, done: RecoveryActivity.(T) -> Unit) {
         if (busyViews.isNotEmpty()) return
+        val h = held
+        h.busy = 1
         busy(true)
-        worker.execute {
+        h.worker.execute {
             val result = runCatching(job)
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
+            h.deliver {
+                h.busy = 0
                 busy(false)
-                result.fold(done) { core.note(UiText(failed)) }
+                result.fold({ done(it) }) { core.note(UiText(failed)) }
             }
         }
     }
@@ -88,11 +131,12 @@ class RecoveryActivity : ScreenActivity() {
             val bar = if (cancellable) ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; isIndeterminate = false; tag = "recovery_busy" }
                 else ProgressBar(this).apply { isIndeterminate = true; tag = "recovery_busy" }
             val text = Ui.text(this, getString(R.string.recovery_working), palette.text)
+            bar.progress = held.percent
             progressBar = bar
             val views = mutableListOf<View>(text, bar)
             if (cancellable) views += Ui.button(this, palette, getString(R.string.cancel), null).apply {
                 tag = "recovery_cancel"
-                setOnClickListener { cancelRequested = true }
+                setOnClickListener { held.cancelRequested = true }
             }
             // In reverse, so they sit in order at the top.
             views.asReversed().forEach { body.addView(it, 0) }
@@ -110,20 +154,33 @@ class RecoveryActivity : ScreenActivity() {
 
     private var progressBar: ProgressBar? = null
 
+    /** The people are asked again after the screen is rebuilt: the card of a copy just saved, opened for its check. */
+    private fun startCheck(uri: Uri) {
+        key = null
+        chatUri = uri
+        step = Step.CHECK
+        build()
+    }
+
     /**
      * [work] for a job that takes long (a full chat copy): a progress bar, a Cancel button, and the job told how to
      * ask whether to stop and where it has got to. A cancelled job is [CancellationException]: its [cancelled] sentence.
      */
-    private fun <T> longWork(failed: Int, job: (() -> Boolean, (Long, Long) -> Unit) -> T, done: (T) -> Unit) {
+    private fun <T> longWork(failed: Int, job: (() -> Boolean, (Long, Long) -> Unit) -> T, done: RecoveryActivity.(T) -> Unit) {
         if (busyViews.isNotEmpty()) return
-        cancelRequested = false
+        val h = held
+        h.cancelRequested = false
+        h.busy = 2
+        h.percent = 0
         busy(true, cancellable = true)
-        worker.execute {
-            val result = runCatching { job({ cancelRequested }) { at, total -> runOnUiThread { progressBar?.progress = (100 * at / maxOf(1L, total)).toInt() } } }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
+        // At most a post per percent and per tenth of a second (B4-5), to whichever screen is attached.
+        val gate = ProgressGate { p -> h.main.post { h.percent = p; h.activity?.progressBar?.progress = p } }
+        h.worker.execute {
+            val result = runCatching { job({ h.cancelRequested }) { at, total -> gate.update(at, total) } }
+            h.deliver {
+                h.busy = 0
                 busy(false)
-                result.fold(done) { e -> core.note(UiText(if (e is CancellationException) R.string.recovery_cancelled else failed)) }
+                result.fold({ done(it) }) { e -> core.note(UiText(if (e is CancellationException) R.string.recovery_cancelled else failed)) }
             }
         }
     }
@@ -265,7 +322,7 @@ class RecoveryActivity : ScreenActivity() {
         val entered = keyFrom(typed) ?: run { core.note(UiText(R.string.recovery_bad_words)); return }
         chatUri?.let { chatCopy(it, entered); return }
         val bytes = file ?: return
-        work(R.string.recovery_read_failed, { Recovery.open(bytes, entered) }) { o -> opened(o) }
+        work(R.string.recovery_read_failed, { try { Recovery.open(bytes, entered) } finally { entered.wipe() } }) { o -> opened(o) }
     }
 
     /** A full chat copy: tried with its card (a check) or kept apart as read-only chats (a restore), chunk by chunk. */
@@ -277,8 +334,12 @@ class RecoveryActivity : ScreenActivity() {
         val checking = step == Step.CHECK
         val now = System.currentTimeMillis()
         longWork(R.string.recovery_read_failed, { cancelled, progress ->
-            if (checking) ArchiveReader.read(checkNotNull(resolver.openInputStream(uri)), entered, scratch, cancelled, progress)
-            else ArchiveImport(history, archives, scratch).import({ resolver.openInputStream(uri) }, entered, now, cancelled, progress)
+            try {
+                if (checking) ArchiveReader.read(checkNotNull(resolver.openInputStream(uri)), entered, scratch, cancelled, progress)
+                else ArchiveImport(history, archives, scratch).import({ resolver.openInputStream(uri) }, entered, now, cancelled, progress)
+            } finally {
+                entered.wipe()
+            }
         }) { result ->
             when (result) {
                 is ArchiveReader.Read.Ok -> {
@@ -294,6 +355,7 @@ class RecoveryActivity : ScreenActivity() {
                 is ArchiveImport.Result.Refused -> core.note(UiText(if (result.why == ArchiveImport.Refused.TOO_MANY_COPIES) R.string.recovery_too_many else R.string.recovery_same_number))
                 is ArchiveImport.Result.Failed -> core.note(UiText(chatProblem(result.problem)))
                 ArchiveImport.Result.NoSpace -> core.note(UiText(R.string.recovery_no_space))
+                ArchiveImport.Result.StorageError -> core.note(UiText(R.string.recovery_storage))
                 ArchiveImport.Result.Unreadable -> core.note(UiText(R.string.recovery_unreadable))
                 else -> core.note(UiText(R.string.recovery_read_failed))
             }
@@ -304,6 +366,8 @@ class RecoveryActivity : ScreenActivity() {
         ArchiveReader.Problem.NOT_A_COPY, ArchiveReader.Problem.NOT_CHAT_COPY -> R.string.recovery_not_copy
         ArchiveReader.Problem.KEY_OR_FILE_DOES_NOT_MATCH -> R.string.recovery_no_match
         ArchiveReader.Problem.TOO_NEW, ArchiveReader.Problem.TOO_BIG -> R.string.recovery_too_new
+        ArchiveReader.Problem.NO_SPACE -> R.string.recovery_no_space
+        ArchiveReader.Problem.STORAGE -> R.string.recovery_storage
     }
 
     /** After a restore of chats: kept apart, read only, marked as from this saved copy; people are to add again. */
@@ -381,7 +445,12 @@ class RecoveryActivity : ScreenActivity() {
     }
 
     private fun save(uri: Uri) {
-        val shown = key ?: return
+        val shown = key ?: run {
+            // The app was closed while the picker was open: the card on paper opens nothing now. Say so, remove the empty file.
+            Thread { ChatBackupActivity.deleter(contentResolver, uri) }.start()
+            core.note(UiText(R.string.backup_fail_lost))
+            return
+        }
         val history = core.history
         val resolver = contentResolver
         val now = System.currentTimeMillis()
@@ -432,6 +501,13 @@ class RecoveryActivity : ScreenActivity() {
         /** Names listed on screen at most; the rest are counted (review A-01). */
         private const val SHOWN = 50
 
+        /** The visit kept while the screen is recreated; null when none is open. */
+        @Volatile private var current: Held? = null
+
         fun open(activity: Activity) = activity.startActivity(Intent(activity, RecoveryActivity::class.java))
+
+        /** Opens the check of the copy just saved at [uri]: the card's words are asked for and a match marks it checked (B4-2). */
+        fun checkIntent(context: android.content.Context, uri: Uri) =
+            Intent(context, RecoveryActivity::class.java).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 }

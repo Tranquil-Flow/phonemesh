@@ -9,8 +9,12 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.graphics.Bitmap
+import android.widget.ProgressBar
 import org.phonemesh.core.backup.HistoryBackup
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Saved chats (backup spec 5.7; v0.1.2 B3): every saved copy read back on this phone, each marked "from this saved
@@ -19,6 +23,7 @@ import java.io.File
  */
 class ArchivesActivity : ScreenActivity() {
     private lateinit var body: LinearLayout
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "archives").apply { isDaemon = true } }
 
     /** The confirmation of the last Remove, for tests (as ChatsActivity keeps its import dialog). */
     internal var removeDialogForTest: android.app.AlertDialog? = null
@@ -38,7 +43,41 @@ class ArchivesActivity : ScreenActivity() {
 
     override fun onResume() {
         super.onResume()
-        build()
+        load()
+    }
+
+    override fun onDestroy() {
+        worker.shutdown()
+        super.onDestroy()
+    }
+
+    /** What a copy shows (its chats, counted over every message) is asked on a worker, with a bar: never on the screen's thread (B4-4). */
+    private fun load(failure: Int? = null) {
+        body.removeAllViews()
+        body.addView(ProgressBar(this).apply { isIndeterminate = true; tag = "archives_progress" })
+        val history = core.history
+        worker.execute {
+            val data = runCatching { ArchiveRows(history).let { rows -> rows.archives().map { it to rows.chats(it.archiveId) } } }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                body.removeAllViews()
+                if (failure != null) line(getString(failure), bold = true, tag = "archives_failure")
+                data.fold({ build(it) }) { line(getString(R.string.archives_failed), bold = true, tag = "archives_failed") }
+            }
+        }
+    }
+
+    /** Takes the copy off on a worker (thousands of rows, then its pictures), then shows the list again. */
+    private fun remove(archive: ArchiveRows.ArchiveRow) {
+        body.removeAllViews()
+        body.addView(ProgressBar(this).apply { isIndeterminate = true; tag = "archives_progress" })
+        line(getString(R.string.archives_removing), bold = true)
+        val history = core.history
+        val folder = core.archivesDir
+        worker.execute {
+            val result = runCatching { ArchiveRows(history).delete(archive.archiveId, folder) }
+            runOnUiThread { if (!isFinishing && !isDestroyed) load(if (result.isFailure) R.string.archives_remove_failed else null) }
+        }
     }
 
     /** Saved copies do not change with the radio or the mail: nothing to redraw. */
@@ -50,12 +89,10 @@ class ArchivesActivity : ScreenActivity() {
             if (tag != null) this.tag = tag
         })
 
-    private fun build() {
-        body.removeAllViews()
-        val rows = ArchiveRows(core.history)
-        val archives = rows.archives()
+    private fun build(loaded: List<Pair<ArchiveRows.ArchiveRow, List<ArchiveRows.ChatRow>>>) {
+        val archives = loaded.map { it.first }
         if (archives.isEmpty()) { line(getString(R.string.archives_empty), bold = true, tag = "archives_empty"); return }
-        for (archive in archives) {
+        for ((archive, chats) in loaded) {
             val hex = archive.hex
             line(getString(R.string.archives_from), bold = true, tag = "archive_from:$hex")
             line(archive.ownName)
@@ -66,7 +103,6 @@ class ArchivesActivity : ScreenActivity() {
             if (archive.missingPictures > 0) line(getString(R.string.backup_missing_pictures, archive.missingPictures))
             val folder = File(core.archivesDir, hex)
             if (archive.pictures > archive.missingPictures && !folder.isDirectory) line(getString(R.string.archives_storage), bold = true, tag = "archive_storage:$hex")
-            val chats = rows.chats(archive.archiveId)
             for (chat in chats.take(SHOWN)) {
                 val kind = when (chat.kind) {
                     HistoryBackup.GROUP_CHAT -> getString(R.string.backup_kind_group) + " · "
@@ -86,13 +122,14 @@ class ArchivesActivity : ScreenActivity() {
                 tag = "archive_remove:$hex"
                 setOnClickListener {
                     // The words are set in the dialog's own view, at the app's text size (a dialog's message is drawn small).
-                    val words = Ui.text(this@ArchivesActivity, getString(R.string.archives_remove_text), palette.text).apply { setPadding(pad(), pad() / 2, pad(), 0) }
+                    val words = LinearLayout(this@ArchivesActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(Ui.text(this@ArchivesActivity, getString(R.string.archives_remove_text), palette.text).apply { setPadding(pad(), pad() / 2, pad(), 0) })
+                        addView(Ui.text(this@ArchivesActivity, getString(R.string.archives_remove_people), palette.text).apply { setPadding(pad(), pad() / 2, pad(), 0) })
+                    }
                     removeDialogForTest = Actions.readable(android.app.AlertDialog.Builder(this@ArchivesActivity)
                         .setTitle(R.string.archives_remove_title).setView(words)
-                        .setPositiveButton(R.string.archives_remove_yes) { _, _ ->
-                            rows.delete(archive.archiveId, core.archivesDir)
-                            build()
-                        }
+                        .setPositiveButton(R.string.archives_remove_yes) { _, _ -> remove(archive) }
                         .setNegativeButton(R.string.cancel, null).create()).also { it.show() }
                 }
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2; bottomMargin = pad() })
@@ -112,43 +149,87 @@ class ArchivesActivity : ScreenActivity() {
  */
 class ArchiveChatActivity : ScreenActivity() {
     private lateinit var list: LinearLayout
+    private lateinit var scroll: ScrollView
     private lateinit var archive: ByteArray
+    private lateinit var titleView: android.widget.TextView
     private var chatId = 0L
     private var oldest = Long.MAX_VALUE
     private var names: Map<Long, String> = emptyMap()
+    private var loading = false
+    private var firstPage = true
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "archive-chat").apply { isDaemon = true } }
+
+    /** One page, read and its pictures decoded on the worker (B4-4): the messages, the reactions to just these, the bitmaps. */
+    private class Loaded(
+        val title: String?, val names: Map<Long, String>, val page: List<ArchiveRows.MessageRow>,
+        val reactions: Map<Long, List<ArchiveRows.ReactionRow>>, val bitmaps: Map<Long, Bitmap?>,
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         archive = ArchiveRows.unhex(intent.getStringExtra(ARCHIVE).orEmpty())
         chatId = intent.getLongExtra(CHAT, 0L)
-        val rows = ArchiveRows(core.history)
-        val chat = rows.chats(archive).firstOrNull { it.id == chatId }
-        names = rows.contacts(archive).associate { it.id to it.name }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), pad())
         }
-        column.addView(backBar(chat?.title?.ifEmpty { null } ?: getString(R.string.archives_title)))
+        val bar = backBar(getString(R.string.archives_title))
+        column.addView(bar)
+        titleView = (bar as LinearLayout).getChildAt(1) as android.widget.TextView
         column.addView(Ui.content(Ui.text(this, getString(R.string.archives_banner), palette.text, bold = true)).apply { tag = "archive_banner"; setPadding(0, 0, 0, pad() / 2) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "archive_messages" }
         column.addView(list)
-        val scroll = ScrollView(this).apply { addView(column) }
+        scroll = ScrollView(this).apply { addView(column) }
         show(scroll)
         more()
-        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
+    }
+
+    override fun onDestroy() {
+        worker.shutdown()
+        super.onDestroy()
     }
 
     override fun render() = Unit
 
     private fun more() {
-        val rows = ArchiveRows(core.history)
-        val page = rows.messages(archive, chatId, PAGE, oldest)
+        if (loading) return
+        loading = true
         list.findViewWithTag<View>("archive_older")?.let(list::removeView)
+        val bar = ProgressBar(this).apply { isIndeterminate = true; tag = "archive_progress" }
+        list.addView(bar, 0)
+        val before = oldest
+        val first = firstPage
+        val history = core.history
+        val folder = File(core.archivesDir, ArchiveRows.hex(archive))
+        worker.execute {
+            val result = runCatching {
+                val rows = ArchiveRows(history)
+                val page = rows.messages(archive, chatId, PAGE, before)
+                val reactions = rows.reactions(archive, page.map { it.id }).groupBy { it.targetId }
+                val bitmaps = HashMap<Long, Bitmap?>()
+                for (m in page) if (m.pictureId != 0L) bitmaps[m.id] = rows.picture(archive, m.pictureId)?.file?.let { File(folder, it) }?.takeIf { it.isFile }?.let { decode(it) }
+                Loaded(if (first) rows.chat(archive, chatId)?.title?.ifEmpty { null } else null, if (first) rows.contacts(archive).associate { it.id to it.name } else emptyMap(), page, reactions, bitmaps)
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                list.removeView(bar)
+                loading = false
+                result.fold({ show(it, first) }) { list.addView(Ui.content(Ui.text(this, getString(R.string.archives_failed), palette.text, bold = true)).apply { tag = "archive_failed" }, 0) }
+            }
+        }
+    }
+
+    private fun show(loaded: Loaded, first: Boolean) {
+        if (first) {
+            firstPage = false
+            names = loaded.names
+            loaded.title?.let { titleView.text = it }
+        }
+        val page = loaded.page
         if (page.isEmpty() && list.childCount == 0) {
             list.addView(Ui.content(Ui.text(this, getString(R.string.archives_empty_chat), palette.muted)).apply { tag = "archive_empty_chat" })
             return
         }
-        val reactions = rows.reactions(archive, chatId).groupBy { it.targetId }
         var insert = 0
         if (page.size == PAGE) {
             list.addView(Ui.button(this, palette, getString(R.string.archives_older), null).apply {
@@ -156,11 +237,12 @@ class ArchiveChatActivity : ScreenActivity() {
                 setOnClickListener { more() }
             }, insert++)
         }
-        for (m in page) list.addView(bubble(m, reactions[m.id].orEmpty(), rows), insert++, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = pad() / 2; gravity = if (m.outgoing) Gravity.END else Gravity.START })
+        for (m in page) list.addView(bubble(m, loaded.reactions[m.id].orEmpty(), loaded.bitmaps[m.id]), insert++, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = pad() / 2; gravity = if (m.outgoing) Gravity.END else Gravity.START })
         if (page.isNotEmpty()) oldest = page.first().id
+        if (first) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
-    private fun bubble(m: ArchiveRows.MessageRow, reactions: List<ArchiveRows.ReactionRow>, rows: ArchiveRows): View {
+    private fun bubble(m: ArchiveRows.MessageRow, reactions: List<ArchiveRows.ReactionRow>, bitmap: Bitmap?): View {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             tag = "archive_message:${m.id}"
@@ -171,8 +253,6 @@ class ArchiveChatActivity : ScreenActivity() {
         if (!m.outgoing && author != null) box.addView(Ui.content(Ui.text(this, author, palette.text, bold = true)))
         if (m.replyMissing) box.addView(Ui.content(Ui.text(this, getString(R.string.archives_missing_reply), palette.muted)))
         if (m.pictureId != 0L) {
-            val picture = rows.picture(archive, m.pictureId)
-            val bitmap = picture?.file?.let { File(File(core.archivesDir, ArchiveRows.hex(archive)), it) }?.takeIf { it.isFile }?.let { decode(it) }
             if (bitmap != null) {
                 box.addView(ImageView(this).apply {
                     setImageBitmap(bitmap)

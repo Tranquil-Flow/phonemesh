@@ -636,7 +636,7 @@
     <string name="backup_range_90">90 derniers jours</string>
     <string name="backup_range_all">Tout l\'historique</string>
     <string name="backup_pictures">Avec les images</string>
-    <string name="backup_unsent">Avec les messages non envoyés</string>
+    <string name="backup_unsent">Avec les messages non envoyés ou non confirmés</string>
     <string name="backup_chat_count">%1$d messages</string>
     <string name="backup_kind_group">Groupe</string>
     <string name="backup_kind_shared">Discussion commune</string>
@@ -658,13 +658,13 @@
     <string name="backup_make_card">Faire la carte</string>
     <string name="backup_change">Changer mon choix</string>
     <string name="backup_saving">Enregistrement de la copie…</string>
-    <string name="backup_saved">Enregistrée et vérifiée : %1$d discussions, %2$d messages.</string>
-    <string name="backup_saved_here">Vérifiée sur ce téléphone.</string>
+    <string name="backup_saved">Enregistrée : %1$d discussions, %2$d messages.</string>
+    <string name="backup_saved_here">Vérifiez-la maintenant avec votre carte.</string>
     <string name="backup_done">Terminé</string>
     <string name="backup_fail_changed">Vos discussions ont changé. Réessayez.</string>
     <string name="backup_fail_space">Pas assez de place. Libérez de la place.</string>
     <string name="backup_fail_destination">Échec. Choisissez un autre endroit.</string>
-    <string name="backup_fail_unchecked">Copie non vérifiée. Enregistrez à nouveau.</string>
+    <string name="backup_fail_unchecked">Non relue. Le fichier a été gardé.</string>
     <string name="backup_fail_cancelled">Annulé. Rien n\'a été enregistré.</string>
     <string name="backup_fail_nothing">Rien n\'a pu être compté. Réessayez.</string>
     <string name="archives_title">Discussions gardées</string>
@@ -676,6 +676,7 @@
     <string name="archives_remove">Retirer de ce téléphone</string>
     <string name="archives_remove_title">Retirer cette copie gardée ?</string>
     <string name="archives_remove_text">Votre fichier reste où vous l\'avez mis.</string>
+    <string name="archives_remove_people">Les personnes gardées de cette copie partent aussi.</string>
     <string name="archives_remove_yes">Retirer</string>
     <string name="archives_empty">Aucune discussion gardée.</string>
     <string name="archives_banner">Lecture seule. Depuis cette copie.</string>
@@ -730,4 +731,17 @@
     <string name="updates_fail_saved">Enregistrement impossible. L’ancien est gardé.</string>
     <string name="updates_fail_not_on_hub">Ce relais ne l’a plus.</string>
     <string name="updates_fail_offered">Plus proposée. Vérifiez à nouveau.</string>
+    <string name="recovery_storage">Problème de stockage. Rien n\'a été gardé.</string>
+    <string name="backup_fail_storage">Problème de stockage. Rien n\'a été enregistré.</string>
+    <string name="backup_fail_unknown">L\'enregistrement a échoué. Rien n\'a été enregistré.</string>
+    <string name="backup_fail_mismatch">Fichier enregistré faux. Il a été supprimé.</string>
+    <string name="backup_fail_leftover">Un fichier vide peut rester. Supprimez-le.</string>
+    <string name="backup_fail_lost">Cela n\'a pas abouti. Recommencez.</string>
+    <string name="backup_left_unconfirmed">%1$d messages non confirmés sont laissés de côté.</string>
+    <string name="backup_left_altered">%1$d longs messages ont été raccourcis.</string>
+    <string name="backup_written">J\'ai noté la carte</string>
+    <string name="backup_check_now">Vérifier maintenant</string>
+    <string name="archives_failed">Les discussions gardées sont illisibles.</string>
+    <string name="archives_removing">Suppression de cette copie…</string>
+    <string name="archives_remove_failed">Pas supprimée. Réessayez.</string>
 </resources>

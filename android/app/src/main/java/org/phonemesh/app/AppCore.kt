@@ -209,7 +209,10 @@ class AppCore private constructor(
         t1?.start()
         if (BuildConfig.T2_PROBE) RadioProbe.load("T2ProbeRun", app)?.start()
         history.expireWaiting()
-        runCatching { ArchiveImport.recover(history, archivesDir, backupDir) }.onFailure { Log.w(TAG, "saved copies wait", it) }
+        // Off the start-up thread (B4-4): it can remove a large unfinished restore. Scratch files made from now on are kept.
+        val startedAt = System.currentTimeMillis()
+        Thread({ runCatching { ArchiveImport.recover(history, archivesDir, backupDir, startedAt) }.onFailure { Log.w(TAG, "saved copies wait", it) } }, "backup-recover")
+            .apply { isDaemon = true }.start()
         history.loseUnfinishedPictures()
         // Pictures received from people finish from their stored pieces, even before a radio is ready.
         main.post { materializePictures() }

@@ -82,6 +82,7 @@ class ChatBackupShotsTest {
         shot("04-card")
         val words = Views.textOf(Views.tagged(a, "chatbackup_words")!!).split(Regex("\\s+")).filterNot { it.endsWith(".") && it.dropLast(1).all(Char::isDigit) }
         answer(Intent.ACTION_CREATE_DOCUMENT)
+        Views.tap(a, "chatbackup_written")
         Views.tap(a, "chatbackup_save")
         until(90) { Views.tagged(a, "chatbackup_done") != null }
         shot("05-saved-and-checked")

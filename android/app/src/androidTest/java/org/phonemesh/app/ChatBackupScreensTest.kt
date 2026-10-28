@@ -129,19 +129,131 @@ class ChatBackupScreensTest {
         assertEquals(12, words.size)
         clean(a, "card")
         answer(Intent.ACTION_CREATE_DOCUMENT)
+        // The file can be saved once the person says the card is on paper (B4-2).
+        val saveButton = Views.tagged(a, "chatbackup_save")!!
+        assertFalse("not before the card is written down", TestCore.onMain { saveButton.isEnabled })
+        Views.tap(a, "chatbackup_written")
         Views.tap(a, "chatbackup_save")
-        until(60) { Views.withText(a, "Saved and checked: 2 chats, $expected messages.") != null }
-        assertNotNull(Views.withText(a, "Checked on this phone."))
+        until(60) { Views.withText(a, "Saved: 2 chats, $expected messages.") != null }
+        assertNotNull(Views.withText(a, "Now check it with your card."))
+        assertNull("saved is not checked", Views.withText(a, "Saved and checked: 2 chats, $expected messages."))
         assertNull("the card is gone from the screen once saved", Views.tagged(a, "chatbackup_words"))
         clean(a, "done")
         // The file really holds it, opened with the typed words.
         val typed = RecoveryKey.fromWords(words.joinToString(" "), RecoveryKey.WordList.load("english"))!!
         val read = ArchiveReader.read(ByteArrayInputStream(copy.readBytes()), typed, work)
         assertEquals(expected, (read as ArchiveReader.Read.Ok).manifest.messages)
-        assertTrue(core.settings.recoveryChecked > 0)
+        assertEquals("the copy was read back, but the card was never tried: not checked", 0L, core.settings.recoveryChecked)
         assertEquals("the scratch folder holds nothing of the copy", emptyList<String>(), core.backupDir.listFiles()?.map { it.name }.orEmpty())
-        Views.tap(a, "chatbackup_done")
-        until { Views.resumed() !is ChatBackupActivity }
+        // The check asks for the card, and only a card that opens the file marks it checked.
+        Views.tap(a, "chatbackup_check")
+        until { Views.resumed() is RecoveryActivity && Views.tagged(Views.resumed()!!, "recovery_entry") != null }
+        val check = Views.resumed()!!
+        typeWords(check, "abandon ".repeat(11) + "about")
+        Thread.sleep(500)
+        assertEquals("a wrong card does not mark it", 0L, core.settings.recoveryChecked)
+        typeWords(check, wordsOf(typed))
+        until(60) { core.settings.recoveryChecked > 0 }
+    }
+
+    /** B4-6: turning the phone (or any recreation) keeps the card, the step and the job. */
+    @Test fun recreatingTheScreenKeepsTheCardAndTheJob() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        ChatFixture.build(core)
+        val a = Views.start(ChatBackupActivity::class.java)
+        until { Views.tagged(a, "scope_count") != null }
+        Views.tap(a, "scope_count")
+        TestCore.onMain { a.recreate() }                     // while it is counting
+        until(60) { (Views.resumed() as? ChatBackupActivity)?.let { it !== a && Views.tagged(it, "preview_size") != null } == true }
+        var b = Views.resumed()!!
+        Views.tap(b, "chatbackup_card")
+        val words = Views.textOf(Views.tagged(b, "chatbackup_words")!!)
+        Views.tap(b, "chatbackup_written")
+        TestCore.onMain { b.recreate() }                     // at the card
+        until { Views.resumed().let { it !== b && it is ChatBackupActivity && Views.tagged(it, "chatbackup_words") != null } }
+        b = Views.resumed()!!
+        assertEquals("the same card", words, Views.textOf(Views.tagged(b, "chatbackup_words")!!))
+        assertTrue("and the person's word that it was written down", (Views.tagged(b, "chatbackup_written") as Switch).let { TestCore.onMain { it.isChecked } })
+        val saveAgain = Views.tagged(b, "chatbackup_save")!!
+        assertTrue(TestCore.onMain { saveAgain.isEnabled })
+    }
+
+    /** B4-6, B4-7: the picker returns after the app lost its state: say so beside the action and remove the empty file. */
+    @Test fun aSaveWithNothingLeftToSaveSaysSoAndRemovesTheEmptyFile() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        ChatFixture.build(core)
+        val deleted = ArrayList<Uri>()
+        ChatBackupActivity.deleter = { _, uri -> deleted += uri; File(uri.path!!).delete() }
+        try {
+            val a = Views.start(ChatBackupActivity::class.java)
+            until { Views.tagged(a, "scope_count") != null }
+            Views.tap(a, "scope_count")
+            until { Views.tagged(a, "chatbackup_card") != null }
+            Views.tap(a, "chatbackup_card")
+            Views.tap(a, "chatbackup_written")
+            copy.writeBytes(ByteArray(0))
+            TestCore.onMain { ChatBackupSession.current!!.release() }        // as if the process had died while the picker was open
+            answer(Intent.ACTION_CREATE_DOCUMENT)
+            Views.tap(a, "chatbackup_save")
+            until { Views.tagged(a, "chatbackup_failure") != null }
+            assertEquals("That did not finish. Start again.", Views.textOf(Views.tagged(a, "chatbackup_failure")!!))
+            assertEquals(listOf(Uri.fromFile(copy)), deleted)
+            assertFalse("the empty document is gone", copy.exists())
+        } finally {
+            ChatBackupActivity.deleter = { r, u -> try { android.provider.DocumentsContract.deleteDocument(r, u) } catch (e: Exception) { false } }
+        }
+    }
+
+    /** B4-7: a save that fails at the place removes the document the picker made, and says when it cannot. */
+    @Test fun aFailedSaveRemovesTheDocumentOrSaysItMayRemain() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        ChatFixture.build(core)
+        val tried = ArrayList<Uri>()
+        val folder = File(inst.targetContext.cacheDir, "not-a-file-2").apply { mkdirs() }
+        try {
+            for (removable in listOf(true, false)) {
+                ChatBackupActivity.deleter = { _, uri -> tried += uri; removable }
+                val a = Views.start(ChatBackupActivity::class.java)
+                until { Views.tagged(a, "scope_count") != null }
+                Views.tap(a, "scope_count")
+                until { Views.tagged(a, "chatbackup_card") != null }
+                Views.tap(a, "chatbackup_card")
+                Views.tap(a, "chatbackup_written")
+                monitors.forEach { inst.removeMonitor(it) }
+                monitors.clear()
+                monitors += inst.addMonitor(IntentFilter(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); addDataType(RecoveryActivity.MIME) },
+                    Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(folder))), true)
+                Views.tap(a, "chatbackup_save")
+                until(60) { Views.tagged(a, "chatbackup_failure") != null }
+                assertEquals("the document is asked to go", listOf(Uri.fromFile(folder)), tried.takeLast(1))
+                assertEquals("the screen says when it could not", !removable, Views.tagged(a, "chatbackup_leftover") != null)
+                TestCore.onMain { a.finish() }
+                until { Views.resumed() !is ChatBackupActivity }
+            }
+        } finally {
+            folder.deleteRecursively()
+            ChatBackupActivity.deleter = { r, u -> try { android.provider.DocumentsContract.deleteDocument(r, u) } catch (e: Exception) { false } }
+        }
+    }
+
+    /** B4-6: recreating the recovery screen keeps the step, and a restore that is running still ends in its result. */
+    @Test fun recreatingTheRecoveryScreenKeepsTheStepAndTheRestore() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        val f = ChatFixture.build(core)
+        copy.writeBytes(ChatFixture.copy(core, f, key, work))
+        TestCore.uninstall()
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        val a = Views.start(RecoveryActivity::class.java)
+        answer(Intent.ACTION_OPEN_DOCUMENT)
+        Views.tap(a, "recovery_restore")
+        until { Views.tagged(a, "recovery_entry") != null }
+        TestCore.onMain { a.recreate() }
+        until { Views.resumed().let { it !== a && it is RecoveryActivity && Views.tagged(it, "recovery_entry") != null } }
+        val b = Views.resumed()!!
+        typeWords(b, wordsOf(key))
+        TestCore.onMain { b.recreate() }                     // while it restores
+        until(90) { Views.resumed().let { it !== b && it is RecoveryActivity && Views.tagged(it, "recovery_see_chats") != null } }
+        assertEquals(1, ArchiveRows(core.history).archives().size)
     }
 
     @Test fun aChoiceOfNoChatsSaysSoAndALimitSaysChooseLess() {
@@ -167,6 +279,7 @@ class ChatBackupScreensTest {
         val folder = File(inst.targetContext.cacheDir, "not-a-file").apply { mkdirs() }
         monitors += inst.addMonitor(IntentFilter(Intent.ACTION_CREATE_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); addDataType(RecoveryActivity.MIME) },
             Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(folder))), true)
+        Views.tap(a, "chatbackup_written")
         Views.tap(a, "chatbackup_save")
         until(60) { Views.withText(a, "Could not save. Choose another place.") != null }
         assertNotNull("it can be tried again with the same card", Views.tagged(a, "chatbackup_retry"))
@@ -202,7 +315,7 @@ class ChatBackupScreensTest {
         Views.tap(a, "recovery_see_chats")
         until { Views.resumed() is ArchivesActivity }
         val list = Views.resumed()!!
-        assertNotNull(Views.tagged(list, "archive_from:${row.hex}"))
+        until { Views.tagged(list, "archive_from:${row.hex}") != null }
         val chats = ArchiveRows(core.history).chats(row.archiveId)
         assertEquals(4, chats.size)
         clean(list, "archives")

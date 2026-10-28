@@ -6,6 +6,7 @@ import org.phonemesh.core.PictureCodec
 import org.phonemesh.core.backup.ChatExport
 import org.phonemesh.core.backup.ContactsBackup
 import org.phonemesh.core.backup.HistoryBackup
+import org.phonemesh.core.backup.WebpCheck
 import org.phonemesh.core.wire.Reactions
 import java.io.File
 import java.io.IOException
@@ -26,13 +27,18 @@ class Left(
     val reactions: Int,
     /** Data the format cannot hold (text that is empty, a picture with impossible sizes). */
     val unsupported: Int,
+    /** Messages sent but never confirmed (status 6), left out when unsent text was not chosen: not "unsent" (B4-11). */
+    val unconfirmed: Int = 0,
+    /** Messages whose text was cut at the format's limit or had control characters turned into spaces (B4-11). */
+    val altered: Int = 0,
 )
 
 /**
  * A frozen copy of what a person chose to save (backup spec 5.6, "a brief bounded exclusive snapshot copy into
- * app-private staging"). One short transaction on the history copies the chosen rows, and nothing else, into a private
- * scratch file; the history is free again at once, and everything after (checks, picture files, the preview, the
- * sealing) reads only the scratch file, so counts, sizes and records cannot move under the export. A message or
+ * app-private staging"). Short transactions of a couple of thousand rows each, up to the newest message the history
+ * held when the copy began, move the chosen rows, and nothing else, into a private scratch file; between them the
+ * history is free for the receive path and the screen (B4-3). Everything after (checks, picture files, the preview,
+ * the sealing) reads only the scratch file, so counts, sizes and records cannot move under the export. A message or
  * picture deleted afterwards is still in this snapshot: it is a picture of the phone at the moment of choosing.
  * [close] deletes the file; [sweep] removes any left by a crash.
  *
@@ -93,13 +99,21 @@ class ChatSnapshot private constructor(
     /** Finds a message of the snapshot by the id the history gave it: for tests and for the preview's per-chat counts. */
     fun messageCount(chatArchiveId: Long): Int = db.rawQuery("SELECT COUNT(*) FROM s_messages WHERE chat = ?", arrayOf(chatArchiveId.toString())).use { it.moveToFirst(); it.getInt(0) }
 
+    /** The phone has too little room for the snapshot (B4-3: asked before anything is copied). */
+    class NoRoom : IOException("not enough room for the snapshot")
+
     companion object {
         private const val PAGE = 500
+        private const val BATCH = 2_000
+        private const val SPARE = 8L * 1024 * 1024
         const val PREFIX = "snapshot-"
 
+        /** Test seam: how many short transactions the snapshots taken so far used on the history. */
+        @Volatile internal var steps = 0
+
         /** Removes scratch files an earlier run left behind (a crash or a closed screen); call at start. */
-        fun sweep(dir: File) {
-            dir.listFiles()?.filter { it.name.startsWith(PREFIX) }?.forEach { it.delete() }
+        fun sweep(dir: File, before: Long = Long.MAX_VALUE) {
+            dir.listFiles()?.filter { it.name.startsWith(PREFIX) && it.lastModified() <= before }?.forEach { it.delete() }
         }
 
         /** How many messages each chat holds since [since] (null: all) that a copy keeps unless unsent text is chosen, for the picker's counts. */
@@ -115,7 +129,8 @@ class ChatSnapshot private constructor(
          */
         fun build(
             history: History, picturesDir: File, workDir: File, scope: ChatScope, now: Long,
-            label: (Chat, String) -> String?, cancelled: () -> Boolean = { false },
+            label: (Chat, String) -> String?, missingPicture: String = "Picture missing from this copy.",
+            usableSpace: (File) -> Long = { it.usableSpace }, cancelled: () -> Boolean = { false },
         ): ChatSnapshot? {
             val me = history.accountRow()?.takeIf { it.name.isNotEmpty() } ?: return null
             workDir.mkdirs()
@@ -126,24 +141,39 @@ class ChatSnapshot private constructor(
                 val entries = Recovery.entries(history)
                 val byAccount = entries.associate { it.accountId to it.contact.id }
                 val chosen = history.chats().filter { it.id in scope.chats }
-                // Who sent what, named before the short exclusive step: the lookups are not part of the frozen view.
+                // Room first (B4-3): a full disk is its own answer, not "nothing could be counted".
+                var estimate = 0L
+                for (chat in chosen) estimate += history.readableDatabase.rawQuery("SELECT COUNT(*), COALESCE(SUM(LENGTH(text)), 0) FROM messages WHERE chat_id = ?", arrayOf(chat.id.toString())).use { c ->
+                    c.moveToFirst(); 250L * c.getLong(0) + 2L * c.getLong(1)
+                }
+                if (scope.pictures) estimate += 3_300L * scalar(history.readableDatabase, "SELECT COUNT(*) FROM pictures")
+                if (usableSpace(workDir) < estimate * 2 + SPARE) throw NoRoom()
+                // Who sent what, named before the copy starts: the lookups are not part of the frozen view.
                 val labels = HashMap<Pair<Long, String>, String?>()
                 for (chat in chosen) {
                     history.readableDatabase.rawQuery("SELECT DISTINCT sender_id FROM messages WHERE chat_id = ? AND sender_id IS NOT NULL", arrayOf(chat.id.toString())).use { c ->
-                        while (c.moveToNext()) { val id = c.getString(0); labels[chat.id to id] = label(chat, id)?.let { ArchiveText.clean(it, 160) } }
+                        while (c.moveToNext()) { val id = c.getString(0); labels[chat.id to id] = label(chat, id)?.let { ArchiveText.plain(it, 160) } }
                     }
                 }
                 if (cancelled()) throw java.util.concurrent.CancellationException("cancelled")
                 val since = scope.since ?: 0L
                 var chatsWithoutContact = 0
                 var unsent = 0
+                var unconfirmed = 0
                 var notes = 0
                 snap.close()
                 val main = history.writableDatabase
                 main.execSQL("ATTACH DATABASE ? AS snap", arrayOf(file.path))
                 try {
-                    main.beginTransaction()
-                    try {
+                    fun step(work: () -> Unit) {
+                        if (cancelled()) throw java.util.concurrent.CancellationException("cancelled")
+                        steps++
+                        main.beginTransaction()
+                        try { work(); main.setTransactionSuccessful() } finally { main.endTransaction() }
+                    }
+                    // The newest message the history holds now: later ones are not part of this picture.
+                    val top = scalar(main, "SELECT COALESCE(MAX(id), 0) FROM main.messages").toLong()
+                    step {
                         for (e in entries) main.execSQL(
                             "INSERT INTO snap.s_contacts (id, account, identity, card, name, colour, met, voice, added) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                             arrayOf<Any?>(e.contact.id, e.accountId, e.contact.identity, e.contact.card, e.contact.savedName, e.contact.colour,
@@ -158,7 +188,7 @@ class ChatSnapshot private constructor(
                             }
                             val contact = if (chat.kind == ChatKind.PERSON) byAccount[chat.address] ?: 0L else 0L
                             if (chat.kind == ChatKind.PERSON && contact == 0L) { chatsWithoutContact++; continue }
-                            val title = ArchiveText.clean(chat.name.ifEmpty { if (contact != 0L) entries.first { it.contact.id == contact }.contact.savedName else "" }, 256)
+                            val title = ArchiveText.plain(chat.name.ifEmpty { if (contact != 0L) entries.first { it.contact.id == contact }.contact.savedName else "" }, 256)
                                 .ifEmpty { if (kind == HistoryBackup.GROUP_CHAT) "?" else "" }
                             main.execSQL(
                                 "INSERT INTO snap.s_chats (src, kind, contact, title, pinned) VALUES (?, ?, ?, ?, ?)",
@@ -176,47 +206,70 @@ class ChatSnapshot private constructor(
                                 }
                             }
                         }
-                        val unsentSql = "(? = 1 OR m.direction = 'IN' OR m.delivery IS NULL OR m.delivery NOT IN ('WAITING','QUEUED','UNCONFIRMED'))"
-                        val hold = "'WAITING','QUEUED','UNCONFIRMED'"
-                        main.execSQL(
-                            "INSERT INTO snap.s_messages (src, chat, packet, outgoing, author, label, text, language, time, status, reply_src, is_picture) " +
-                                "SELECT m.id, c.id, m.packet_id, m.direction = 'OUT', COALESCE(l.contact, 0), l.label, m.text, m.language, m.time, " +
-                                "CASE WHEN m.direction = 'IN' THEN 0 ELSE CASE m.delivery WHEN 'DELIVERED' THEN 3 WHEN 'HUB' THEN 2 WHEN 'FAILED' THEN 4 " +
-                                "WHEN 'WAITING' THEN 5 WHEN 'QUEUED' THEN 5 WHEN 'UNCONFIRMED' THEN 6 ELSE 1 END END, m.reply_to, m.kind = 'PICTURE' " +
-                                "FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id " +
-                                "LEFT JOIN snap.s_labels l ON l.src_chat = m.chat_id AND l.sender = m.sender_id " +
-                                "WHERE m.reaction = 0 AND m.kind IN ('TEXT', 'PICTURE') AND m.time >= ? AND $unsentSql " +
-                                "AND (m.kind = 'TEXT' OR EXISTS (SELECT 1 FROM main.pictures p WHERE p.message_id = m.id)) ORDER BY m.id",
-                            arrayOf<Any>(since, if (scope.unsent) 1 else 0),
-                        )
+                    }
+                    val unsentSql = "(? = 1 OR m.direction = 'IN' OR m.delivery IS NULL OR m.delivery NOT IN ('WAITING','QUEUED','UNCONFIRMED'))"
+                    // Messages and reactions share one table: the rows are walked in id steps, each its own short transaction.
+                    var from = 0L
+                    while (from < top) {
+                        val upper = boundary(main, "SELECT MAX(id) FROM (SELECT id FROM main.messages WHERE id > ? AND id <= ? ORDER BY id LIMIT $BATCH)", from, top) ?: break
+                        step {
+                            main.execSQL(
+                                "INSERT INTO snap.s_messages (src, chat, packet, outgoing, author, label, text, language, time, status, reply_src, is_picture) " +
+                                    "SELECT m.id, c.id, m.packet_id, m.direction = 'OUT', COALESCE(l.contact, 0), l.label, m.text, m.language, m.time, " +
+                                    "CASE WHEN m.direction = 'IN' THEN 0 ELSE CASE m.delivery WHEN 'DELIVERED' THEN 3 WHEN 'HUB' THEN 2 WHEN 'FAILED' THEN 4 " +
+                                    "WHEN 'WAITING' THEN 5 WHEN 'QUEUED' THEN 5 WHEN 'UNCONFIRMED' THEN 6 ELSE 1 END END, m.reply_to, m.kind = 'PICTURE' " +
+                                    "FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id " +
+                                    "LEFT JOIN snap.s_labels l ON l.src_chat = m.chat_id AND l.sender = m.sender_id " +
+                                    "WHERE m.id > ? AND m.id <= ? AND m.reaction = 0 AND m.kind IN ('TEXT', 'PICTURE') AND m.time >= ? AND $unsentSql " +
+                                    "AND (m.kind = 'TEXT' OR EXISTS (SELECT 1 FROM main.pictures p WHERE p.message_id = m.id)) ORDER BY m.id",
+                                arrayOf<Any>(from, upper, since, if (scope.unsent) 1 else 0),
+                            )
+                            main.execSQL(
+                                "INSERT INTO snap.s_reactions (src_chat, chat, target_packet, author, label, emoji, time, unsent) " +
+                                    "SELECT r.chat_id, c.id, r.reply_to, COALESCE(l.contact, 0), l.label, r.text, r.time, CASE WHEN r.delivery = 'QUEUED' THEN 1 ELSE 0 END " +
+                                    "FROM main.messages r JOIN snap.s_chats c ON c.src = r.chat_id " +
+                                    "LEFT JOIN snap.s_labels l ON l.src_chat = r.chat_id AND l.sender = r.sender_id " +
+                                    "WHERE r.id > ? AND r.id <= ? AND r.reaction = 1 AND r.reply_to IS NOT NULL AND (? = 1 OR r.delivery IS NOT 'QUEUED') ORDER BY r.id",
+                                arrayOf<Any>(from, upper, if (scope.unsent) 1 else 0),
+                            )
+                            if (!scope.unsent) {
+                                val range = arrayOf(since.toString(), from.toString(), upper.toString())
+                                unsent += scalar(main, "SELECT COUNT(*) FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id WHERE m.reaction = 0 AND m.kind IN ('TEXT', 'PICTURE') AND " +
+                                    "m.time >= ? AND m.id > ? AND m.id <= ? AND m.direction = 'OUT' AND m.delivery IN ('WAITING','QUEUED')", *range)
+                                unconfirmed += scalar(main, "SELECT COUNT(*) FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id WHERE m.reaction = 0 AND m.kind IN ('TEXT', 'PICTURE') AND " +
+                                    "m.time >= ? AND m.id > ? AND m.id <= ? AND m.direction = 'OUT' AND m.delivery = 'UNCONFIRMED'", *range)
+                            }
+                            notes += scalar(main, "SELECT COUNT(*) FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id WHERE m.kind = 'NOTE' AND m.time >= ? AND m.id > ? AND m.id <= ?",
+                                since.toString(), from.toString(), upper.toString())
+                        }
+                        from = upper
+                    }
+                    step {
+                        // Planned messages never left: they carry the moment they were saved as their time, and their due time as planned_at.
                         if (scope.unsent) {
                             main.execSQL(
                                 "INSERT INTO snap.s_messages (src, chat, packet, outgoing, author, label, text, language, time, status, reply_src, is_picture, planned, reply_missing) " +
-                                    "SELECT NULL, c.id, NULL, 1, 0, NULL, p.text, p.language, p.due, 5, NULL, 0, p.due, CASE WHEN p.reply_to IS NULL THEN 0 ELSE 1 END " +
+                                    "SELECT NULL, c.id, NULL, 1, 0, NULL, p.text, p.language, ?, 5, NULL, 0, p.due, CASE WHEN p.reply_to IS NULL THEN 0 ELSE 1 END " +
                                     "FROM main.planned p JOIN snap.s_chats c ON c.src = p.chat_id ORDER BY p.id",
+                                arrayOf<Any>(maxOf(now, since)),
                             )
                         } else {
-                            unsent = scalar(main, "SELECT COUNT(*) FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id WHERE m.reaction = 0 AND " +
-                                "m.kind IN ('TEXT', 'PICTURE') AND m.time >= ? AND m.direction = 'OUT' AND m.delivery IN ($hold)", since.toString()) +
-                                scalar(main, "SELECT COUNT(*) FROM main.planned p JOIN snap.s_chats c ON c.src = p.chat_id")
+                            unsent += scalar(main, "SELECT COUNT(*) FROM main.planned p JOIN snap.s_chats c ON c.src = p.chat_id")
                         }
-                        notes = scalar(main, "SELECT COUNT(*) FROM main.messages m JOIN snap.s_chats c ON c.src = m.chat_id WHERE m.kind = 'NOTE' AND m.time >= ?", since.toString())
-                        main.execSQL(
-                            "INSERT INTO snap.s_pictures (id, message, complete, codec, width, height, sketch, src_file, lost) " +
-                                "SELECT sm.id, sm.id, 0, p.codec, p.width, p.height, p.sketch, p.file, p.lost FROM snap.s_messages sm " +
-                                "JOIN main.pictures p ON p.message_id = sm.src WHERE sm.is_picture = 1 ORDER BY sm.id",
-                        )
-                        main.execSQL(
-                            "INSERT INTO snap.s_reactions (src_chat, chat, target_packet, author, label, emoji, time, unsent) " +
-                                "SELECT r.chat_id, c.id, r.reply_to, COALESCE(l.contact, 0), l.label, r.text, r.time, CASE WHEN r.delivery = 'QUEUED' THEN 1 ELSE 0 END " +
-                                "FROM main.messages r JOIN snap.s_chats c ON c.src = r.chat_id " +
-                                "LEFT JOIN snap.s_labels l ON l.src_chat = r.chat_id AND l.sender = r.sender_id " +
-                                "WHERE r.reaction = 1 AND r.reply_to IS NOT NULL AND (? = 1 OR r.delivery IS NOT 'QUEUED') ORDER BY r.id",
-                            arrayOf<Any>(if (scope.unsent) 1 else 0),
-                        )
-                        main.setTransactionSuccessful()
-                    } finally {
-                        main.endTransaction()
+                    }
+                    // Pictures: the rows of the picture messages, in steps over the snapshot's own ids.
+                    var picture = 0L
+                    while (true) {
+                        val upper = boundary(main, "SELECT MAX(id) FROM (SELECT id FROM snap.s_messages WHERE is_picture = 1 AND id > ? AND id <= ? ORDER BY id LIMIT $BATCH)", picture, Long.MAX_VALUE) ?: break
+                        step {
+                            main.execSQL(
+                                "INSERT INTO snap.s_pictures (id, message, complete, codec, width, height, sketch, src_file, lost) " +
+                                    "SELECT sm.id, sm.id, 0, p.codec, p.width, p.height, p.sketch, p.file, p.lost FROM snap.s_messages sm " +
+                                    "JOIN main.pictures p ON p.message_id = sm.src WHERE sm.is_picture = 1 AND sm.id > ? AND sm.id <= ? ORDER BY sm.id",
+                                arrayOf<Any>(picture, upper),
+                            )
+                        }
+                        picture = upper
                     }
                 } finally {
                     runCatching { main.execSQL("DETACH DATABASE snap") }
@@ -225,7 +278,7 @@ class ChatSnapshot private constructor(
                 val db = SQLiteDatabase.openOrCreateDatabase(file, null)
                 db.rawQuery("PRAGMA journal_mode=OFF", null).use { it.moveToFirst() }
                 db.rawQuery("PRAGMA synchronous=OFF", null).use { it.moveToFirst() }
-                val s = finish(db, picturesDir, scope, now, since, cancelled)
+                val s = finish(db, picturesDir, scope, now, since, missingPicture, cancelled)
                 val kinds = chosen.map { it.kind }.toSet()
                 val flags = (if (ChatKind.GROUP in kinds) HistoryBackup.SHARED else 0) or (if (ChatKind.DIRECT in kinds) HistoryBackup.LEGACY else 0) or
                     (if (scope.unsent) HistoryBackup.UNSENT else 0) or (if (scope.pictures) HistoryBackup.PICTURE_DATA else 0) or
@@ -235,10 +288,13 @@ class ChatSnapshot private constructor(
                     scalar(db, "SELECT COUNT(*) FROM s_reactions"), scalar(db, "SELECT COUNT(*) FROM s_pictures"),
                     scalar(db, "SELECT COUNT(*) FROM s_pictures WHERE complete = 0"),
                 )
+                // A range names the newest thing in it too, so a message stamped after "now" (a skewed clock) still fits (B4-10).
+                val newest = db.rawQuery("SELECT MAX(COALESCE((SELECT MAX(time) FROM s_messages), 0), COALESCE((SELECT MAX(time) FROM s_reactions), 0))", null)
+                    .use { it.moveToFirst(); it.getLong(0) }
                 return ChatSnapshot(
                     file, db, me.identity, Recovery.displayName(me.name), me.colour and 0xFFFFFF, scope.since?.let { maxOf(0L, it) } ?: 0L,
-                    if (scope.since != null) maxOf(now, scope.since) else 0L, flags, counts,
-                    Left(unsent, notes, chatsWithoutContact, s.reactions, s.unsupported),
+                    if (scope.since != null) maxOf(now, scope.since, newest) else 0L, flags, counts,
+                    Left(unsent, notes, chatsWithoutContact, s.reactions, s.unsupported, unconfirmed, s.altered),
                 )
             } catch (e: Throwable) {
                 runCatching { snap.close() }
@@ -248,7 +304,7 @@ class ChatSnapshot private constructor(
             }
         }
 
-        private class Finished(val reactions: Int, val unsupported: Int)
+        private class Finished(val reactions: Int, val unsupported: Int, val altered: Int)
 
         private fun create(db: SQLiteDatabase) {
             for (sql in listOf(
@@ -266,11 +322,16 @@ class ChatSnapshot private constructor(
             )) db.execSQL(sql)
         }
 
+        /** The largest id of the next [BATCH] rows after [from] (up to [to]), or null when there are none. */
+        private fun boundary(db: SQLiteDatabase, sql: String, from: Long, to: Long): Long? =
+            db.rawQuery(sql, arrayOf(from.toString(), to.toString())).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+
         private fun scalar(db: SQLiteDatabase, sql: String, vararg args: String): Int = db.rawQuery(sql, args).use { it.moveToFirst(); it.getInt(0) }
 
         /** Checks every copied row against the format, reads the picture files and links replies and reactions. */
-        private fun finish(db: SQLiteDatabase, picturesDir: File, scope: ChatScope, now: Long, since: Long, cancelled: () -> Boolean): Finished {
+        private fun finish(db: SQLiteDatabase, picturesDir: File, scope: ChatScope, now: Long, since: Long, missingPicture: String, cancelled: () -> Boolean): Finished {
             var unsupported = 0
+            var altered = 0
             val pending = ArrayList<Long>()
             db.beginTransaction()
             try {
@@ -280,9 +341,10 @@ class ChatSnapshot private constructor(
                         val id = c.getLong(0)
                         val text = c.getString(1)
                         val clean = ArchiveText.clean(text, HistoryBackup.MAX_TEXT, lines = true)
-                        val label = c.getString(2)?.let { ArchiveText.clean(it, 160) }
+                        val label = c.getString(2)?.let { ArchiveText.plain(it, 160) }
                         val language = c.getString(3)?.let { ArchiveText.clean(it, 64) }
                         if (clean.isEmpty() && c.getInt(4) == 0) { pending.add(id); continue }
+                        if (clean != text) altered++
                         if (clean != text || label != c.getString(2) || language != c.getString(3)) {
                             db.execSQL("UPDATE s_messages SET text = ?, label = ?, language = ? WHERE id = ?", arrayOf<Any?>(clean, label, language, id))
                         }
@@ -298,20 +360,23 @@ class ChatSnapshot private constructor(
                         val codec = PictureCodec.of(c.getInt(1))
                         val sketch = c.getBlob(4)
                         if (codec == null || c.getInt(2) !in 1..512 || c.getInt(3) !in 1..512 || sketch.size !in 1..32) { pending.add(id); continue }
+                        val width = c.getInt(2)
+                        val height = c.getInt(3)
                         var complete = false
                         var data = ByteArray(0)
                         if (codec == PictureCodec.SKETCH) {
                             complete = c.getInt(6) == 0
                         } else if (scope.pictures && c.getInt(6) == 0 && !c.isNull(5)) {
                             val bytes = runCatching { File(picturesDir, c.getString(5)).takeIf { it.isFile && it.length() <= HistoryBackup.MAX_PICTURE_BYTES }?.readBytes() }.getOrNull()
-                            if (bytes != null && isWebp(bytes)) { complete = true; data = bytes }
+                            if (bytes != null && WebpCheck.dimensions(bytes) == (width to height)) { complete = true; data = bytes }
                         }
                         db.execSQL("UPDATE s_pictures SET complete = ?, data = ? WHERE id = ?", arrayOf<Any>(if (complete) 1 else 0, data, id))
                     }
                 }
+                // A picture the format cannot hold keeps its message: a text message saying the picture is missing (B4-11).
                 for (id in pending) {
                     db.execSQL("DELETE FROM s_pictures WHERE id = ?", arrayOf<Any>(id))
-                    db.execSQL("DELETE FROM s_messages WHERE id = ?", arrayOf<Any>(id))
+                    db.execSQL("UPDATE s_messages SET is_picture = 0, text = CASE WHEN text = '' THEN ? ELSE text || char(10) || ? END WHERE id = ?", arrayOf<Any>(missingPicture, missingPicture, id))
                     unsupported++
                 }
                 pending.clear()
@@ -328,17 +393,19 @@ class ChatSnapshot private constructor(
                 )
                 var dropped = scalar(db, "SELECT COUNT(*) FROM s_reactions WHERE target = 0")
                 db.execSQL("DELETE FROM s_reactions WHERE target = 0")
+                // Older than the range chosen: left out and counted. The same reaction twice (a repeat on the radio) is kept once.
+                dropped += scalar(db, "SELECT COUNT(*) FROM s_reactions WHERE time < ?", since.toString())
+                db.execSQL("DELETE FROM s_reactions WHERE time < ?", arrayOf<Any>(since))
+                dropped += scalar(db, "SELECT COUNT(*) - (SELECT COUNT(*) FROM (SELECT 1 FROM s_reactions GROUP BY target, author, label, emoji)) FROM s_reactions")
+                db.execSQL("DELETE FROM s_reactions WHERE id NOT IN (SELECT MIN(id) FROM s_reactions GROUP BY target, author, label, emoji)")
                 val bad = ArrayList<Long>()
                 db.rawQuery("SELECT id, emoji FROM s_reactions", null).use { c -> while (c.moveToNext()) if (Reactions.single(c.getString(1)) != c.getString(1)) bad.add(c.getLong(0)) }
                 for (id in bad) { db.execSQL("DELETE FROM s_reactions WHERE id = ?", arrayOf<Any>(id)); dropped++ }
                 db.setTransactionSuccessful()
-                return Finished(dropped, unsupported)
+                return Finished(dropped, unsupported, altered)
             } finally {
                 db.endTransaction()
             }
         }
-
-        private fun isWebp(d: ByteArray) = d.size >= 12 && String(d, 0, 4, Charsets.US_ASCII) == "RIFF" && String(d, 8, 4, Charsets.US_ASCII) == "WEBP" &&
-            java.nio.ByteBuffer.wrap(d, 4, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int.toLong() == d.size - 8L
     }
 }

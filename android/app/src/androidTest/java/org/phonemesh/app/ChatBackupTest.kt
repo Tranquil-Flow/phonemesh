@@ -10,6 +10,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.phonemesh.core.DeliveryStatus
 import org.phonemesh.core.backup.BackupStream
 import org.phonemesh.core.backup.ChatExport
 import org.phonemesh.core.backup.HistoryBackup
@@ -251,14 +252,28 @@ class ChatBackupTest {
             val unreadable = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { null })
             assertEquals("written but never read back is not checked", ChatBackup.Why.NOT_CHECKED, (unreadable as ChatBackup.Saved.Failed).why)
             assertTrue(unreadable.partial)
+            assertFalse("a file that could not be read back may be fine: it is kept", unreadable.discard)
+            assertTrue("an early failure leaves the picker's empty document: it goes", (noDestination as ChatBackup.Saved.Failed).discard)
             val cut = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { ByteArrayInputStream(out.readBytes().copyOf(1000)) })
-            assertEquals(ChatBackup.Why.NOT_CHECKED, (cut as ChatBackup.Saved.Failed).why)
+            assertEquals("read to its end and cut: a bad file", ChatBackup.Why.MISMATCH, (cut as ChatBackup.Saved.Failed).why)
+            assertTrue("a known-bad document is removed (B4-7)", cut.discard && cut.partial)
             val flipped = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { ByteArrayInputStream(out.readBytes().also { it[it.size - 3] = (it[it.size - 3].toInt() xor 1).toByte() }) })
-            assertEquals(ChatBackup.Why.NOT_CHECKED, (flipped as ChatBackup.Saved.Failed).why)
+            assertEquals(ChatBackup.Why.MISMATCH, (flipped as ChatBackup.Saved.Failed).why)
             val other = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { ByteArrayInputStream(otherCopy(f)) })
-            assertEquals("a different good file is not this copy", ChatBackup.Why.NOT_CHECKED, (other as ChatBackup.Saved.Failed).why)
+            assertEquals("a different good file is not this copy", ChatBackup.Why.MISMATCH, (other as ChatBackup.Saved.Failed).why)
             val cancelled = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { out.inputStream() }, cancelled = { true })
             assertEquals(ChatBackup.Why.CANCELLED, (cancelled as ChatBackup.Saved.Failed).why)
+            assertTrue(cancelled.discard)
+            // No room: a failure before the destination is even asked for still removes the document the picker made.
+            val huge = ChatExport.Preview.Ok(preview.counts, preview.records, preview.plainBytes, Long.MAX_VALUE / 4)
+            val noRoom = backup.save(snap, huge, key, 5, 1, { throw AssertionError("never asked") }, { null }) as ChatBackup.Saved.Failed
+            assertEquals(ChatBackup.Why.NO_SPACE, noRoom.why)
+            assertTrue(noRoom.discard)
+            // A bug in the app is not a problem with the place chosen (B4-15).
+            val bug = backup.save(snap, preview, key, 5, 1, { out.outputStream() }, { throw IllegalStateException("bug") }) as ChatBackup.Saved.Failed
+            assertEquals(ChatBackup.Why.NOT_CHECKED, bug.why)
+            val wiped = RecoveryKey.generate().also { it.wipe() }
+            assertEquals(ChatBackup.Why.FAILED, (backup.save(snap, preview, wiped, 5, 1, { out.outputStream() }, { null }) as ChatBackup.Saved.Failed).why)
             assertEquals("nothing but the snapshot is left in the private folder", emptyList<String>(),
                 (work.listFiles() ?: emptyArray()).map { it.name }.filterNot { it.startsWith(ChatSnapshot.PREFIX) })
         }
@@ -334,5 +349,129 @@ class ChatBackupTest {
         snapshot(f, scope(f, chats = setOf(f.person))).use { snap ->
             assertEquals("at the limit it is kept", 1, save(snap).all<HistoryBackup.Picture>().count { it.complete })
         }
+    }
+
+    // ---- Review B4
+
+    /** B4-1: a failure of this phone's storage while checking is its own answer, never "key or file does not match". */
+    @Test fun aStorageFailureWhileReadingIsNotAVerdictOnTheFileOrTheKey() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        val bytes = snapshot(f, scope(f, chats = setOf(f.group))).use { save(it).file }
+        fun read(thrown: RuntimeException?): ArchiveReader.Read = ArchiveReader.read(ByteArrayInputStream(bytes), key, work) { if (thrown != null) throw thrown }
+        assertTrue(read(null) is ArchiveReader.Read.Ok)
+        assertEquals(ArchiveReader.Problem.NO_SPACE, (read(android.database.sqlite.SQLiteFullException("full")) as ArchiveReader.Read.Failed).problem)
+        assertEquals(ArchiveReader.Problem.STORAGE, (read(android.database.sqlite.SQLiteException("broken")) as ArchiveReader.Read.Failed).problem)
+        assertEquals(ArchiveReader.Problem.STORAGE, (read(ArchiveReader.StorageFailure("picture file")) as ArchiveReader.Read.Failed).problem)
+        assertEquals("a wrong key stays a wrong key", ArchiveReader.Problem.KEY_OR_FILE_DOES_NOT_MATCH,
+            (ArchiveReader.read(ByteArrayInputStream(bytes), RecoveryKey.generate(), work) as ArchiveReader.Read.Failed).problem)
+        assertEquals("a cancel is not swallowed", true, runCatching { read(java.util.concurrent.CancellationException("c")) }.exceptionOrNull() is java.util.concurrent.CancellationException)
+    }
+
+    /** B4-8: the reader closes what it was given, whatever happens. */
+    @Test fun theReaderClosesItsInputOnSuccessFailureAndCancel() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        val bytes = snapshot(f, scope(f, chats = setOf(f.group))).use { save(it).file }
+        class Tracking(b: ByteArray) : ByteArrayInputStream(b) { var closed = false; override fun close() { closed = true; super.close() } }
+        for ((name, k, stop) in listOf(Triple("success", key, false), Triple("wrong key", RecoveryKey.generate(), false), Triple("cancel", key, true))) {
+            val input = Tracking(bytes)
+            runCatching { ArchiveReader.read(input, k, work, cancelled = { stop }) }
+            assertTrue("$name: input closed", input.closed)
+        }
+        val short = Tracking(bytes.copyOf(40))
+        ArchiveReader.read(short, key, work)
+        assertTrue("a file that is not a copy: input closed", short.closed)
+    }
+
+    /** B4-11: nothing is shortened or turned into a placeholder without being counted; unconfirmed is not "unsent". */
+    @Test fun shortenedMessagesAndUnconfirmedOnesAreCountedWithTheirOwnWords() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        TestCore.onMain {
+            val h = core.history
+            h.addIncoming(f.person, f.bea.account, "x".repeat(5_000), "fr", f.now - 1_000, false, packetId = 5_001L)
+            h.addOutgoing(f.person, "sent but never confirmed", "fr", f.now - 2_000).also { h.setStatus(it.id, DeliveryStatus.UNCONFIRMED) }
+            h.addIncomingPicture(f.person, f.bea.account, PictureRow(0, 9, 1, 600, 48, ByteArray(16) { 1 }, null, 1, 4, false), f.now - 500, false)
+        }
+        val missing = "Picture missing from this copy."
+        snapshot(f, scope(f, chats = setOf(f.person))).use { snap ->
+            assertEquals("the unconfirmed one is not an unsent one", 2, snap.left.unsent)
+            assertEquals(1, snap.left.unconfirmed)
+            assertEquals("the long message was cut", 1, snap.left.altered)
+            assertTrue("the picture with impossible sizes is counted", snap.left.unsupported >= 1)
+            val copy = save(snap)
+            assertTrue(copy.all<HistoryBackup.Message>().none { it.text == "sent but never confirmed" })
+            val cut = copy.all<HistoryBackup.Message>().single { it.text.startsWith("xxxx") }
+            assertEquals(HistoryBackup.MAX_TEXT, cut.text.length)
+            assertTrue("a picture message that cannot be saved stays as a text with a note", copy.all<HistoryBackup.Message>().any { it.text == missing && it.pictureId == 0L })
+        }
+        snapshot(f, scope(f, unsent = true, chats = setOf(f.person))).use { snap ->
+            assertEquals(0, snap.left.unconfirmed)
+            val copy = save(snap)
+            assertEquals(6, copy.all<HistoryBackup.Message>().single { it.text == "sent but never confirmed" }.status)
+        }
+    }
+
+    /** B4-10: the writer refuses nothing the phone really holds: a skewed clock, a repeated reaction, a title with a bidi override. */
+    @Test fun whatThePhoneReallyHoldsAlwaysFitsTheRules() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        val tomorrowish = f.now + 10 * ChatFixture.DAY
+        TestCore.onMain {
+            val h = core.history
+            h.addIncoming(f.person, f.bea.account, "from a clock ten days ahead", "fr", tomorrowish, false, packetId = 9_001L)
+            h.addReaction(f.person, f.bea.account, "👍", 2000L + ChatFixture.BIG, f.now - 5 * 60_000L)
+            h.privateGroupChat("cd".repeat(16), "Fa\u202Emille \u200Bdeux")
+        }
+        snapshot(f, scope(f, since = f.now - 90 * ChatFixture.DAY, chats = setOf(f.person, f.group) + TestCore.onMain { core.history.chats().filter { it.kind == ChatKind.PRIVATE_GROUP }.map { it.id } })).use { snap ->
+            val copy = save(snap)
+            assertTrue("the range includes the newest message", copy.manifest.scopeEnd >= tomorrowish)
+            assertEquals("the same reaction twice is one", 1, copy.all<HistoryBackup.Reaction>().count { it.emoji == "👍" && it.authorContactId != 0L })
+            assertTrue(copy.all<HistoryBackup.Chat>().none { c -> c.title.any { it == '\u202E' || it == '\u200B' } })
+            assertTrue("the hidden characters are dropped, the name stays", copy.all<HistoryBackup.Chat>().any { it.title == "Famille deux" })
+        }
+    }
+
+    /** B4-3: the history stays answerable while a big snapshot is taken (steps of a couple of thousand rows, not one lock). */
+    @Test fun aBigSnapshotNeverHoldsTheHistoryForLong() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        TestCore.onMain {
+            core.history.writableDatabase.execSQL(
+                "INSERT INTO messages (chat_id, direction, kind, text, time, reaction, language) " +
+                    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 120000) SELECT ?, 'IN', 'TEXT', 'filler ' || i, ?, 0, 'fr' FROM n",
+                arrayOf<Any>(f.person, f.now - 60_000),
+            )
+        }
+        val worst = LongArray(1)
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        var snap: ChatSnapshot? = null
+        ChatSnapshot.steps = 0
+        val worker = Thread { snap = snapshot(f, scope(f, chats = setOf(f.person))); done.set(true) }.also { it.start() }
+        while (!done.get()) {
+            val t = System.nanoTime()
+            TestCore.onMain { core.history.chats() }
+            worst[0] = maxOf(worst[0], (System.nanoTime() - t) / 1_000_000)
+            Thread.sleep(5)
+        }
+        worker.join()
+        snap!!.use { assertTrue("snapshot has the filler messages", it.counts().messages > 120_000) }
+        assertTrue("the longest wait of a history call was ${worst[0]} ms", worst[0] < 600)
+        assertTrue("one short transaction per couple of thousand rows, not one lock: ${ChatSnapshot.steps}", ChatSnapshot.steps >= 60)
+    }
+
+    /** B4-3: room is asked before anything is copied; a full disk is its own answer and leaves no scratch file. */
+    @Test fun aSnapshotWithoutRoomIsRefusedBeforeAnythingIsCopied() {
+        TestCore.install()
+        val f = ChatFixture.build(core)
+        val refused = runCatching {
+            ChatSnapshot.build(core.history, core.picturesDir, work, scope(f), f.now, core::exportLabel, usableSpace = { 1_000 })
+        }.exceptionOrNull()
+        assertTrue("$refused", refused is ChatSnapshot.NoRoom)
+        assertEquals(emptyList<String>(), work.listFiles()?.map { it.name }.orEmpty())
+        val made = ChatSnapshot.build(core.history, core.picturesDir, work, scope(f), f.now, core::exportLabel)
+        assertNotNull("with room it works", made)
+        made!!.close()
     }
 }

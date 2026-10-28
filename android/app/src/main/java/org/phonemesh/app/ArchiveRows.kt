@@ -65,6 +65,22 @@ class ArchiveRows(private val history: History) {
         arrayOf(hex(id), chatId.toString()),
     ).use { c -> buildList { while (c.moveToNext()) add(ReactionRow(c.getLong(0), c.getLong(1), c.getLong(2), c.optString(3), c.getString(4), c.getLong(5), c.getInt(6) != 0)) } }
 
+    /** The reactions to just these [targets] (the messages of one page): never every reaction of a chat (B4-4). */
+    fun reactions(id: ByteArray, targets: Collection<Long>): List<ReactionRow> {
+        if (targets.isEmpty()) return emptyList()
+        val marks = targets.joinToString(",") { "?" }
+        return db.rawQuery(
+            "SELECT r.local_id, r.target_id, r.author_contact_id, r.author_label, r.emoji, r.time, r.was_unsent FROM archive_reactions r " +
+                "WHERE r.archive_id = ? AND r.target_id IN ($marks) ORDER BY r.local_id",
+            arrayOf(hex(id)) + targets.map { it.toString() },
+        ).use { c -> buildList { while (c.moveToNext()) add(ReactionRow(c.getLong(0), c.getLong(1), c.getLong(2), c.optString(3), c.getString(4), c.getLong(5), c.getInt(6) != 0)) } }
+    }
+
+    /** One chat's own row, without counting its messages. */
+    fun chat(id: ByteArray, chatId: Long): ChatRow? = db.rawQuery(
+        "SELECT local_id, kind, contact_id, title, pinned FROM archive_chats WHERE archive_id = ? AND local_id = ?", arrayOf(hex(id), chatId.toString()),
+    ).use { c -> if (c.moveToFirst()) ChatRow(id, c.getLong(0), c.getInt(1), c.getLong(2), c.getString(3), c.getInt(4) != 0, 0, 0) else null }
+
     fun picture(id: ByteArray, pictureId: Long): PictureRow? = db.query("archive_pictures", null, "archive_id = ? AND local_id = ?", arrayOf(hex(id), pictureId.toString()), null, null, null).use { c ->
         if (!c.moveToFirst()) null else PictureRow(
             c.getLong(c.getColumnIndexOrThrow("local_id")), c.getLong(c.getColumnIndexOrThrow("message_id")), c.getInt(c.getColumnIndexOrThrow("complete")) != 0,
@@ -77,17 +93,62 @@ class ArchiveRows(private val history: History) {
         buildList { while (c.moveToNext()) add(ContactRow(c.getLong(c.getColumnIndexOrThrow("local_id")), c.getBlob(c.getColumnIndexOrThrow("identity")), c.getString(c.getColumnIndexOrThrow("saved_name")), c.getInt(c.getColumnIndexOrThrow("colour")), c.getInt(c.getColumnIndexOrThrow("historical_met")) != 0)) }
     }
 
-    /** Takes a saved copy off this phone: its rows, then its picture folder. The file it came from is not touched. */
-    fun delete(id: ByteArray, archivesDir: File) {
+    /**
+     * Takes a saved copy off this phone (never on the screen's thread): one small transaction removes the copy from
+     * every list and notes the removal in the journal, then its rows go in steps of a few thousand, then its picture
+     * folder. A crash in between is finished by [ArchiveImport.recover]. The saved people that copy created go too,
+     * unless another copy holds the same person (B4-12). The file it came from is not touched.
+     */
+    fun delete(id: ByteArray, archivesDir: File, cancelled: () -> Boolean = { false }) = synchronized(LOCK) {
         val h = hex(id)
         db.beginTransaction()
         try {
-            for (t in listOf("archive_reactions", "archive_pictures", "archive_messages", "archive_chats", "archive_contacts", "backup_archives")) db.delete(t, "archive_id = ?", arrayOf(h))
+            dropPeopleOf(id)
+            db.delete("backup_archives", "archive_id = ?", arrayOf(h))
+            db.insertWithOnConflict("backup_imports", null, android.content.ContentValues().apply {
+                put("archive_id", h); put("step", REMOVING); put("started", System.currentTimeMillis())
+            }, SQLiteDatabase.CONFLICT_REPLACE)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
-        File(archivesDir, h).deleteRecursively()
+        finishRemoving(id, archivesDir, cancelled)
+    }
+
+    /** The second half of [delete], also run by [ArchiveImport.recover] after a crash. */
+    fun finishRemoving(id: ByteArray, archivesDir: File, cancelled: () -> Boolean = { false }) {
+        removeRows(id, cancelled)
+        File(archivesDir, hex(id)).deleteRecursively()
+        journalDrop(id)
+    }
+
+    /** The archive tables' rows of [id], [STEP] at a time, each step its own transaction. Not the copy's own row. */
+    fun removeRows(id: ByteArray, cancelled: () -> Boolean = { false }) {
+        val h = hex(id)
+        for (t in listOf("archive_reactions", "archive_pictures", "archive_messages", "archive_chats", "archive_contacts")) {
+            val statement = db.compileStatement(
+                "DELETE FROM $t WHERE archive_id = ? AND local_id <= (SELECT MAX(local_id) FROM (SELECT local_id FROM $t WHERE archive_id = ? ORDER BY local_id LIMIT $STEP))",
+            )
+            statement.use {
+                while (true) {
+                    if (cancelled()) throw java.util.concurrent.CancellationException("cancelled")
+                    it.bindString(1, h); it.bindString(2, h)
+                    if (it.executeUpdateDelete() == 0) break
+                }
+            }
+        }
+    }
+
+    /** Saved people made by copy [id] go, except those another copy still holds: they now belong to that copy. */
+    private fun dropPeopleOf(id: ByteArray) {
+        val h = hex(id)
+        val mine = db.rawQuery("SELECT identity FROM recovered_contacts WHERE hex(archive) = ?", arrayOf(h.uppercase())).use { c -> buildList { while (c.moveToNext()) add(c.getBlob(0)) } }
+        for (identity in mine) {
+            val upper = hex(identity).uppercase()
+            val other = db.rawQuery("SELECT archive_id FROM archive_contacts WHERE archive_id <> ? AND hex(identity) = ? LIMIT 1", arrayOf(h, upper)).use { if (it.moveToFirst()) it.getString(0) else null }
+            if (other != null) db.update("recovered_contacts", android.content.ContentValues().apply { put("archive", unhex(other)) }, "hex(identity) = ?", arrayOf(upper))
+            else db.delete("recovered_contacts", "hex(identity) = ?", arrayOf(upper))
+        }
     }
 
     // ---- The import journal (spec 5.7 step 6).
@@ -122,6 +183,15 @@ class ArchiveRows(private val history: History) {
     companion object {
         /** Saved copies kept on one phone at most: each can be half a gigabyte of messages (spec 5.8, bounded growth). */
         const val MAX_ARCHIVES = 8
+
+        /** One import or removal at a time, and the start-up cleanup after neither: they share the journal and the folders. */
+        val LOCK = Any()
+
+        /** The journal step of a copy being taken off the phone. */
+        const val REMOVING = "REMOVING"
+
+        /** Rows removed per transaction when a copy goes (B4-3, B4-4). */
+        private const val STEP = 5_000
 
         fun hex(b: ByteArray): String = b.joinToString("") { "%02x".format(it) }
         fun unhex(s: String): ByteArray = ByteArray(s.length / 2) { s.substring(2 * it, 2 * it + 2).toInt(16).toByte() }

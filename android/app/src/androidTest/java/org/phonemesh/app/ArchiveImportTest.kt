@@ -273,7 +273,150 @@ class ArchiveImportTest {
         }
     }
 
+    // ---- Review B4
+
+    /** B4-9: the file is read once; the id that is checked, filed and committed is the id of those bytes. */
+    @Test fun theFileIsReadOnceSoTheIdThatIsCheckedIsTheIdThatIsCommitted() {
+        newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.group)) }
+        val a = tiny(3, SecureRandom())
+        val b = tiny(4, SecureRandom())
+        var opens = 0
+        val result = importer().import({ ByteArrayInputStream(if (opens++ == 0) a else b) }, key, 1) as ArchiveImport.Result.Saved
+        assertEquals("one open", 1, opens)
+        assertArrayEquals(a.copyOfRange(12, 28), result.archiveId)
+        val row = ArchiveRows(core.history).archives().single()
+        assertEquals(3, row.messages)
+        assertTrue("its pictures folder is named by that id", File(archives, row.hex).exists() || row.pictures == 0)
+        assertEquals(emptyList<String>(), work.listFiles()?.map { it.name }.orEmpty())
+    }
+
+    /** B4-14: an authenticated copy a newer app wrote is "needs a newer app", not "key or file does not match". */
+    @Test fun anAuthenticatedCopyFromANewerAppIsNotAWrongKey() {
+        newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.group)) }
+        val plain = tinyPlain(3)
+        plain[7] = 3                                          // schema 3
+        val result = import(sealed(plain))
+        assertEquals(ArchiveReader.Problem.TOO_NEW, (result as ArchiveImport.Result.Failed).problem)
+        assertNothingKept()
+        val wrongKey = import(sealed(tinyPlain(3)), RecoveryKey.generate())
+        assertEquals(ArchiveReader.Problem.KEY_OR_FILE_DOES_NOT_MATCH, (wrongKey as ArchiveImport.Result.Failed).problem)
+    }
+
+    /** B4-4: a page of a saved chat asks for the reactions to its own messages only, never every reaction of the chat. */
+    @Test fun aPageLoadsOnlyTheReactionsToItsOwnMessages() {
+        val (bytes, _) = newPhoneWith()
+        val saved = import(bytes) as ArchiveImport.Result.Saved
+        val rows = ArchiveRows(core.history)
+        val everyone = rows.chats(saved.archiveId).flatMap { c -> rows.reactions(saved.archiveId, c.id) }
+        assertTrue("the copy holds several reactions", everyone.size >= 3)
+        val first = everyone.first()
+        assertEquals(everyone.filter { it.targetId == first.targetId && it.id == first.id }.map { it.id }, rows.reactions(saved.archiveId, listOf(first.targetId)).filter { it.id == first.id }.map { it.id })
+        assertTrue(rows.reactions(saved.archiveId, listOf(first.targetId)).all { it.targetId == first.targetId })
+        assertEquals(emptyList<Long>(), rows.reactions(saved.archiveId, emptyList()).map { it.id })
+        assertEquals(emptyList<Long>(), rows.reactions(saved.archiveId, listOf(-5L)).map { it.id })
+    }
+
+    /** B4-8. */
+    @Test fun theFileIsClosedWhateverTheOutcome() {
+        newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.group)) }
+        val good = tiny(3, SecureRandom())
+        class Tracking(b: ByteArray) : ByteArrayInputStream(b) { var closed = false; override fun close() { closed = true; super.close() } }
+        for ((name, bytes, k) in listOf(Triple("saved", good, key), Triple("wrong key", good, RecoveryKey.generate()), Triple("not a copy", "hello".toByteArray(), key))) {
+            val input = Tracking(bytes)
+            importer().import({ input }, k, 1)
+            assertTrue("$name: closed", input.closed)
+            ArchiveRows(core.history).archives().forEach { ArchiveRows(core.history).delete(it.archiveId, archives) }
+        }
+        val again = Tracking(good)
+        assertTrue(importer().import({ again }, key, 1) is ArchiveImport.Result.Saved)
+        val dup = Tracking(good)
+        assertTrue(importer().import({ dup }, key, 2) is ArchiveImport.Result.Already)
+        assertTrue("already saved: closed", dup.closed)
+    }
+
+    /** B4-1: a full disk or a failing database is its own answer, never "key or file does not match", and nothing is kept. */
+    @Test fun aFullDiskOrAStorageErrorIsNeverAVerdictOnTheFile() {
+        newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.group)) }
+        val bytes = tiny(300, SecureRandom())
+        // Room is sized from the file: a phone with 1 MB free cannot take any copy.
+        assertEquals(ArchiveImport.Result.NoSpace, ArchiveImport(core.history, archives, work, usableSpace = { 1_000_000 }).import({ ByteArrayInputStream(bytes) }, key, 1))
+        assertNothingKept()
+        var seen = 0
+        val full = ArchiveImport(core.history, archives, work, stageHook = { if (++seen == 100) throw android.database.sqlite.SQLiteFullException("full") })
+        assertEquals("disk full on record 100", ArchiveImport.Result.NoSpace, full.import({ ByteArrayInputStream(bytes) }, key, 1))
+        assertNothingKept()
+        seen = 0
+        val broken = ArchiveImport(core.history, archives, work, stageHook = { if (++seen == 100) throw android.database.sqlite.SQLiteException("disk I/O") })
+        assertEquals(ArchiveImport.Result.StorageError, broken.import({ ByteArrayInputStream(bytes) }, key, 1))
+        assertNothingKept()
+        seen = 0
+        val pictureFile = ArchiveImport(core.history, archives, work, stageHook = { if (++seen == 100) throw ArchiveReader.StorageFailure("picture") })
+        assertEquals(ArchiveImport.Result.StorageError, pictureFile.import({ ByteArrayInputStream(bytes) }, key, 1))
+        assertNothingKept()
+        assertTrue("and then it works", import(bytes) is ArchiveImport.Result.Saved)
+    }
+
+    /** B4-12. */
+    @Test fun removingACopyAlsoDropsTheSavedPeopleItMadeUnlessAnotherCopyHasThem() {
+        var second = ByteArray(0)
+        val (first, _) = newPhoneWith {
+            second = ChatFixture.copy(core, it, key, work, chats = setOf(it.person))
+            ChatFixture.copy(core, it, key, work, chats = setOf(it.person, it.group))
+        }
+        val one = import(first) as ArchiveImport.Result.Saved
+        assertEquals(listOf("Bea"), core.history.recoveredRows().map { it.name })
+        val two = import(second) as ArchiveImport.Result.Saved
+        assertEquals("Bea was already saved: not twice", 0, two.people)
+        val rows = ArchiveRows(core.history)
+        rows.delete(one.archiveId, archives)
+        assertEquals("another copy still holds Bea", listOf("Bea"), core.history.recoveredRows().map { it.name })
+        rows.delete(two.archiveId, archives)
+        assertEquals("the last copy that held her is gone", emptyList<String>(), core.history.recoveredRows().map { it.name })
+        assertEquals(0, count("backup_imports"))
+    }
+
+    /** B4-3: the history stays answerable while a big copy is committed (steps, not one lock). */
+    @Test fun aBigRestoreNeverHoldsTheHistoryForLong() {
+        newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.group)) }
+        val bytes = tiny(100_000, SecureRandom())
+        val worst = LongArray(1)
+        val done = java.util.concurrent.atomic.AtomicBoolean(false)
+        var result: ArchiveImport.Result? = null
+        ArchiveImport.batches = 0
+        val worker = Thread { result = import(bytes); done.set(true) }.also { it.start() }
+        while (!done.get()) {
+            val t = System.nanoTime()
+            TestCore.onMain { core.history.chats() }
+            worst[0] = maxOf(worst[0], (System.nanoTime() - t) / 1_000_000)
+            Thread.sleep(5)
+        }
+        worker.join()
+        assertTrue("$result", result is ArchiveImport.Result.Saved)
+        assertEquals(100_000, count("archive_messages"))
+        assertTrue("the longest wait of a history call was ${worst[0]} ms", worst[0] < 700)
+        assertTrue("staged rows go in steps of a couple of thousand, not one lock: ${ArchiveImport.batches}", ArchiveImport.batches >= 50)
+    }
+
+    /** B4-4, B4-13: a removal that was under way is finished at the next start; rows of an import that never committed go. */
+    @Test fun recoverFinishesARemovalAndDropsRowsNobodyCommitted() {
+        val (bytes, _) = newPhoneWith { ChatFixture.copy(core, it, key, work, chats = setOf(it.person, it.group)) }
+        val saved = import(bytes) as ArchiveImport.Result.Saved
+        val db = core.history.writableDatabase
+        val hex = ArchiveRows.hex(saved.archiveId)
+        // The process died after the copy left every list and before its rows went.
+        db.execSQL("DELETE FROM backup_archives WHERE archive_id = ?", arrayOf<Any>(hex))
+        db.execSQL("INSERT INTO backup_imports VALUES (?, 'REMOVING', 1)", arrayOf<Any>(hex))
+        // And rows an import left before its final step.
+        val ghost = "%032x".format(77)
+        db.execSQL("INSERT INTO archive_messages VALUES (?, 1, 1, 0, 0, NULL, 'x', NULL, 1, 0, 0, 0, 0, 0)", arrayOf<Any>(ghost))
+        db.execSQL("INSERT INTO backup_imports VALUES (?, 'FILES_MOVED', 1)", arrayOf<Any>(ghost))
+        ArchiveImport.recover(core.history, archives, work)
+        for (t in ArchiveRows.TABLES) assertEquals("$t is empty", 0, count(t))
+        assertEquals(emptyList<String>(), archives.listFiles()?.map { it.name }.orEmpty())
+    }
+
     // ---- helpers for hand-made copies
+
 
     private class Fixed : SecureRandom() {
         private val queue = ArrayDeque(listOf(ByteArray(16) { 0xA1.toByte() }, ByteArray(16) { 0x5A }, ByteArray(32) { it.toByte() }, ByteArray(12) { 0x77 }))
@@ -284,7 +427,9 @@ class ArchiveImportTest {
         ByteArrayOutputStream().also { BackupStream.seal(key, BackupFile.Purpose.HISTORY, ByteArrayInputStream(plain), plain.size.toLong(), it, random) }.toByteArray()
 
     /** A valid small copy with one group chat of [messages] messages. */
-    private fun tiny(messages: Int, random: SecureRandom): ByteArray {
+    private fun tiny(messages: Int, random: SecureRandom): ByteArray = sealed(tinyPlain(messages), random)
+
+    private fun tinyPlain(messages: Int): ByteArray {
         val identity = core.history.accountRow()!!.identity
         val m = HistoryBackup.Manifest(identity, 1, 1, "Awa", 0, 0, 0, HistoryBackup.GROUPS, 0, 1, messages, 0, 0, 0)
         val out = ByteArrayOutputStream()
@@ -293,7 +438,7 @@ class ArchiveImportTest {
             for (i in 1..messages) write(HistoryBackup.Message(i.toLong(), 1, false, 0, "Yaw", "message $i", null, i.toLong(), 0, 0, false, 0, 0))
             finish()
         }
-        return sealed(out.toByteArray(), random)
+        return out.toByteArray()
     }
 
     private companion object {

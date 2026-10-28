@@ -89,10 +89,13 @@ class HubClient(
         @Volatile var engine: HubEngineTls? = null
         @Volatile var timedOut = false
 
-        /** From any thread (the watchdog, close): ends the sockets or the stream, which wakes whatever is blocked on them. */
+        /**
+         * From any thread (the watchdog, close): ends the sockets or the stream, which wakes whatever is blocked on them.
+         * The plain socket goes first: closing TLS first can wait on the JDK's handshake lock while a handshake is blocked.
+         */
         fun abort() {
-            runCatching { secure?.close() }
             runCatching { plain?.close() }
+            runCatching { secure?.close() }
             runCatching { stream?.abort() }
         }
 

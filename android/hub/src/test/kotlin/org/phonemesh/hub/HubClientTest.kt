@@ -188,6 +188,36 @@ class HubClientTest {
         assertTrue(runCatching { doomed.send(301, Packets.message(5)) }.exceptionOrNull() is IOException)
     }
 
+    /**
+     * close() shuts the plain socket itself first. Closing the TLS socket first can wait on the JDK's handshake lock while
+     * a handshake is blocked reading, so the request only ended once that wait gave up (seen as a slow close under load).
+     */
+    @Test fun closingShutsThePlainSocketBeforeTheTlsLayer() {
+        val dripping = fakeServer(drip = true)
+        val firstCloser = java.util.concurrent.atomic.AtomicReference<String?>()
+        val factory = object : SocketFactory() {
+            override fun createSocket(): java.net.Socket = object : java.net.Socket() {
+                override fun close() {
+                    val viaTls = Thread.currentThread().stackTrace.any { it.className.contains("SSLSocket") }
+                    firstCloser.compareAndSet(null, if (viaTls) "tls" else "plain")
+                    super.close()
+                }
+            }
+            override fun createSocket(host: String, port: Int): java.net.Socket = throw UnsupportedOperationException()
+            override fun createSocket(host: String, port: Int, local: java.net.InetAddress, localPort: Int): java.net.Socket = throw UnsupportedOperationException()
+            override fun createSocket(host: java.net.InetAddress, port: Int): java.net.Socket = throw UnsupportedOperationException()
+            override fun createSocket(host: java.net.InetAddress, port: Int, local: java.net.InetAddress, localPort: Int): java.net.Socket = throw UnsupportedOperationException()
+        }
+        val doomed = HubClient("127.0.0.1", dripping.localPort, tls.pin, factory, sendMillis = 30_000)
+        val caller = thread { runCatching { doomed.send(301, Packets.message(5)) } }
+        Thread.sleep(400)
+        assertTrue("the request is waiting in the handshake", caller.isAlive)
+        doomed.close()
+        caller.join(10_000)
+        assertTrue(!caller.isAlive)
+        assertEquals("plain", firstCloser.get())
+    }
+
     /** Two phones with a real session: one hands a sealed message to the hub, the other's long poll gets it and opens it. */
     @Test fun aRealMessageGoesThroughTheClientAndTheCursorMovesOn() {
         val a = SoftKeys.generate(); val b = SoftKeys.generate()

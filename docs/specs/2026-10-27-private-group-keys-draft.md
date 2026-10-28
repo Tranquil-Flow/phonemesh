@@ -154,6 +154,70 @@ From the agent review (lane C), all in core with tests and mutants:
 - C5: low S only. C6: own codes asked for. C7: secrets out of message storage and wiped. C8: saved state.
 - C9: keys on the curve only. C10: window steps cached.
 
+## Review G9 (storage, transport and engine): rules fixed and limits kept
+
+Lane G9 reviewed the engine and the app around it (owner decision 76). Every finding is fixed, or kept here as a limit
+with its reason. Rules the draft now states:
+
+- **A signing key is new to the group (G9-1).** A Join reply (`Signer`) whose key equals this phone's own signing key,
+  a listed member's key, or the key another person already gave is refused. The admin's epoch for the other joiners
+  still goes. If a duplicate ever reached the stored keys, the batch drops that joiner and never throws.
+- **Rival keys are believed for 6 hours (G9-4).** A key for the epoch held, from an admin of the list before, counts
+  as a second list only within 6 hours of taking that epoch. After that a removed admin's rival is refused like any
+  key. Inside the window the group still stops at a conflict until an admin fixes it (two admins acting at once is
+  the case the rule exists for). The time the epoch was taken is saved with the member state.
+- **Photo pieces are checked on reading (G9-3).** A member photo or group photo piece must decode as a whole group-cut
+  piece (`PictureWire.decodeGroup`); anything else is dropped before it reaches storage. Joining a photo uses the
+  cut it was made with (133-byte parts for groups); the part size is never defaulted.
+- **Keys go to contacts only (G9-7).** An epoch that would need a key for someone who is no longer a contact does not
+  start (a new member joining, a leaving, or the last admin handing over); the admin is told by a line in the group
+  chat, and the epoch goes at the next batch once every key has a way. A key already queued for a contact is kept
+  (not dropped) until its 72-hour horizon, then let go with a note.
+- **Invitations (G9-8).** The first invitation for a group id stays; a later one from anyone is ignored. One contact
+  may leave at most 4, all together at most 16, and any invitation expires after 30 days.
+- **Recent messages (G9-9).** Read from an admin's hub chain, by a phone that joined in the epoch they were sent in;
+  they are still read while the next epoch is new (the old hub readers last 72 hours). At most 50 are taken per
+  group, and a time later than now is shown as now.
+- **Old state goes (G9-10).** Once an hour: finished outbox rows of no shown message after 7 days, queued private
+  bodies and waiting hub-only packets after 72 hours (a key that never went is reported), and picture pieces that
+  never completed after 72 hours (the picture then shows as lost).
+- **An Ask is answered once per member per epoch (G9-11).** The answer carries the key and every list part over the
+  private session, which retries by itself, so asking again for the same epoch adds nothing.
+- **Ops keep to their chains (G9-12).** Messages and the group photo travel on either chain; profiles and receipts on
+  the radio chain only; recent messages and member photos on the hub chain only. Sealing one elsewhere throws, and
+  reading one from the wrong chain drops it.
+- **Admin calls never throw (G9-13).** Removing or promoting your own account is refused; a list the engine refuses
+  is a refusal.
+- **Leaving (G9-14).** A Leave more than 4 epochs behind the epoch held is a stale notice and is not taken.
+- **Packets for no group cost a look-up (G9-6).** The codes every group expects are kept in memory, refreshed after each
+  change that group makes; a packet whose code no group expects opens no group.
+
+Limits kept, with reasons:
+
+- **G9-9 (1), recent messages are a reader-side rule.** Every member derives every member's hub chain from the epoch
+  secret, so "only new members read the batch" is the reader's choice. A member with a modified client can read a
+  batch meant for a later joiner. Sending the batch under a key given only to the new members would cost a key packet
+  per joiner per batch and was not chosen. The admin still sends at most 50 messages from the last 7 days.
+- **G9-9 (3), author and time of a shared message are the admin's word.** They are not signed by the author. The
+  time is capped at now and the count at 50, and the line is shown as shared by that admin. Signing each shared
+  message by its author would not fit a group packet next to the 126-byte body.
+- **G9-9 (4), a message longer than 126 bytes is not shared.** The shared packet carries op, author and time too.
+- **G9-4, no "ignore this admin" choice.** Inside the 6-hour window a rival key still stops sending until an admin
+  fixes the group. Naming the rival admin and offering to ignore them was not built: it would let a member decide
+  alone which of two admins is right.
+- **G9-7, retries run with the postman.** The epoch of people who joined while a contact was missing goes again at
+  the next postman run after the contact exists, not at a fixed time.
+- **G9-11, one answer per epoch.** A member whose answer was lost with its private session waits for the next epoch
+  (or asks another admin); the manual "Ask again" button sends the request but is answered once.
+- **G9-14, last admin of a two-person group.** The leaving admin has nobody to hand over to; the other person keeps a
+  group with no admin and nobody is told. A group of two is better left by both. Likewise a leaving member tells one
+  admin it has a contact for; with none, nothing is sent.
+- **G9-14, `Removed` is final.** A removal notice sent wrongly by one side of two admins acting at once cannot be
+  undone without a new invitation.
+- **G9-15, receipts and shared authors are claims.** "Delivered to N of M" counts what members say they read; a member
+  can claim to have read everything, and a forged `missing` mask makes the sender air a row again, at most 3 times
+  per row. Profile names are not unique inside a group.
+
 ## Questions for the reviewer
 
 1. **Deniability:** decision 66 above. Review the admin-relayed signing keys and the admin trade-off.

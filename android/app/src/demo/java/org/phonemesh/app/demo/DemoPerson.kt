@@ -2,6 +2,11 @@ package org.phonemesh.app.demo
 
 import android.content.Context
 import org.phonemesh.app.AccountStore
+import org.phonemesh.app.AppGroupStore
+import org.phonemesh.app.ChatKind
+import org.phonemesh.app.Direction
+import org.phonemesh.app.MessageKind
+import org.phonemesh.core.group.GroupPost
 import org.phonemesh.app.Accounts
 import org.phonemesh.app.AppMailStore
 import org.phonemesh.app.History
@@ -25,6 +30,8 @@ import org.phonemesh.core.wire.WireV2
  * One demo person with a radio: the app's own account and mail engines ([AccountStore], [Accounts], [AppMailStore],
  * [Postman]) on their own database and keys, so their chats with the phone use the real start, ratchet, receipts and
  * retries. Only the screen is missing: they answer from [DemoScript]. All methods may be called from any thread.
+ * In private groups they use the app's group engine too ([AppGroupStore], [GroupPost]): they say Join to an
+ * invitation from someone they know, and those who write back answer that person's group messages.
  */
 class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private val clock: DemoClock) {
     enum class Who(val key: String, val label: String, val node: String, val colour: Int, val avatar: Avatar, val replies: Boolean) {
@@ -42,7 +49,12 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
     private val history = History(app, "demo-${who.key}.db")
     private val store = AccountStore(history, Vault(VAULT), softwareOnly = true, keyPrefix = "demo-${who.key}")
     private val accounts: Accounts
+    private val groupStore = AppGroupStore(history, store, Vault(VAULT))
+    private val groups = GroupPost(store.identity, groupStore, quietDelay = { Postman.MIN_QUIET_MS })
     private val postman: Postman
+    /** Groups whose invitation they will say Join to, and the newest group message they have looked at. */
+    private val joining = HashSet<String>()
+    private var seenGroupMessage = 0L
     private var said = 0
     private val random = java.security.SecureRandom()
     private val lastLanguage = HashMap<AccountId, String>()
@@ -51,7 +63,8 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
         if (history.accountRow()?.name.isNullOrEmpty()) store.setProfile(who.label, who.colour, who.avatar)
         accounts = Accounts(history, store, send = { false }, now = clock::now)
         // Receipts after the protocol's shortest quiet time (15 s) instead of a random 15 to 60 s, so Delivered comes soon.
-        postman = Postman(store, AppMailStore(history, store), quietDelay = { Postman.MIN_QUIET_MS })
+        postman = Postman(store, AppMailStore(history, store), quietDelay = { Postman.MIN_QUIET_MS },
+            groups = Postman.GroupInbox { from, body, now -> groups.takePrivate(from, body, now) })
         mesh.join(who.node) { _, port, payload, _ -> heard(port, payload) }
         clock.after(TICK_MS) { tick() }
     }
@@ -113,9 +126,11 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
             WireV2.PORT -> if (Start.isHello(payload)) {
                 val request = accounts.onPacket(payload) ?: return
                 clock.after(ACCEPT_MS) { accept(request) }
+            } else if (groups.receive(payload, now)) {
+                afterGroups(now)
             } else {
                 val got = postman.receive(payload, now) ?: return
-                answer(got)
+                if (got.body is Body.Group) afterGroups(now) else answer(got)
             }
             HubAck.PORT -> postman.hubAck(payload)
         }
@@ -157,6 +172,56 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
         }
     }
 
+    /** What the group engine has to send goes out; invitations from people they know get a Join; answers are planned. */
+    private fun afterGroups(now: Long) {
+        flushGroups(now)
+        for (invitation in groupStore.invitations()) {
+            val key = AppGroupStore.hex(invitation.invite.group)
+            if (!knows(invitation.from) || !joining.add(key)) continue
+            clock.after(ACCEPT_MS) {
+                synchronized(this) { if (groups.join(invitation, clock.now())) flushGroups(clock.now()); joining.remove(key) }
+            }
+        }
+        if (!who.replies) return
+        for (chat in history.chats().filter { it.kind == ChatKind.PRIVATE_GROUP }) {
+            for (m in history.messages(chat.id, 20)) {
+                if (m.id <= seenGroupMessage) continue
+                seenGroupMessage = maxOf(seenGroupMessage, m.id)
+                // Only the phone's person writes to them first: they answer people they know, never each other.
+                val from = m.senderId ?: continue
+                if (m.direction != Direction.IN || m.kind != MessageKind.TEXT || m.sharedBy != null || !knows(AppMailStore.idOf(from))) continue
+                val ref = m.packetId ?: continue
+                val raw = m.language ?: language(AppMailStore.idOf(from))
+                val group = AppGroupStore.hexBytes(chat.address)
+                clock.after(REPLY_MS) {
+                    synchronized(this) {
+                        val text = DemoScript.reply(who, raw, said++)
+                        groups.send(group, listOf(Body.encode(Body.Reply(AppMailStore.refBytes(ref), DemoScript.tag(raw), text)) to false), null, clock.now())
+                        flushGroups(clock.now())
+                    }
+                }
+            }
+        }
+    }
+
+    /** As the app's flushGroups: private bodies through the Postman, group packets by radio (hub-only ones wait). */
+    private fun flushGroups(now: Long) {
+        for ((rowId, to, body) in groupStore.privates()) {
+            val out = try { postman.send(to, body, null, now) } catch (_: IllegalStateException) {
+                groupStore.rows.dropPrivate(rowId); continue
+            } finally { body.wipe() }
+            if (out == null) continue
+            groupStore.rows.dropPrivate(rowId)
+            mesh.broadcast(who.node, WireV2.PORT, out.packet)
+            postman.transmitted(out.outboxId)
+        }
+        for (row in groupStore.rows.outWaiting()) {
+            if (row.hubOnly) continue
+            mesh.broadcast(who.node, WireV2.PORT, row.packet)
+            groupStore.rows.setOutState(row.id, AppGroupStore.STATE_SENT, row.airings + 1)
+        }
+    }
+
     /** Contacts that have not been told about the latest picture change. */
     private val owed = HashSet<AccountId>()
 
@@ -176,6 +241,7 @@ class DemoPerson(app: Context, val who: Who, private val mesh: DemoMesh, private
             synchronized(this) {
                 val now = clock.now()
                 postman.recoverIncoming(now).forEach { answer(it) }
+                groups.tick(now); flushGroups(now)
                 (postman.due(now) + postman.unsent()).distinctBy { it.outboxId }.forEach {
                     mesh.broadcast(who.node, WireV2.PORT, it.packet)
                     postman.transmitted(it.outboxId)

@@ -58,10 +58,12 @@ object CatalogSigner {
 
     // ---- the list ----
 
-    fun readList(list: File, limits: Limits = Limits()): CatalogList {
+    /** [packs]: the folder the list's `file=` paths are relative to (default: the list's own folder). */
+    fun readList(list: File, limits: Limits = Limits(), packs: File? = null): CatalogList {
         if (!Files.isRegularFile(list.toPath(), LinkOption.NOFOLLOW_LINKS)) throw Refused("${list.name} is not a file")
         if (list.length() > 256 * 1024) throw Refused("${list.name} is too large for a pack list")
-        val base = list.absoluteFile.parentFile.toPath().toRealPath()
+        if (packs != null && !packs.isDirectory) throw Refused("${packs.path} is not a folder")
+        val base = (packs ?: list.absoluteFile.parentFile).toPath().toRealPath()
         val settings = HashMap<String, String>()
         val revoked = ArrayList<ByteArray>()
         val lines = ArrayList<Pair<Int, List<String>>>()
@@ -229,7 +231,8 @@ object CatalogSigner {
 
     // ---- signing ----
 
-    fun sign(list: CatalogList, key: KeyFile.Loaded, roots: UpdateRoots, outDir: File, keyId: Int = roots.catalogKeyId): Signed {
+    /** The signed catalog bytes only (no objects): what the packaged baseline is. The key must be the catalog key of [roots]. */
+    fun envelope(list: CatalogList, key: KeyFile.Loaded, roots: UpdateRoots, keyId: Int = roots.catalogKeyId): ByteArray {
         if (keyId == UpdateMetadata.RECOVERY_KEY_ID || keyId != roots.catalogKeyId) throw Refused("key id $keyId is not the catalog key id (${roots.catalogKeyId})")
         if (!key.publicKey.contentEquals(roots.catalogKey)) {
             throw Refused(if (key.publicKey.contentEquals(roots.recoveryKey)) "this is the recovery key; a catalog is signed by the catalog key"
@@ -237,10 +240,18 @@ object CatalogSigner {
         }
         val payload = payload(list)
         if (8 + 12 + payload.size + 64 > UpdateMetadata.MAX_ENVELOPE) throw Refused("the catalog is larger than ${UpdateMetadata.MAX_ENVELOPE} bytes")
+        val envelope = UpdateMetadata.sign(UpdateMetadata.CATALOG, keyId, payload, key.privateKey)
+        val env = UpdateMetadata.verify(envelope, mapOf(keyId to roots.catalogKey), null) ?: throw Refused("the signed catalog does not verify")
+        if (!env.payload.contentEquals(payload)) throw Refused("the signed catalog differs from the list")
+        return envelope
+    }
+
+    fun sign(list: CatalogList, key: KeyFile.Loaded, roots: UpdateRoots, outDir: File, keyId: Int = roots.catalogKeyId): Signed {
+        val envelope = envelope(list, key, roots, keyId)
+        val payload = payload(list)
         val existed = outDir.exists()
         if (existed && !outDir.isDirectory) throw Refused("${outDir.name} is not a folder")
         if (existed && outDir.list().orEmpty().isNotEmpty()) throw Refused("${outDir.name} is not empty; use a new folder for each release")
-        val envelope = UpdateMetadata.sign(UpdateMetadata.CATALOG, keyId, payload, key.privateKey)
         try {
             val objects = File(outDir, "objects")
             if (!objects.mkdirs()) throw Refused("cannot create ${objects.path}")

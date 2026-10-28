@@ -237,21 +237,23 @@ All phone calls use TLS pinned to the hub public key from the card (over Wi-Fi o
 | `POST /send?port=301&air=0` | The same, but the hub keeps it only for phones that fetch their mail here and never sends it by radio (photo avatars) |
 | `POST /mail?since=N&wait=S&hellos=1&shared=1` | Recipient codes in the body, hex, one per line; mail after N, waiting at most 30 seconds |
 | `GET /updates/v1/catalog`, `GET /updates/v1/recovery` | The signed update catalog and recovery policy the operator imported, exact bytes; 404 when there are none |
-| `GET` or `HEAD /updates/v1/objects/<sha256>` | An imported app or pack file; one byte range at most (206, 416 for a bad range); 429 when two downloads are already running or this phone has one |
+| `GET` or `HEAD /updates/v1/objects/<sha256>` | An imported app or pack file; one byte range at most (206, 416 for a bad range). A request waits up to 2 seconds for its slot (two downloads at a time, one per phone), then gets 429 with `Retry-After`, which phones wait out. A transfer that moves less than 4 KiB/s over a minute, or lasts over 10 minutes, is closed. |
 
 The update routes only serve what was imported and checked from a USB folder (`UpdateImport`); phones check every byte
 against the signed catalog themselves. The hub vouches for nothing.
 
 ## Signed updates: commands
 
-These three commands do not start the hub. They are run as `bin/phonemesh-hub <command>` (`./gradlew :hub:run --args="<command> ..."`
+These commands do not start the hub. They are run as `bin/phonemesh-hub <command>` (`./gradlew :hub:run --args="<command> ..."`
 while developing). Exit code 0 means done; 2 means refused or misused, and nothing was changed.
 
 | Command | Who | What it does |
 |---|---|---|
 | `sign-catalog --key catalog-key.pem --list packs.list --out release-1 [--public-keys public-keys.txt]` | Owner, on the offline machine | Reads the encrypted catalog key (asks for the passphrase at the terminal, or reads one line from standard input; never from an argument, never printed) and a pack list. Writes `release-1/catalog.pmup` and `release-1/objects/<sha256>`. Needs a new or empty `--out` folder. |
+| `sign-baseline --public-keys public-keys.txt --key catalog-key.pem --list update-baseline.list --packs android/model-packs --out android/core/src/main/resources/update` | Owner, once, when the real keys arrive | The whole key swap in one step: writes the owner's `public-keys.txt` and a re-signed `baseline-catalog.pmup` into the app's resources together, after checking that the pair opens a fresh phone state and that the list names exactly the packs this build carries. Refuses TEST keys (a developer refreshing the test files adds `--allow-test-keys`). See [docs/update-keys.md](../../docs/update-keys.md). |
+| `sign-recovery --key recovery-key.pem --public-keys public-keys.txt --new-catalog-key <66 hex> --new-key-id 2 --epoch 2 --min-sequence 1 --out recovery-1` | Owner, only if the catalog key is lost or stolen | Writes `recovery-1/recovery.pmup` (copy it beside `catalog.pmup` on the stick): the policy that moves phones to a new catalog key. Checked the way a phone checks it before it is written. |
 | `import-updates <stick folder> [hub.conf]` | Hub operator | Checks the stick's `catalog.pmup`, optional `recovery.pmup` and `objects/` and puts what verifies into the hub's data folder (`dir` in the config). A running hub serves it at once. The same catalog can be imported again from another stick to fill files that were missing. |
-| `update-status [hub.conf]` | Hub operator | Shows the release held (trust epoch, catalog number, dates), each file as `here` or `MISSING`, files that are not in the release, room used of the 2 GB update room, free disk space with the 100 MB kept for mail, and when files were last brought. |
+| `update-status [hub.conf]` | Hub operator | Shows the release held (trust epoch, catalog number, dates), each file as `here` or `MISSING`, files that are not in the release, room used of the 2 GB update room, free disk space with the 100 MB kept for mail, and when files were last brought. While the keys are TEST keys it starts with a `WARNING` line: anyone can sign with them. If the records were made under other keys (a hub from before the key swap) it says so; the next import replaces them. |
 
 **Pack list** for `sign-catalog` (paths are relative to the list's folder, never outside it, never links; `#` starts a comment):
 
@@ -271,9 +273,16 @@ its `SHA256SUMS`, and trial-installs it through the phone's own pack rules, so i
 `apk file=... version=N abi=arm64-v8a label=0.1.2 cert=<64 hex digits>` lines exist for app files; phones take packs first.
 `update-baseline.list` is the list for the four packs every build knows.
 
+**Room.** An import keeps the files of the new release and of the one before it (phones may still be copying that one) and removes the
+files of older releases, so a long series of releases does not fill the 2 GB.
+
 **Keys.** The key file is the one `make-update-keys.sh` writes (PKCS#8, AES-256-CBC, passphrase). An unencrypted key, another curve, a wrong
-passphrase, the recovery key, or any key that is not the catalog key in the public key file is refused. Until the real public keys are
-handed over, the build carries TEST keys (`core/src/main/resources/update/public-keys.txt`, marked `# status: TEST`) and the tool says so.
+passphrase, fewer than 2048 PBKDF2 rounds, the recovery key, or any key that is not the catalog key in the public key file is refused. The
+script's default protection is light (2048 rounds; macOS's openssl also uses SHA-1), so the tool says so and the passphrase must be long.
+Until the real public keys are handed over, the build carries TEST keys (`core/src/main/resources/update/public-keys.txt`, marked `# status: TEST`):
+their private parts follow from a public label, so **anyone can sign with them**. Every command that depends on them prints that. A phone
+release build refuses them outright: updates are off in it. Debug and demo builds trust them for testing.
+A hub that holds records made under other keys (before the swap) starts fresh under the new ones at its next import.
 Check a release on another computer with the public keys before it goes on a stick.
 
 Implementation: [config](src/main/kotlin/org/phonemesh/hub/HubConfig.kt),

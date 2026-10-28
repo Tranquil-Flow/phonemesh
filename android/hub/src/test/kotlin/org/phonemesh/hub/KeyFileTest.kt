@@ -2,6 +2,7 @@ package org.phonemesh.hub
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -74,6 +75,19 @@ class KeyFileTest {
         refused(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(plain, "correct horse", iterations = 1)), why = "one iteration")
         refused(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(plain, "correct horse", iterations = 20_000_000)), why = "twenty million iterations")
         refused(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(plain, "correct horse", cipherOid = TestPem.aes128, keyBytes = 16)), why = "AES-128")
-        assertEquals(KeyFile.MIN_ITERATIONS, 1000)
+        // U7-14: what make-update-keys.sh produces (2048 rounds) loads; fewer does not.
+        assertEquals(KeyFile.MIN_ITERATIONS, 2048)
+        refused(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(plain, "correct horse", iterations = 2047)), why = "2047 iterations")
+        refused(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(plain, "correct horse", iterations = 1000)), why = "1000 iterations")
+    }
+
+    @Test fun lightProtectionLoadsButIsFlagged() {
+        fun load(prf: ByteArray, iterations: Int) = KeyFile.read(TestPem.pem("ENCRYPTED PRIVATE KEY", TestPem.encrypt(TestPem.pkcs8(key), "correct horse", prf, iterations)), "correct horse".toCharArray())
+        val script = load(TestPem.hmacSha1, 2048)
+        assertTrue("2048 rounds with SHA-1 is what the owner's script writes", script.lightlyProtected && script.sha1 && script.iterations == 2048)
+        assertTrue(load(TestPem.hmacSha256, 2048).lightlyProtected)
+        assertTrue("SHA-1 stays flagged however many rounds", load(TestPem.hmacSha1, 600_000).lightlyProtected)
+        assertFalse(load(TestPem.hmacSha256, 100_000).lightlyProtected)
+        assertTrue(load(TestPem.hmacSha256, 99_999).lightlyProtected)
     }
 }

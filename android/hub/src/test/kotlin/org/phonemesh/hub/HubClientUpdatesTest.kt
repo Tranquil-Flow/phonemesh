@@ -127,4 +127,22 @@ class HubClientUpdatesTest {
         assertNotNull(served)
         assertArrayEquals(served.readBytes(), done.file.readBytes())
     }
+
+    /** U7-15: a hub that answers with the whole large file is read for its head only; the downloader names the fault. */
+    @Test fun aLargeWholeFileAnswerKeepsItsHeadAndLeavesTheBodyUnread() {
+        val hubDir = folder.newFolder("hub")
+        val rel = release(2, 2)
+        // A pack larger than the client's answer cap, imported as a plain object.
+        val big = ByteArray(700_000) { (it * 31 + 5).toByte() }
+        val name = TestKeys.hex(org.phonemesh.core.crypto.Bytes.sha256(big))
+        assertTrue(UpdateImport(hubDir, roots.recoveryKey, roots.catalogKey).import(rel) is UpdateImport.Result.Imported)
+        File(hubDir, "updates/objects/$name").writeBytes(big)
+        val transport = start(hubDir).updates()!!
+        assertEquals(524_288L, transport.maxAnswerBytes)
+        transport.get("/updates/v1/objects/$name", null).use {
+            assertEquals(200, it.status)
+            assertEquals("700000", it.one("content-length"))
+            assertEquals("the body is not carried", 0, it.body.readAllBytes().size)
+        }
+    }
 }

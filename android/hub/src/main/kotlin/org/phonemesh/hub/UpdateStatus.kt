@@ -17,7 +17,10 @@ import java.util.TimeZone
  * is reported, never reset. It conveys no trust to anybody else: phones check every byte themselves.
  */
 object UpdateStatus {
-    enum class Kind { NONE, OK, DAMAGED }
+    enum class Kind { NONE, OK, DAMAGED, OTHER_KEYS }
+
+    /** The warning every operator-facing output carries while the keys are TEST keys (anyone can compute their private parts). */
+    const val TEST_KEYS_WARNING = "These are TEST keys: updates signed with them can be forged by anyone. Phones running a release build ignore them; only debug and demo builds trust them."
 
     class Entry(val id: String, val version: Long, val bytes: Long, val kind: Int, val present: Boolean)
 
@@ -25,12 +28,16 @@ object UpdateStatus {
         val kind: Kind, val note: String = "", val epoch: Long = 0, val sequence: Long = -1, val issuedAt: Long = 0, val reviewAfter: Long = 0,
         val entries: List<Entry> = emptyList(), val revoked: Int = 0, val strangers: Int = 0, val objectBytes: Long = 0,
         val quota: Long = UpdateImport.OBJECT_QUOTA, val freeSpace: Long = 0, val mailReserve: Long = UpdateImport.MAIL_RESERVE,
-        val last: UpdateImport.LastImport? = null,
+        val last: UpdateImport.LastImport? = null, val testKeys: Boolean = false,
     ) {
         fun render(): List<String> {
-            if (kind == Kind.DAMAGED) return listOf("The update records on this hub are damaged: $note", "Nothing was changed. Restore updates/ from a backup or move it aside and import a release again.")
-            if (kind == Kind.NONE) return listOf("No updates have been imported on this hub yet.")
+            val banner = if (testKeys) listOf("WARNING: $TEST_KEYS_WARNING") else emptyList()
+            if (kind == Kind.DAMAGED) return banner + listOf("The update records on this hub are damaged: $note", "Nothing was changed. Restore updates/ from a backup or move it aside and import a release again.")
+            if (kind == Kind.NONE) return banner + listOf("No updates have been imported on this hub yet.")
+            if (kind == Kind.OTHER_KEYS) return banner + listOf("The update records on this hub were made under other keys than this program has.",
+                "Nothing was deleted. The next import starts fresh under the keys of this program and replaces them.")
             val lines = ArrayList<String>()
+            lines += banner
             lines += "Updates on this hub"
             if (sequence < 0) lines += "Trust epoch $epoch, no catalog yet"
             else lines += "Release: trust epoch $epoch, catalog number $sequence, issued ${day(issuedAt)}, review after ${day(reviewAfter)}"
@@ -39,7 +46,7 @@ object UpdateStatus {
             lines += "Files ($here of ${entries.size} here):"
             for (e in entries) lines += "  ${if (e.present) "here    " else "MISSING "} ${e.id}, version ${e.version}, ${size(e.bytes)}"
             lines += "Revoked: $revoked"
-            if (strangers > 0) lines += "$strangers file${if (strangers == 1) "" else "s"} not in this release (kept, and counted in the room used)"
+            if (strangers > 0) lines += "$strangers file${if (strangers == 1) "" else "s"} not in this release (counted in the room used; removed by the next import)"
             lines += "Room: ${size(objectBytes)} of ${size(quota)} used for updates; ${size(freeSpace)} free on this disk, ${size(mailReserve)} of it kept for mail"
             lines += last?.let { "Last import: ${stamp(it.seconds)}, catalog number ${it.sequence}, ${it.copied} file${if (it.copied == 1) "" else "s"} copied, ${it.missing} missing" } ?: "Last import: none recorded"
             return lines
@@ -49,25 +56,26 @@ object UpdateStatus {
     fun read(dir: File, roots: UpdateRoots, quota: Long = UpdateImport.OBJECT_QUOTA, now: () -> Long = System::currentTimeMillis): Report {
         val updates = File(dir, "updates")
         val stateFile = File(updates, "trust-state.bin")
-        if (!updates.isDirectory || !Files.isRegularFile(stateFile.toPath(), LinkOption.NOFOLLOW_LINKS)) return Report(Kind.NONE)
+        if (!updates.isDirectory || !Files.isRegularFile(stateFile.toPath(), LinkOption.NOFOLLOW_LINKS)) return Report(Kind.NONE, testKeys = roots.isTest)
         val state = (if (stateFile.length() <= 1024) UpdateImport.State.decode(stateFile.readBytes()) else null)
-            ?: return Report(Kind.DAMAGED, "updates/trust-state.bin cannot be read")
+            ?: return Report(Kind.DAMAGED, "updates/trust-state.bin cannot be read", testKeys = roots.isTest)
+        if (UpdateImport(dir, roots.recoveryKey, roots.catalogKey, roots.catalogKeyId).recordsAreFromOtherKeys) return Report(Kind.OTHER_KEYS, testKeys = roots.isTest)
         val objects = File(updates, "objects")
         val held = objects.listFiles().orEmpty().filter { Files.isRegularFile(it.toPath(), LinkOption.NOFOLLOW_LINKS) }
         val heldBytes = held.sumOf { it.length() }
         val last = UpdateImport.lastImport(dir)
         val free = dir.usableSpace
-        if (state.sequence < 0) return Report(Kind.OK, epoch = state.epoch, objectBytes = heldBytes, quota = quota, freeSpace = free, last = last)
+        if (state.sequence < 0) return Report(Kind.OK, epoch = state.epoch, objectBytes = heldBytes, quota = quota, freeSpace = free, last = last, testKeys = roots.isTest)
         val file = File(File(updates, "catalogs"), "${hex(state.catalogDigest)}.pmup")
         val bytes = if (Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) && file.length() <= UpdateMetadata.MAX_ENVELOPE) file.readBytes() else null
         val env = bytes?.let { UpdateMetadata.verify(it, mapOf(state.keyId to state.key), null) }
         val catalog = env?.takeIf { it.kind == UpdateMetadata.CATALOG }?.let { UpdateMetadata.catalog(it.payload) }
-            ?: return Report(Kind.DAMAGED, "the stored catalog for number ${state.sequence} is missing or does not verify")
+            ?: return Report(Kind.DAMAGED, "the stored catalog for number ${state.sequence} is missing or does not verify", testKeys = roots.isTest)
         val entries = catalog.entries.map { Entry(it.id, it.version, it.bytes, it.kind, Files.isRegularFile(File(objects, hex(it.digest)).toPath(), LinkOption.NOFOLLOW_LINKS)) }
         val listed = catalog.entries.map { hex(it.digest) }.toSet()
         return Report(Kind.OK, epoch = state.epoch, sequence = state.sequence, issuedAt = catalog.issuedAt, reviewAfter = catalog.reviewAfter,
             entries = entries, revoked = catalog.revoked.size, strangers = held.count { it.name !in listed }, objectBytes = heldBytes,
-            quota = quota, freeSpace = free, last = last)
+            quota = quota, freeSpace = free, last = last, testKeys = roots.isTest)
     }
 
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }

@@ -32,6 +32,10 @@ class HubServer(
     updatesDir: File? = null,
     /** How long a download may make no progress before it is closed ([UpdateRoutes]). */
     updateStallMillis: Long = UpdateRoutes.STALL_MILLIS,
+    /** How long an update request waits for a free slot; how long one may last in all; who is asking (tests set the last). */
+    updateQueueMillis: Long = UpdateRoutes.QUEUE_MILLIS,
+    updateRequestMillis: Long = UpdateRoutes.REQUEST_MILLIS,
+    updateClientOf: (com.sun.net.httpserver.HttpExchange) -> String = { it.remoteAddress.address.hostAddress },
 ) {
     private val server = HttpsServer.create(InetSocketAddress(port), 0)
     private val pool = Executors.newFixedThreadPool(32)
@@ -42,7 +46,7 @@ class HubServer(
         server.createContext("/hello") { handle(it) { ex -> reply(ex, 200, "phonemesh-hub 1\nname $name\nlatest ${mailbox.latest()}\n") } }
         server.createContext("/send") { handle(it, ::send) }
         server.createContext("/mail") { handle(it, ::mail) }
-        updatesDir?.let { d -> val routes = UpdateRoutes(d, updateStallMillis); server.createContext("/updates/v1/") { handle(it, routes::handle) } }
+        updatesDir?.let { d -> val routes = UpdateRoutes(d, updateStallMillis, updateQueueMillis, requestMillis = updateRequestMillis, clientOf = updateClientOf); server.createContext("/updates/v1/") { handle(it, routes::handle) } }
     }
 
     val port: Int get() = server.address.port

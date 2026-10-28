@@ -182,4 +182,47 @@ class UpdateCommandsTest {
         assertEquals(1_700_000_000L, last.seconds); assertEquals(1L, last.sequence); assertEquals(1, last.copied); assertEquals(0, last.missing)
         assertNotNull(UpdateImport(dir, roots.recoveryKey, roots.catalogKey).lastImport())
     }
+
+    // ---- U7-3, U7-2: the tool says plainly what the keys are, and what it holds that belongs to other keys
+
+    private fun runAs(r: UpdateRoots, vararg args: String): Run {
+        val out = ByteArrayOutputStream(); val err = ByteArrayOutputStream()
+        val code = UpdateCli.run(args.toList(), UpdateCli.Io(PrintStream(out), PrintStream(err), { null }, r, now = { clock }, defaultConfig = conf))
+        return Run(code, out.toString(), err.toString())
+    }
+
+    private val testRoots get() = UpdateRoots.parse("# status: TEST\n" + roots.let { "catalog key_id=1 public_key=${TestKeys.hex(TestKeys.compressed(catalogKey))}\nrecovery key_id=100 public_key=${TestKeys.hex(TestKeys.compressed(recoveryKey))}\n" })
+
+    @Test fun testKeysAreNamedInStatusAndImportAndTheOldFalseSentenceIsGone() {
+        val rel = release(3, fr)
+        val imp = runAs(testRoots, "import-updates", rel.path, conf.path)
+        assertEquals(imp.err, 0, imp.code)
+        assertTrue(imp.out, "TEST keys" in imp.out && "forged by anyone" in imp.out)
+        val st = runAs(testRoots, "update-status", conf.path)
+        assertTrue(st.out, st.out.lines().first().startsWith("WARNING:") && "TEST keys" in st.out)
+        assertFalse("the old sentence said TEST catalogs were harmless", "trusted by a real release" in imp.out + st.out)
+        val empty = runAs(testRoots, "update-status", File(folder.newFolder().also { File(it, "hub.conf").writeText("name = x\ndir = ${it.absolutePath}\n") }, "hub.conf").path)
+        assertTrue(empty.out, "TEST keys" in empty.out)
+        // Real keys: no banner.
+        assertFalse(run("update-status", conf.path).out.contains("TEST"))
+    }
+
+    @Test fun recordsMadeUnderOtherKeysAreSaidSoAndTheNextImportReplacesThem() {
+        assertEquals(0, run("import-updates", release(3, fr).path, conf.path).code)
+        val other = P256.generate(); val otherR = P256.generate()
+        val newRoots = UpdateRoots.parse("catalog key_id=1 public_key=${TestKeys.hex(TestKeys.compressed(other))}\nrecovery key_id=100 public_key=${TestKeys.hex(TestKeys.compressed(otherR))}\n")
+        val st = runAs(newRoots, "update-status", conf.path)
+        assertEquals(0, st.code)
+        assertTrue(st.out, "other keys" in st.out && "Nothing was deleted" in st.out)
+        assertTrue(File(hubDir, "updates/trust-state.bin").isFile)
+        val rel = folder.newFolder().let { d ->
+            File(d, "voice-fr-siwis-1.zip").writeBytes(TestPacks.zip("voice-fr-siwis", 1, "voice"))
+            File(d, "packs.list").writeText("epoch = 1\nsequence = 1\nissued-at = 1793145600\npack file=voice-fr-siwis-1.zip\n")
+            File(folder.newFolder(), "release").also { CatalogSigner.sign(CatalogSigner.readList(File(d, "packs.list")), KeyFile.read(TestPem.encryptedPem(other, "pw"), "pw".toCharArray()), newRoots, it) }
+        }
+        val imp = runAs(newRoots, "import-updates", rel.path, conf.path)
+        assertEquals(imp.err, 0, imp.code)
+        assertTrue(imp.out, "other keys" in imp.out && "replaced" in imp.out)
+        assertFalse(runAs(newRoots, "update-status", conf.path).out.contains("other keys"))
+    }
 }

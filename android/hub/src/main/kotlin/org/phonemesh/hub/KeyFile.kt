@@ -20,12 +20,19 @@ import javax.crypto.spec.SecretKeySpec
  * Parsing is a small strict DER reader; there is no extra library.
  */
 object KeyFile {
-    const val MIN_ITERATIONS = 1000
+    /** What `make-update-keys.sh` produces: macOS's openssl and OpenSSL 3 both write 2048 PBKDF2 rounds. Fewer is refused (U7-14). */
+    const val MIN_ITERATIONS = 2048
     const val MAX_ITERATIONS = 5_000_000
+    /** Below this many rounds, or with SHA-1, an offline guess of a typed passphrase is cheap: the key loads, with a warning. */
+    const val STRONG_ITERATIONS = 100_000
     private const val MAX_FILE = 16 * 1024
 
     class Rejected(message: String) : Exception(message)
-    class Loaded(val privateKey: PrivateKey, publicKey: ByteArray) { val publicKey: ByteArray = publicKey.copyOf() }
+    class Loaded(val privateKey: PrivateKey, publicKey: ByteArray, val iterations: Int = 0, val sha1: Boolean = false) {
+        val publicKey: ByteArray = publicKey.copyOf()
+        /** Only lightly protected by its passphrase (few rounds, or SHA-1): say so, never refuse. */
+        val lightlyProtected: Boolean get() = iterations < STRONG_ITERATIONS || sha1
+    }
 
     private class Der(val bytes: ByteArray, var pos: Int = 0, val end: Int = bytes.size) {
         class Item(val tag: Int, val start: Int, val end: Int)
@@ -66,8 +73,9 @@ object KeyFile {
         if (pem.length > MAX_FILE) throw Rejected("the key file is too large")
         val der = unwrap(pem)
         if (passphrase.isEmpty()) throw Rejected("a passphrase is needed")
-        val plain = decrypt(der, passphrase)
-        try { return parsePrivateKey(plain) } finally { plain.fill(0) }
+        val params = IntArray(2)
+        val plain = decrypt(der, passphrase, params)
+        try { return parsePrivateKey(plain).let { Loaded(it.privateKey, it.publicKey, params[0], params[1] == 1) } } finally { plain.fill(0) }
     }
 
     private fun unwrap(pem: String): ByteArray {
@@ -83,7 +91,7 @@ object KeyFile {
         return try { Base64.getDecoder().decode(body.joinToString("")) } catch (_: IllegalArgumentException) { throw Rejected("the key file is damaged") }
     }
 
-    private fun decrypt(der: ByteArray, passphrase: CharArray): ByteArray {
+    private fun decrypt(der: ByteArray, passphrase: CharArray, report: IntArray): ByteArray {
         val top = Der(der)
         val info = top.sub(top.next(0x30)); top.done()
         val alg = info.sub(info.next(0x30))
@@ -96,7 +104,8 @@ object KeyFile {
         val kdfParams = kdf.sub(kdf.next(0x30)); kdf.done()
         val salt = kdfParams.content(kdfParams.next(0x04))
         val iterations = kdfParams.int()
-        if (iterations !in MIN_ITERATIONS..MAX_ITERATIONS) throw Rejected("the key file has an unsafe iteration count")
+        if (iterations < MIN_ITERATIONS) throw Rejected("the key file uses only $iterations PBKDF2 rounds (at least $MIN_ITERATIONS are needed); make a new key")
+        if (iterations > MAX_ITERATIONS) throw Rejected("the key file has an unsafe iteration count")
         if (salt.size < 8 || salt.size > 64) throw Rejected("the key file has an unusable salt")
         var hash = "PBKDF2WithHmacSHA1"
         if (kdfParams.pos < kdfParams.end) {
@@ -108,6 +117,7 @@ object KeyFile {
                 else -> throw Rejected("the key file uses an unsupported hash")
             }
         }
+        report[0] = iterations; report[1] = if (hash == "PBKDF2WithHmacSHA1") 1 else 0
         if (!scheme.content(scheme.next(0x06)).contentEquals(OID_AES256)) throw Rejected("the key must be encrypted with AES-256-CBC")
         val iv = scheme.content(scheme.next(0x04)); scheme.done()
         if (iv.size != 16 || data.isEmpty() || data.size % 16 != 0) throw Rejected("the key file is damaged")

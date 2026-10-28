@@ -1,8 +1,9 @@
-# The signed baseline catalog of the packs every Phonemesh build knows (GeneratedPackCatalog), made with:
-#   phonemesh-hub sign-catalog --key catalog-key.pem --list update-baseline.list --out baseline-release
-# Copy this file into the folder that holds the four pack archives (android/model-packs) first: paths are relative to the list.
-# The result's catalog.pmup is core/src/main/resources/update/baseline-catalog.pmup. Until the owner's real keys arrive it is signed
-# by the TEST catalog key (core/src/main/resources/update/public-keys.txt); re-sign it with the real key, same list, then.
+# The signed baseline catalog of the packs every Phonemesh build knows (GeneratedPackCatalog). The owner makes it, together with
+# public-keys.txt, in one step (docs/update-keys.md):
+#   phonemesh-hub sign-baseline --public-keys public-keys.txt --key catalog-key.pem --list hub/update-baseline.list \
+#     --packs model-packs --out core/src/main/resources/update
+# Paths in this list are relative to the --packs folder. Until the owner's real keys arrive the shipped baseline is signed by the
+# TEST catalog key (core/src/main/resources/update/public-keys.txt), and a release build refuses those keys (updates are off in it).
 epoch = 1
 sequence = 1
 issued-at = 1793145600

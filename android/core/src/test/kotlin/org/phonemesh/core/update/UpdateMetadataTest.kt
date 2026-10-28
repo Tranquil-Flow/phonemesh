@@ -49,6 +49,8 @@ class UpdateMetadataTest {
         val policy = { id: Int -> ByteBuffer.allocate(8 + 2 + 65 + 8 + 4).putLong(2).putShort(id.toShort()).put(hex("catalogKey2")).putLong(1).putInt(1).array() }
         assertNotNull(UpdateMetadata.recovery(policy(2)))
         assertNull(UpdateMetadata.recovery(policy(100)))
+        // U7-4: key id 0 can be written but never read back from the saved state, so it is not a policy at all.
+        assertNull(UpdateMetadata.recovery(policy(0)))
     }
 
     @Test fun thePythonCatalogVerifiesAndReadsAsTheSpecSays() {

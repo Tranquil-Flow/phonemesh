@@ -744,4 +744,13 @@
     <string name="archives_failed">Les discussions gardées sont illisibles.</string>
     <string name="archives_removing">Suppression de cette copie…</string>
     <string name="archives_remove_failed">Pas supprimée. Réessayez.</string>
+    <string name="updates_not_set_up">Mises à jour pas prêtes dans cette version.</string>
+    <string name="updates_off_build">Mises à jour coupées. Version non prête.</string>
+    <string name="updates_test_banner">Clés d’essai. Pour tester seulement.</string>
+    <string name="updates_notice_hub_older">Ce relais a une liste plus ancienne.</string>
+    <string name="updates_list_date">Liste du %1$s</string>
+    <string name="updates_list_old">Liste ancienne. Demandez au responsable du relais.</string>
+    <string name="updates_withdrawn">Retrait de %1$s. Les messages marchent.</string>
+    <string name="updates_withdrawn_fix">Ajoutez un remplaçant dans Réglages.</string>
+    <string name="updates_done_restart">Installée. Relancez l’app pour l’utiliser.</string>
 </resources>

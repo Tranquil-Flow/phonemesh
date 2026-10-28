@@ -21,7 +21,7 @@ import java.io.IOException
  * downloader calls it from one place at a time.
  */
 class UpdateTrust private constructor(
-    private val store: TrustStore, private val roots: UpdateRoots, val readerVersion: Long, private var current: TrustState,
+    private val store: TrustStore, private val roots: UpdateRoots, val readerVersion: Long, @Volatile private var current: TrustState,
 ) {
     enum class Reason { NOT_SIGNED, MALFORMED, WRONG_EPOCH, OLDER, CONFLICT, NEEDS_NEWER_APP, NOT_NEWER_EPOCH, BAD_KEY, STORE_FAILED }
 
@@ -38,7 +38,10 @@ class UpdateTrust private constructor(
     }
 
     sealed class Opened {
-        class Ready(val trust: UpdateTrust) : Opened()
+        /** [startedFresh]: saved state made under other roots was set aside and the packaged baseline became the state (U7-2). */
+        class Ready(val trust: UpdateTrust, val startedFresh: Boolean = false) : Opened()
+        /** The packaged roots are TEST keys (anyone can sign with them) and this build does not allow that: updates are off. */
+        class NotSetUp(val why: String) : Opened()
         /** Saved state exists but cannot be read. Updates stay off; nothing is reset. */
         class Corrupt(val why: String) : Opened()
         /** The packaged baseline does not verify under the packaged keys (a build mistake), or cannot be saved. */
@@ -49,7 +52,7 @@ class UpdateTrust private constructor(
     class Offer(val entry: UpdateMetadata.Entry, val epoch: Long, val sequence: Long)
 
     val state: TrustState get() = current
-    private var cached: Pair<Long, UpdateMetadata.Catalog?>? = null
+    @Volatile private var cached: Pair<Long, UpdateMetadata.Catalog?>? = null
 
     /** The accepted catalog, parsed; null right after a recovery until the new epoch's first catalog. */
     fun catalog(): UpdateMetadata.Catalog? {
@@ -64,9 +67,10 @@ class UpdateTrust private constructor(
         bytes?.let { UpdateMetadata.verify(it, keys, recovery) }?.payload
 
     private fun commit(next: TrustState): Boolean = try {
-        store.save((next.generation % 2).toInt(), next.encode())
-        current = next
-        true
+        val bytes = next.encode()
+        // What cannot be read back after a restart must never be accepted now (U7-4).
+        if (TrustState.decode(bytes) == null) false
+        else { store.save((next.generation % 2).toInt(), bytes); current = next; true }
     } catch (_: IOException) { false }
 
     @Synchronized fun acceptCatalog(bytes: ByteArray): CatalogResult {
@@ -103,7 +107,11 @@ class UpdateTrust private constructor(
         if (r.minReader > readerVersion) return RecoveryResult.Refused(Reason.NEEDS_NEWER_APP)
         // The successor key may be neither the recovery key nor the key it replaces.
         if (r.catalogKey.contentEquals(roots.recoveryKey) || r.catalogKey.contentEquals(s.key)) return RecoveryResult.Refused(Reason.BAD_KEY)
-        val next = TrustState(s.generation + 1, r.epoch, r.catalogKeyId, r.catalogKey, r.minSequence - 1, null, bytes, s.floors)
+        // A key the owner has burnt can not come back through a replayed older policy (U7-13).
+        if (roots.burnt.any { it.contentEquals(r.catalogKey) }) return RecoveryResult.Refused(Reason.BAD_KEY)
+        val next = TrustState(s.generation + 1, r.epoch, r.catalogKeyId, r.catalogKey, r.minSequence - 1, null, bytes, s.floors, s.rootsId)
+        // A record that would not read back after a restart is refused now, not lost silently later (U7-4).
+        if (TrustState.decode(next.encode()) == null) return RecoveryResult.Refused(Reason.MALFORMED)
         return if (commit(next)) RecoveryResult.Accepted(r.epoch) else RecoveryResult.Refused(Reason.STORE_FAILED)
     }
 
@@ -159,24 +167,57 @@ class UpdateTrust private constructor(
     companion object {
         /**
          * Loads the saved state, or starts from [baseline] on a first start. [readerVersion] is this app's versionCode.
+         *
+         * - [roots] that are TEST keys (anyone can sign with them) are refused unless [allowTestRoots]: debug and demo builds
+         *   and tests say so; a release build never does (U7-1). Nothing is read or written then.
+         * - State made under other roots (a build that carried TEST keys, then real ones) is set aside and the packaged baseline
+         *   starts a fresh state under the new roots: the old catalog key is never kept (U7-2). Version floors are not carried over.
+         * - A saved slot that exists but cannot be read is [Opened.Corrupt] when the store's writes are atomic: the newest state
+         *   is never quietly replaced by an older one (U7-12).
          */
         fun open(
             store: TrustStore, roots: UpdateRoots = UpdateRoots.compiled, readerVersion: Long,
-            baseline: ByteArray = UpdateRoots.baselineCatalog(),
+            baseline: ByteArray = UpdateRoots.baselineCatalog(), allowTestRoots: Boolean = false,
         ): Opened {
+            if (roots.isTest && !allowTestRoots) return Opened.NotSetUp("the update keys in this build are TEST keys, so updates are off")
             val a = store.load(0); val b = store.load(1)
-            val best = listOfNotNull(a?.let(TrustState::decode), b?.let(TrustState::decode)).maxByOrNull { it.generation }
-            if (best != null) return Opened.Ready(UpdateTrust(store, roots, readerVersion, best))
+            val da = a?.let(TrustState::decode); val db = b?.let(TrustState::decode)
+            if (store.atomicSlotWrites && ((a != null && da == null) || (b != null && db == null))) {
+                return Opened.Corrupt("a saved update state is damaged")
+            }
+            val best = listOfNotNull(da, db).maxByOrNull { it.generation }
+            if (best != null) {
+                if (belongsTo(best, roots)) {
+                    if (best.rootsId != null) return Opened.Ready(UpdateTrust(store, roots, readerVersion, best))
+                    // An older record that did not name its roots: name them now (best effort; the state itself is unchanged).
+                    val named = best.copy(generation = best.generation + 1, rootsId = roots.id)
+                    val saved = try { store.save((named.generation % 2).toInt(), named.encode()); named } catch (_: IOException) { best }
+                    return Opened.Ready(UpdateTrust(store, roots, readerVersion, saved))
+                }
+                return startFrom(store, roots, readerVersion, baseline, best.generation + 1, fresh = true)
+            }
             // Nothing whole. The first save of an install goes to slot 1, so slot 0 was never written; a torn first save is a fresh start.
             if (a != null) return Opened.Corrupt("the saved update state is damaged")
+            return startFrom(store, roots, readerVersion, baseline, 1, fresh = false)
+        }
+
+        /** Whether [state] was made under [roots]: by its recorded name, or (schema 1) by the key and policy it holds. */
+        private fun belongsTo(state: TrustState, roots: UpdateRoots): Boolean {
+            state.rootsId?.let { return it.contentEquals(roots.id) }
+            val policy = state.policy
+            return if (policy == null) state.keyId == roots.catalogKeyId && state.key.contentEquals(roots.catalogKey)
+            else UpdateMetadata.verify(policy, emptyMap(), roots.recoveryKey) != null
+        }
+
+        private fun startFrom(store: TrustStore, roots: UpdateRoots, readerVersion: Long, baseline: ByteArray, generation: Long, fresh: Boolean): Opened {
             val env = UpdateMetadata.verify(baseline, mapOf(roots.catalogKeyId to roots.catalogKey), null)?.takeIf { it.kind == UpdateMetadata.CATALOG }
                 ?: return Opened.BadBaseline("the packaged baseline catalog is not signed by the packaged catalog key")
             val c = UpdateMetadata.catalog(env.payload) ?: return Opened.BadBaseline("the packaged baseline catalog is malformed")
             if (c.minReader > readerVersion) return Opened.BadBaseline("the packaged baseline needs a newer app")
-            val first = TrustState(1, c.epoch, roots.catalogKeyId, roots.catalogKey, c.sequence, baseline, null, emptyMap())
+            val first = TrustState(generation, c.epoch, roots.catalogKeyId, roots.catalogKey, c.sequence, baseline, null, emptyMap(), roots.id)
             return try {
                 store.save((first.generation % 2).toInt(), first.encode())
-                Opened.Ready(UpdateTrust(store, roots, readerVersion, first))
+                Opened.Ready(UpdateTrust(store, roots, readerVersion, first), startedFresh = fresh)
             } catch (e: IOException) { Opened.BadBaseline("the update state cannot be saved: ${e.message}") }
         }
     }

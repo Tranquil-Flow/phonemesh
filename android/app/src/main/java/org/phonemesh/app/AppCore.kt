@@ -271,7 +271,17 @@ class AppCore private constructor(
     fun hubUpdates(): HubUpdates = synchronized(updatesLock) {
         updates ?: HubUpdates.open(File(app.filesDir, "updates"), File(app.filesDir, "packs"), store,
             // Only the hub reached over its own Wi-Fi (pinned TLS on that network) can give a route: never Bluetooth, radio or mobile data.
-            transport = { hub?.wire()?.updates() }).also { updates = it }
+            transport = { hub?.wire()?.updates() },
+            // A new pack is really started once before it replaces the one in use (U7-5).
+            opens = LocalPackOpener(app, store, { settings.engine }, { runCatching { speech.releaseEngine() } }),
+            // Packs the accepted list withdraws are no longer loaded; a loaded engine is let go (U7-6).
+            withdrawn = { ids ->
+                val moved = store.blockedIds != ids
+                store.blockedIds = ids
+                if (moved && ids.isNotEmpty()) runCatching { speech.releaseEngine() }
+                if (moved) changed(Change.PACKS)
+            },
+        ).also { updates = it }
     }
 
     private fun openUpdatesSoon() {
@@ -2777,7 +2787,7 @@ class AppCore private constructor(
         if (recordState != RecordState.IDLE) return
         val wanted = LanguageRegistry.forMessage(languageTag)
         val exact = wanted?.let { store.readiness(settings.engine, it.tag) as? Readiness.Ready }
-        val selected = preferredVoice?.let { id -> store.list().firstOrNull { it.kind == PackKind.VOICE && it.id == id } }
+        val selected = preferredVoice?.let { id -> store.usable().firstOrNull { it.kind == PackKind.VOICE && it.id == id } }
         val preferred = selected?.let { voice ->
             (store.readiness(settings.engine, checkNotNull(voice.languageTag)) as? Readiness.Ready)?.copy(voice = voice)
         }

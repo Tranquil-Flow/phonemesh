@@ -8,11 +8,13 @@ import java.util.TreeMap
  * Everything the phone has decided to trust for updates, in one record (spec 5.3): the trust epoch and the catalog key of
  * that epoch, the highest accepted catalog number and the accepted catalog itself, the recovery policy that started this
  * epoch, and per pack the version floor (and what was installed at it). A record is `PMTS | schema | generation | ...`, closed
- * by the SHA-256 of everything before it, so a torn or damaged record is recognised and never half-used.
+ * by the SHA-256 of everything before it, so a torn or damaged record is recognised and never half-used. Schema 2 also names
+ * the roots the record was made under ([rootsId], see [UpdateRoots.id]); schema 1 (no name) is still read, and
+ * [UpdateTrust.open] decides from its content whether it belongs to the roots of this build (U7-2).
  */
 class TrustState(
     val generation: Long, val epoch: Long, val keyId: Int, key: ByteArray, val sequence: Long,
-    catalog: ByteArray?, policy: ByteArray?, floors: Map<String, Floor>,
+    catalog: ByteArray?, policy: ByteArray?, floors: Map<String, Floor>, rootsId: ByteArray? = null,
 ) {
     /** The version installed for one pack id, the digest of its `SHA256SUMS` and of its published archive. */
     class Floor(val version: Long, sums: ByteArray, artifact: ByteArray) {
@@ -21,6 +23,8 @@ class TrustState(
     }
 
     val key: ByteArray = key.copyOf()
+    /** The roots this record was made under; null for a schema 1 record, which did not say. */
+    val rootsId: ByteArray? = rootsId?.copyOf()
     val catalog: ByteArray? = catalog?.copyOf()
     val policy: ByteArray? = policy?.copyOf()
     val floors: Map<String, Floor> = TreeMap(floors)
@@ -28,14 +32,17 @@ class TrustState(
     fun copy(
         generation: Long = this.generation, epoch: Long = this.epoch, keyId: Int = this.keyId, key: ByteArray = this.key, sequence: Long = this.sequence,
         catalog: ByteArray? = this.catalog, policy: ByteArray? = this.policy, floors: Map<String, Floor> = this.floors,
-    ) = TrustState(generation, epoch, keyId, key, sequence, catalog, policy, floors)
+        rootsId: ByteArray? = this.rootsId,
+    ) = TrustState(generation, epoch, keyId, key, sequence, catalog, policy, floors, rootsId)
 
     fun encode(): ByteArray {
         val c = catalog ?: ByteArray(0); val p = policy ?: ByteArray(0)
         val out = java.io.ByteArrayOutputStream()
-        out.write(MAGIC); out.write(SCHEMA)
+        val named = rootsId != null
+        out.write(MAGIC); out.write(if (named) SCHEMA else SCHEMA_1)
         out.write(ByteBuffer.allocate(8 + 8 + 2).putLong(generation).putLong(epoch).putShort(keyId.toShort()).array())
         out.write(key)
+        rootsId?.let { out.write(it) }
         out.write(ByteBuffer.allocate(8 + 4).putLong(sequence).putInt(c.size).array()); out.write(c)
         out.write(ByteBuffer.allocate(4).putInt(p.size).array()); out.write(p)
         out.write(ByteBuffer.allocate(2).putShort(floors.size.toShort()).array())
@@ -50,9 +57,10 @@ class TrustState(
 
     companion object {
         private val MAGIC = "PMTS".toByteArray(Charsets.US_ASCII)
-        private const val SCHEMA = 1
+        private const val SCHEMA = 2
+        private const val SCHEMA_1 = 1
         const val MAX_FLOORS = 512
-        private const val MAX_RECORD = 4 + 1 + 18 + 65 + 12 + 65_536 + 4 + 65_536 + 2 + MAX_FLOORS * (2 + 64 + 72) + 32
+        private const val MAX_RECORD = 4 + 1 + 18 + 65 + 32 + 12 + 65_536 + 4 + 65_536 + 2 + MAX_FLOORS * (2 + 64 + 72) + 32
 
         fun floorKey(kind: Int, id: String) = "$kind/$id"
 
@@ -63,9 +71,12 @@ class TrustState(
             if (!Bytes.equal(Bytes.sha256(body), bytes.copyOfRange(bytes.size - 32, bytes.size))) return null
             return try {
                 val b = ByteBuffer.wrap(body)
-                if (!ByteArray(4).also(b::get).contentEquals(MAGIC) || b.get().toInt() != SCHEMA) return null
+                if (!ByteArray(4).also(b::get).contentEquals(MAGIC)) return null
+                val schema = b.get().toInt()
+                if (schema != SCHEMA && schema != SCHEMA_1) return null
                 val generation = b.long; val epoch = b.long; val keyId = b.short.toInt() and 0xFFFF
                 val key = ByteArray(65).also(b::get)
+                val rootsId = if (schema == SCHEMA) ByteArray(32).also(b::get) else null
                 val sequence = b.long
                 fun blob(): ByteArray? {
                     val n = b.int
@@ -86,7 +97,7 @@ class TrustState(
                     if (floors.put(floorKey(kind, id), f) != null) throw IllegalArgumentException()
                 }
                 if (b.hasRemaining() || generation <= 0 || epoch <= 0 || keyId == 0 || sequence < -1 || UpdateMetadata.publicKey(key) == null) return null
-                TrustState(generation, epoch, keyId, key, sequence, catalog, policy, floors)
+                TrustState(generation, epoch, keyId, key, sequence, catalog, policy, floors, rootsId)
             } catch (_: RuntimeException) { null }
         }
     }

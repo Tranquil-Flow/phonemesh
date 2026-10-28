@@ -27,6 +27,12 @@ class UpdateController(
     private val executor: Executor,
     private val open: (PackInfo) -> Boolean = { true },
     private val downloaderFor: (HubTransport, File) -> UpdateDownloader = { hub, dir -> UpdateDownloader(trust, hub, dir) },
+    /** What an installed pack takes on disk (it stays beside its replacement until that opens). */
+    private val installedBytes: (String) -> Long = { 0L },
+    /** Milliseconds since 1970: only to tell whether the held list is past its review date. */
+    private val now: () -> Long = System::currentTimeMillis,
+    /** Called after every check that may have changed what is trusted (a new list can revoke an installed pack). */
+    private val onTrustChanged: () -> Unit = {},
 ) {
     /** Why a copy stopped; the screen turns each into one plain sentence beside the action. */
     enum class Why { HUB_GONE, NO_SPACE, NOT_TRUSTED, BUSY, REFUSED, OPEN_FAILED, NOT_SAVED, NOT_ON_HUB, NOT_OFFERED }
@@ -49,9 +55,20 @@ class UpdateController(
     class Row(val key: String, val kind: Int, val id: String, val label: String, val version: Long, val installed: Long, val bytes: Long, val state: State)
 
     /** The one sentence about the hub itself, apart from rows. */
-    enum class Notice { NONE, NO_WIFI, CHECKING, NO_UPDATES, UP_TO_DATE, UNREACHABLE, LIST_NOT_TRUSTED, NEEDS_NEWER_APP, SAVE_FAILED }
+    enum class Notice {
+        NONE, NO_WIFI, CHECKING, NO_UPDATES,
+        /** The hub's list is the one held or a newer one, and nothing is offered. */
+        UP_TO_DATE,
+        /** The hub gave an older list than the one held: nothing newer here (and nothing to say about the world). */
+        HUB_OLDER,
+        UNREACHABLE, LIST_NOT_TRUSTED, NEEDS_NEWER_APP, SAVE_FAILED,
+    }
 
-    class View(val notice: Notice, val rows: List<Row>) {
+    /**
+     * [listIssuedAt]: when the held list was made, seconds since 1970 (0 when none). [listOld]: the clock is plausible and past
+     * the list's review date (advisory only). [revoked]: ids of installed packs the held list withdraws.
+     */
+    class View(val notice: Notice, val rows: List<Row>, val listIssuedAt: Long = 0, val listOld: Boolean = false, val revoked: List<String> = emptyList()) {
         val busy: Boolean get() = notice == Notice.CHECKING || rows.any { it.state is State.Copying || it.state is State.Installing || it.state == State.Waiting }
     }
 
@@ -71,10 +88,15 @@ class UpdateController(
     /** How many verified offers (from the catalog already accepted, no network) the phone holds for packs it has. */
     fun pending(): Int { val have = installed(); return trust.offers(appVersion, sdk, have).count { it.entry.id in have } }
 
-    private fun snapshot() = View(notice, items.map { (k, i) ->
-        val e = i.offer.entry
-        Row(k, e.kind, e.id, e.label, e.version, i.installed, e.bytes, i.state)
-    })
+    private fun snapshot(): View {
+        val held = trust.catalog()
+        val clock = now()
+        return View(notice, items.map { (k, i) ->
+            val e = i.offer.entry
+            Row(k, e.kind, e.id, e.label, e.version, i.installed, e.bytes, i.state)
+        }, listIssuedAt = held?.issuedAt ?: 0L, listOld = held != null && clock >= PLAUSIBLE_CLOCK_MILLIS && clock / 1000 > held.reviewAfter,
+            revoked = trust.revokedInstalled())
+    }
 
     private fun changed() { onChange?.invoke() }
     private fun key(e: UpdateMetadata.Entry) = "${e.kind}/${e.id}"
@@ -102,12 +124,35 @@ class UpdateController(
                     c is UpdateTrust.CatalogResult.Refused && c.reason == UpdateTrust.Reason.STORE_FAILED -> Notice.SAVE_FAILED
                     c is UpdateTrust.CatalogResult.Refused && c.reason in LIST_REFUSED -> Notice.LIST_NOT_TRUSTED
                     r is UpdateTrust.RecoveryResult.Refused && r.reason in LIST_REFUSED -> Notice.LIST_NOT_TRUSTED
+                    // An older list than the one held says nothing about what is new (U7-9).
+                    c is UpdateTrust.CatalogResult.Refused && c.reason == UpdateTrust.Reason.OLDER -> Notice.HUB_OLDER
                     else -> Notice.NONE
                 }
             }
         }
         finishCheck(note)
+        runCatching { sweep() }
+        runCatching { onTrustChanged() }
     }
+
+    /**
+     * Removes copies nobody can use any more (U7-15): a finished or partial file whose digest the held list no longer offers
+     * (or revokes), and stray temporary files. A copy in progress for a listed pack stays.
+     */
+    private fun sweep() {
+        val catalog = trust.catalog()
+        val wanted = catalog?.entries?.filter { e -> catalog.revoked.none { it.contentEquals(e.digest) } }?.map { hex(it.digest) }?.toSet() ?: emptySet()
+        val busyNames = synchronized(lock) { items.values.filter { it.state.keepsRow() && it.state !is State.Done }.map { hex(it.offer.entry.digest) }.toSet() }
+        for (sub in listOf("ready", "partial")) {
+            File(work, sub).listFiles().orEmpty().forEach { f ->
+                val name = f.name.removePrefix(".").substringBefore('.')
+                val tmp = f.name.startsWith(".") && f.name.endsWith(".tmp")
+                if ((name !in wanted && name !in busyNames) || (tmp && name !in busyNames)) f.delete()
+            }
+        }
+    }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 
     private fun finishCheck(note: Notice) {
         synchronized(lock) {
@@ -122,7 +167,8 @@ class UpdateController(
             }
             items.entries.filter { it.key !in fresh && it.value.state.keepsRow() && it.value.state !is State.Done }.forEach { fresh[it.key] = it.value }
             items.clear(); items.putAll(fresh)
-            notice = if (note == Notice.NONE && items.isEmpty()) Notice.UP_TO_DATE else if (note == Notice.NO_UPDATES && items.isNotEmpty()) Notice.NONE else note
+            notice = if (note == Notice.NONE && items.isEmpty()) Notice.UP_TO_DATE
+                else if ((note == Notice.NO_UPDATES || note == Notice.HUB_OLDER) && items.isNotEmpty()) Notice.NONE else note
         }
         changed()
     }
@@ -169,48 +215,63 @@ class UpdateController(
     private fun drain() {
         while (true) {
             val k = synchronized(lock) { queue.removeFirstOrNull().also { if (it == null) draining = false } } ?: return
-            try { copy(k) } catch (e: RuntimeException) { set(k, State.Failed(Why.REFUSED)) }
+            try { copy(k) } catch (e: RuntimeException) { synchronized(lock) { items[k] }?.let { set(it, State.Failed(Why.REFUSED)) } }
         }
     }
 
-    private fun set(k: String, s: State) { synchronized(lock) { items[k]?.state = s }; changed() }
+    /** Sets [item]'s state; a row that was replaced by a newer offer meanwhile is no longer shown and takes nothing from this copy. */
+    private fun set(item: Item, s: State) { synchronized(lock) { item.state = s }; changed() }
 
     private fun copy(k: String) {
         val item = synchronized(lock) { items[k]?.takeIf { it.state == State.Waiting } } ?: return
         val offer = item.offer; val total = offer.entry.bytes
-        if (synchronized(lock) { k in stop }) { set(k, State.Paused(0, total)); return }
+        if (synchronized(lock) { k in stop }) { set(item, State.Paused(0, total)); return }
         val hub = transport()
-        if (hub == null) { set(k, State.Stopped(Why.HUB_GONE, 0, total)); return }
-        set(k, State.Copying(0, total))
+        if (hub == null) { set(item, State.Stopped(Why.HUB_GONE, 0, total)); return }
+        set(item, State.Copying(0, total))
         val result = try {
-            downloaderFor(hub, work).download(offer, { done, all -> set(k, State.Copying(done, all)) }, { synchronized(lock) { k in stop } })
-        } catch (e: IOException) { set(k, State.Failed(Why.NO_SPACE)); return }
+            downloaderFor(hub, work).download(offer, { done, all -> set(item, State.Copying(done, all)) }, { synchronized(lock) { k in stop } },
+                installedBytes = installedBytes(offer.entry.id))
+        } catch (e: IOException) {
+            // Only a full disk is "no space"; any other failure to write is a save problem, said as such (U7-7).
+            set(item, State.Failed(if (isNoSpace(e)) Why.NO_SPACE else Why.NOT_SAVED)); return
+        }
         when (result) {
-            is UpdateDownloader.Download.Ready -> install(k, offer, result.file)
-            is UpdateDownloader.Download.Paused -> set(k, State.Paused(result.offset, total))
-            is UpdateDownloader.Download.NeedsResume -> set(k, State.Stopped(Why.HUB_GONE, result.offset, total))
-            is UpdateDownloader.Download.NoSpace -> set(k, State.Failed(Why.NO_SPACE))
-            UpdateDownloader.Download.NotAuthorized -> set(k, State.Failed(Why.NOT_OFFERED))
-            UpdateDownloader.Download.NotOnThisHub -> set(k, State.Failed(Why.NOT_ON_HUB))
-            UpdateDownloader.Download.WrongHash -> set(k, State.Failed(Why.NOT_TRUSTED))
-            is UpdateDownloader.Download.Refused -> set(k, State.Failed(Why.REFUSED))
-            is UpdateDownloader.Download.Busy -> set(k, State.Failed(Why.BUSY))
+            is UpdateDownloader.Download.Ready -> install(item, offer, result.file)
+            is UpdateDownloader.Download.Paused -> set(item, State.Paused(result.offset, total))
+            is UpdateDownloader.Download.NeedsResume -> set(item, State.Stopped(Why.HUB_GONE, result.offset, total))
+            is UpdateDownloader.Download.NoSpace -> set(item, State.Failed(Why.NO_SPACE))
+            UpdateDownloader.Download.NotAuthorized -> set(item, State.Failed(Why.NOT_OFFERED))
+            UpdateDownloader.Download.NotOnThisHub -> set(item, State.Failed(Why.NOT_ON_HUB))
+            UpdateDownloader.Download.WrongHash -> set(item, State.Failed(Why.NOT_TRUSTED))
+            is UpdateDownloader.Download.Refused -> set(item, State.Failed(Why.REFUSED))
+            is UpdateDownloader.Download.Busy -> set(item, State.Failed(Why.BUSY))
         }
     }
 
-    private fun install(k: String, offer: UpdateTrust.Offer, file: File) {
-        set(k, State.Installing)
+    private fun isNoSpace(e: Throwable) = generateSequence(e) { it.cause }.take(8).any { x -> x.message?.let { "No space" in it || "ENOSPC" in it } == true }
+
+    private fun install(item: Item, offer: UpdateTrust.Offer, file: File) {
+        set(item, State.Installing)
         val result = try { activation.activate(trust, offer, file, open) } catch (e: IOException) { PackActivation.Result.StateNotSaved }
         when (result) {
-            is PackActivation.Result.Activated -> { file.delete(); set(k, State.Done) }
-            PackActivation.Result.NotAuthorized -> { file.delete(); set(k, State.Failed(Why.NOT_OFFERED)) }
-            PackActivation.Result.WrongFile, is PackActivation.Result.Rejected -> { file.delete(); set(k, State.Failed(Why.NOT_TRUSTED)) }
-            PackActivation.Result.OpenFailed -> set(k, State.Failed(Why.OPEN_FAILED))
-            PackActivation.Result.StateNotSaved -> set(k, State.Failed(Why.NOT_SAVED))
+            is PackActivation.Result.Activated -> { file.delete(); set(item, State.Done) }
+            PackActivation.Result.NotAuthorized -> { file.delete(); set(item, State.Failed(Why.NOT_OFFERED)) }
+            // The phone could not store a file that is exactly the signed one: keep it, so the next try needs no transfer (U7-7).
+            is PackActivation.Result.Rejected -> when (result.why) {
+                "NO_SPACE" -> set(item, State.Failed(Why.NO_SPACE))
+                "DAMAGED" -> set(item, State.Failed(Why.NOT_SAVED))
+                else -> { file.delete(); set(item, State.Failed(Why.NOT_TRUSTED)) }
+            }
+            PackActivation.Result.WrongFile -> { file.delete(); set(item, State.Failed(Why.NOT_TRUSTED)) }
+            PackActivation.Result.OpenFailed -> set(item, State.Failed(Why.OPEN_FAILED))
+            PackActivation.Result.StateNotSaved -> set(item, State.Failed(Why.NOT_SAVED))
         }
     }
 
     companion object {
+        /** Before this (2020-01-01) a phone's clock has not been set: no "old list" warning from it. */
+        private const val PLAUSIBLE_CLOCK_MILLIS = 1_577_836_800_000L
         private val LIST_REFUSED = setOf(UpdateTrust.Reason.NOT_SIGNED, UpdateTrust.Reason.MALFORMED, UpdateTrust.Reason.WRONG_EPOCH, UpdateTrust.Reason.CONFLICT, UpdateTrust.Reason.BAD_KEY)
     }
 }

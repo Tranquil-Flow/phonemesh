@@ -125,6 +125,20 @@ class PackStoreTest {
         assertEquals("engine-whisper-tiny", ready.engine.id)
         assertEquals("voice-fr-siwis", ready.voice.id)
     }
+    /** U7-6: a pack the accepted update list withdraws is not loaded, but stays installed so it can be replaced or removed. */
+    @Test fun aWithdrawnPackIsNotUsableButStaysListed() {
+        val (s, _) = store(engine() to PackKind.ENGINE, voice() to PackKind.VOICE)
+        install(s, engine()); install(s, voice())
+        assertTrue(s.readiness(null, "fr") is Readiness.Ready)
+        s.blockedIds = setOf("voice-fr-siwis")
+        assertEquals(Readiness.MissingVoice("fr"), s.readiness(null, "fr"))
+        assertEquals(listOf("engine-whisper-tiny"), s.usable().map { it.id })
+        assertEquals("both are still installed", 2, s.list().size)
+        s.blockedIds = setOf("engine-whisper-tiny")
+        assertEquals(Readiness.MissingEngine, s.readiness(null, "fr"))
+        s.blockedIds = emptySet()
+        assertTrue(s.readiness(null, "fr") is Readiness.Ready)
+    }
     @Test fun engineWithoutTheVoiceLanguageIsUnsupported() {
         val noFrench = engine() + ("whisper/tokens.txt" to "<|en|> 1\n")
         val (s, _) = store(noFrench to PackKind.ENGINE, voice() to PackKind.VOICE)

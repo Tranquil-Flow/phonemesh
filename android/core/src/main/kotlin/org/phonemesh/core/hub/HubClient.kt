@@ -178,12 +178,15 @@ class HubClient(
         if (sockets == null) return null
         return object : HubTransport {
             override val route = UpdateRoute.PINNED_HUB_WIFI
+            override val maxAnswerBytes: Long get() = MAX_REPLY.toLong()
 
             override fun get(path: String, range: LongRange?): HubResponse {
                 if (!path.startsWith("/updates/v1/") || path.any { it.code <= 32 || it.code > 126 || it == '?' || it == '#' }) throw IOException("not an update path")
                 val extra = StringBuilder("Accept-Encoding: identity").append(CRLF)
                 if (range != null) extra.append("Range: bytes=").append(range.first).append('-').append(range.last).append(CRLF)
-                val reply = call("GET", path, ByteArray(0), UPDATE_MILLIS, extra.toString())
+                // A hub that answers a range request with the whole (large) file gets its head read and its body left unread:
+                // the downloader names that, instead of the link breaking on a "bad length" (U7-15).
+                val reply = call("GET", path, ByteArray(0), UPDATE_MILLIS, extra.toString(), headOnlyWhenLong = true)
                 val headers = HashMap<String, MutableList<String>>()
                 reply.lines.forEach { (k, v) -> headers.getOrPut(k) { ArrayList() }.add(v) }
                 return HubResponse(reply.status, headers, ByteArrayInputStream(reply.body))
@@ -201,7 +204,7 @@ class HubClient(
         return Mail(seq, port, ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() })
     }
 
-    private fun call(method: String, path: String, body: ByteArray, totalMillis: Int, extraHeaders: String = ""): Reply {
+    private fun call(method: String, path: String, body: ByteArray, totalMillis: Int, extraHeaders: String = "", headOnlyWhenLong: Boolean = false): Reply {
         if (closed) throw IOException("this hub link is closed")
         val attempt = Attempt()
         live.add(attempt)
@@ -223,7 +226,7 @@ class HubClient(
             out.write(head.toString().toByteArray(Charsets.US_ASCII))
             out.write(body)
             out.flush()
-            return Exchange(BufferedInputStream(secure.input), until).reply()
+            return Exchange(BufferedInputStream(secure.input), until).reply(headOnlyWhenLong)
         } catch (e: IOException) {
             throw if (attempt.timedOut) IOException("the hub took too long") else e
         } catch (e: RuntimeException) {
@@ -268,13 +271,14 @@ class HubClient(
 
     /** Reads one HTTP/1.1 reply (Content-Length, chunked as the JDK server sends an empty body, or to the end), within a deadline. */
     private class Exchange(private val input: InputStream, private val until: Long) {
-        fun reply(): Reply {
+        fun reply(headOnlyWhenLong: Boolean = false): Reply {
             val lines = head().split(CRLF)
             val status = lines[0].split(' ').getOrNull(1)?.toIntOrNull() ?: throw IOException("bad reply")
             val pairs = lines.drop(1).filter { ':' in it }.map { it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim() }
             val headers = pairs.toMap()
             val body = when {
                 headers["transfer-encoding"]?.lowercase() == "chunked" -> chunked()
+                headOnlyWhenLong && (headers["content-length"]?.toLongOrNull() ?: 0L) > MAX_REPLY -> ByteArray(0)
                 headers["content-length"] != null ->
                     exact(headers.getValue("content-length").toIntOrNull()?.takeIf { it in 0..MAX_REPLY } ?: throw IOException("bad length"))
                 else -> rest()

@@ -33,7 +33,7 @@ class UpdateControllerTest {
     private val compiled get() = listOf(
         CatalogEntry("voice-fr-siwis", 1, PackKind.VOICE, "x.zip", v1.zip.size.toLong(), hex(v1.entry.sums)),
         CatalogEntry("voice-en-amy", 1, PackKind.VOICE, "y.zip", en1.zip.size.toLong(), hex(en1.entry.sums)))
-    private val trust by lazy { (UpdateTrust.open(MemoryTrustStore(), TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust }
+    private val trust by lazy { (UpdateTrust.open(MemoryTrustStore(), TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust }
     private var wifi: HubTransport? = hub
     private val tasks = ArrayDeque<Runnable>()
     private var direct = true

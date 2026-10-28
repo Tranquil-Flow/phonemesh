@@ -21,14 +21,16 @@ class UpdateDownloaderTest {
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
     private val hub = FakeHub()
     private val store = MemoryTrustStore()
-    private val trust: UpdateTrust by lazy { (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust }
+    private val trust: UpdateTrust by lazy { (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust }
     private val dir by lazy { folder.newFolder("work") }
 
     private fun entry(bytes: ByteArray = data, version: Long = 2) = UpdateMetadata.Entry(UpdateMetadata.VOICE, "voice-fr-siwis", "$version", "", version, 1, 0, 26, 2, bytes.size.toLong(),
         sha(bytes), 2_000_000, 9, TestCatalogs.sha("sums"), ByteArray(32))
 
-    private fun downloader(chunk: Int = 256 * 1024, free: Long = Long.MAX_VALUE / 2, failures: Int = 3, work: File = dir) =
-        UpdateDownloader(trust, hub, work, freeSpace = { free }, chunkBytes = chunk, bufferBytes = 64 * 1024, maxFailures = failures)
+    private val waits = ArrayList<Long>()
+    private fun downloader(chunk: Int = 256 * 1024, free: Long = Long.MAX_VALUE / 2, failures: Int = 3, work: File = dir, busyRetries: Int = 8) =
+        UpdateDownloader(trust, hub, work, freeSpace = { free }, chunkBytes = chunk, bufferBytes = 64 * 1024, maxFailures = failures,
+            busyRetries = busyRetries, sleep = { waits += it })
 
     /** Publishes [data] as version 2 and returns the offer. */
     private fun offer(bytes: ByteArray = data, sequence: Long = 2, version: Long = 2): UpdateTrust.Offer {
@@ -261,12 +263,100 @@ class UpdateDownloaderTest {
         assertEquals("the refused range, then a fresh start from the beginning", listOf(0L, 100_000L, 0L), objectRequests().take(3).map { it.second!!.first })
     }
 
-    @Test fun aBusyHubAndAMissingObjectArePlainAnswers() {
+    @Test fun aMissingObjectIsAPlainAnswer() {
         val o = offer()
-        hub.bend = { _, _, _ -> HubResponse(429, mapOf("Retry-After" to listOf("5")), ByteArrayInputStream(ByteArray(0))) }
-        assertEquals(5, (downloader().download(o) as UpdateDownloader.Download.Busy).retryAfterSeconds)
-        hub.bend = null; hub.objects.clear()
+        hub.objects.clear()
         assertTrue(downloader().download(o) is UpdateDownloader.Download.NotOnThisHub)
+    }
+
+    /** U7-8: a busy hub (429) is waited out and asked again; it is not a failure and not a stop. */
+    @Test fun aBusyHubIsWaitedOutAndTheCopyGoesOn() {
+        val o = offer()
+        var busy = 3
+        hub.bend = { _, _, ok -> if (busy-- > 0) HubResponse(429, mapOf("Retry-After" to listOf("2")), ByteArrayInputStream(ByteArray(0))) else ok }
+        val r = ready(downloader(failures = 1).download(o))
+        assertArrayEquals(data, r.file.readBytes())
+        assertEquals("three busy answers, then the 3 ranges", 6, objectRequests().size)
+        assertTrue("it waited each time, at least as long as the hub asked", waits.sum() >= 3 * 2000L)
+    }
+
+    @Test fun aHubThatStaysBusyEndsWithBusyAfterTheRetriesAndKeepsTheBytes() {
+        val o = offer()
+        hub.dropNextAfter(100_000)
+        downloader(failures = 1).download(o)
+        assertEquals(100_000L, part(o).length())
+        hub.bend = { _, _, _ -> HubResponse(429, mapOf("Retry-After" to listOf("5")), ByteArrayInputStream(ByteArray(0))) }
+        hub.requests.clear()
+        val r = downloader(busyRetries = 3).download(o)
+        assertEquals(5, (r as UpdateDownloader.Download.Busy).retryAfterSeconds)
+        assertEquals("one try and three retries", 4, objectRequests().size)
+        assertEquals(100_000L, part(o).length())
+    }
+
+    @Test fun pausingWhileWaitingForABusyHubStopsTheWaiting() {
+        val o = offer()
+        hub.bend = { _, _, _ -> HubResponse(429, mapOf("Retry-After" to listOf("30")), ByteArrayInputStream(ByteArray(0))) }
+        var asked = 0
+        val r = downloader().download(o, cancelled = { ++asked > 3 })
+        assertTrue(r::class.simpleName, r is UpdateDownloader.Download.Paused)
+        assertTrue("it stopped waiting at once instead of sitting out the 30 s: ${waits.sum()} ms", waits.sum() < 2_000)
+    }
+
+    /** U7-10: a hub that answers a few bytes per range is a failing hub, not progress. */
+    @Test fun aHubThatDripsOneBytePerRangeIsCountedAsFailing() {
+        val o = offer()
+        val name = hex(o.entry.digest)
+        hub.bend = { _, range, _ ->
+            val from = range!!.first
+            // A copy that keeps going on one byte per request is the failure; stop the test hub instead of waiting 700,000 requests.
+            if (objectRequests().size > 50) throw AssertionError("a hub that drips one byte per range was not stopped")
+            HubResponse(206, mapOf("ETag" to listOf("\"$name\""), "Content-Range" to listOf("bytes $from-$from/${data.size}"), "Content-Length" to listOf("1")),
+                ByteArrayInputStream(byteArrayOf(data[from.toInt()])))
+        }
+        val r = downloader().download(o)
+        assertTrue(r::class.simpleName, r is UpdateDownloader.Download.NeedsResume)
+        assertEquals("three tries and the copy waits for the person", 3, objectRequests().size)
+        assertEquals("the too-short answers were not written", 0L, part(o).length().coerceAtLeast(0))
+    }
+
+    @Test fun aShortAnswerIsFineWhenItIsAllThatWasAskedFor() {
+        val tail = ByteArray(256 * 1024 + 100) { (it % 251).toByte() }
+        val o = offer(tail)
+        val r = ready(downloader().download(o))
+        assertArrayEquals(tail, r.file.readBytes())
+        assertEquals("the last range is 100 bytes", 100L, objectRequests().last().second!!.let { it.last - it.first + 1 })
+    }
+
+    /** U7-15: a 200 to a range request that the client cannot carry is named as the hub's fault. */
+    @Test fun aHubThatAnswersARangeWithTheWholeFileIsNamedAndNotCalledADroppedConnection() {
+        val o = offer()
+        hub.maxAnswer = 300_000
+        hub.bend = { path, _, _ ->
+            HubResponse(200, mapOf("ETag" to listOf("\"${path.substringAfterLast('/')}\""), "Content-Length" to listOf(data.size.toString())), ByteArrayInputStream(ByteArray(0)))
+        }
+        val r = downloader().download(o)
+        assertTrue(r::class.simpleName, r is UpdateDownloader.Download.Refused)
+        assertTrue((r as UpdateDownloader.Download.Refused).why, r.why.contains("ignored the byte range"))
+        assertEquals(1, objectRequests().size)
+    }
+
+    /** U7-15: a hub bug on the recovery route must not stop the catalog. */
+    @Test fun aBrokenRecoveryRouteDoesNotBlockTheCatalog() {
+        hub.catalog = TestCatalogs.catalog(1, 2, listOf(entry()))
+        hub.bend = { path, _, ok -> if (path.endsWith("/recovery")) HubResponse(500, emptyMap(), ByteArrayInputStream(ByteArray(0))) else ok }
+        val r = downloader().refresh()
+        assertTrue(r::class.simpleName, r is UpdateDownloader.Refresh.Updated)
+        assertNull((r as UpdateDownloader.Refresh.Updated).recovery)
+        assertTrue(r.catalog is UpdateTrust.CatalogResult.Accepted)
+    }
+
+    /** U7-7: the pack being replaced stays on disk while the new one is stored, so there must be room for both. */
+    @Test fun roomIsNeededForTheOldPackToo() {
+        val o = offer()
+        val base = 700_000L + 2_000_000L + 20L * 1024 * 1024
+        val tight = downloader(free = base + 999_999).download(o, installedBytes = 1_000_000) as UpdateDownloader.Download.NoSpace
+        assertEquals(base + 1_000_000, tight.needed)
+        assertTrue(downloader(free = base + 1_000_000).download(o, installedBytes = 1_000_000) is UpdateDownloader.Download.Ready)
     }
 
     @Test fun thereMustBeRoomForTheFileItsUnpackingAndAReserve() {

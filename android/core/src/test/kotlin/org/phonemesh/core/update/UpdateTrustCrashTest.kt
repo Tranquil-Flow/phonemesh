@@ -35,7 +35,7 @@ class UpdateTrustCrashTest {
         "recovery epoch 5" to { t -> t.acceptRecovery(p5) },
     )
 
-    private fun open(store: TrustStore) = UpdateTrust.open(store, roots, 3, TestCatalogs.baseline)
+    private fun open(store: TrustStore) = UpdateTrust.open(store, roots, 3, TestCatalogs.baseline, allowTestRoots = true)
     private fun trust(store: TrustStore) = (open(store) as UpdateTrust.Opened.Ready).trust
 
     @Test fun everyWriteTornAtEveryByteLeavesTheOldOrTheNewStateAndCanBeRepeated() {

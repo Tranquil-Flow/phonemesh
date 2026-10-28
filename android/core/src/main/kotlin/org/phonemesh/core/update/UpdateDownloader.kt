@@ -23,6 +23,12 @@ class UpdateDownloader(
     private val freeSpace: () -> Long = { dir.usableSpace },
     private val chunkBytes: Int = CHUNK, private val bufferBytes: Int = BUFFER, private val maxFailures: Int = 3,
     private val spaceReserve: Long = RESERVE,
+    /** An answer to a range request shorter than this (unless it is all that was asked for) counts as a failure (U7-10). */
+    private val minRangeBytes: Int = MIN_RANGE,
+    /** How many times a busy hub (429) is waited out before the copy stops with [Download.Busy] (U7-8). */
+    private val busyRetries: Int = BUSY_RETRIES,
+    /** Waits [millis]; may return early. A seam for tests. */
+    private val sleep: (Long) -> Unit = { Thread.sleep(it) },
 ) {
     init { require(transport.route == UpdateRoute.PINNED_HUB_WIFI) { "updates only come from the pinned hub" } }
 
@@ -55,10 +61,10 @@ class UpdateDownloader(
     // ---- metadata ----
 
     fun refresh(): Refresh {
+        // A hub that answers oddly on the recovery route must not block the catalog: no policy then, the catalog still counts (U7-15).
         val recovery = when (val r = small("/updates/v1/recovery")) {
             is Small.Bytes -> trust.acceptRecovery(r.bytes)
-            is Small.Absent -> null
-            is Small.Bad -> return Refresh.Failed(r.why)
+            is Small.Absent, is Small.Bad -> null
         }
         return when (val c = small("/updates/v1/catalog")) {
             is Small.Absent -> Refresh.NoUpdates
@@ -92,7 +98,11 @@ class UpdateDownloader(
 
     // ---- files ----
 
-    fun download(offer: UpdateTrust.Offer, onProgress: (done: Long, total: Long) -> Unit = { _, _ -> }, cancelled: () -> Boolean = { false }): Download {
+    /** [installedBytes]: what the pack being replaced takes on disk; it stays there until the new one has opened, so room is needed for both. */
+    fun download(
+        offer: UpdateTrust.Offer, onProgress: (done: Long, total: Long) -> Unit = { _, _ -> }, cancelled: () -> Boolean = { false },
+        installedBytes: Long = 0,
+    ): Download {
         val entry = offer.entry
         require(entry.kind == UpdateMetadata.ENGINE || entry.kind == UpdateMetadata.VOICE) { "packs only" }
         val name = hex(entry.digest)
@@ -102,10 +112,10 @@ class UpdateDownloader(
         val finished = File(ready, name)
         if (finished.isFile && finished.length() == entry.bytes && sha256(finished).contentEquals(entry.digest)) return Download.Ready(finished, 0)
         var offset = resume(part, sidecar, entry, offer)
-        val needed = (entry.bytes - offset) + entry.expanded + spaceReserve
+        val needed = (entry.bytes - offset) + entry.expanded + installedBytes + spaceReserve
         val free = freeSpace()
         if (free < needed) return Download.NoSpace(needed, free)
-        var failures = 0; var restarts = 0
+        var failures = 0; var restarts = 0; var busy = 0
         onProgress(offset, entry.bytes)
         while (offset < entry.bytes) {
             if (cancelled()) return Download.Paused(offset)
@@ -113,9 +123,17 @@ class UpdateDownloader(
             val last = minOf(offset + chunkBytes, entry.bytes) - 1
             val step = try {
                 transport.get("/updates/v1/objects/$name", offset..last).use { r -> fetch(r, entry, name, part, sidecar, offset, last, offer, cancelled) }
+            } catch (e: LocalWriteFailure) {
+                // Our own disk, not the hub: the caller says "could not save" or "no space", and the hub is not blamed (U7-7).
+                throw IOException(e.message, e.cause)
             } catch (e: IOException) { Step.Failed("the hub connection dropped", offset) }
             when (step) {
-                is Step.Progress -> { if (step.restarted) restarts++; if (step.offset > offset || step.restarted) failures = 0; offset = step.offset; onProgress(offset, entry.bytes) }
+                is Step.Progress -> { busy = 0; if (step.restarted) restarts++; if (step.offset > offset || step.restarted) failures = 0; offset = step.offset; onProgress(offset, entry.bytes) }
+                is Step.Busy -> {
+                    // A busy hub is not a failure: wait as it asks (with a growing floor) and ask again, a few times (U7-8).
+                    if (++busy > busyRetries) return Download.Busy(step.seconds)
+                    if (!wait(maxOf(step.seconds.toLong(), 1L shl minOf(busy, 5)).coerceAtMost(MAX_BUSY_WAIT), cancelled)) return Download.Paused(offset)
+                }
                 is Step.Failed -> {
                     if (step.offset > offset) failures = 0
                     offset = step.offset; failures++
@@ -133,9 +151,13 @@ class UpdateDownloader(
         return Download.Ready(finished, restarts)
     }
 
+    /** A failure of the phone's own storage while writing the copy (not of the hub link). */
+    private class LocalWriteFailure(cause: IOException) : IOException(cause.message, cause)
+
     private sealed class Step {
         class Progress(val offset: Long, val restarted: Boolean = false) : Step()
         class Failed(val why: String, val offset: Long) : Step()
+        class Busy(val seconds: Int) : Step()
         class Stop(val result: Download) : Step()
     }
 
@@ -146,7 +168,7 @@ class UpdateDownloader(
         fun refuse(why: String) = Step.Stop(Download.Refused(why))
         when {
             r.status == 404 -> return Step.Stop(Download.NotOnThisHub)
-            r.status == 429 -> return Step.Stop(Download.Busy(r.one("retry-after")?.toIntOrNull()?.coerceIn(1, 3600) ?: 30))
+            r.status == 429 -> return Step.Busy(r.one("retry-after")?.toIntOrNull()?.coerceIn(1, 3600) ?: 30)
             r.status == 416 -> { part.delete(); sidecar.delete(); return Step.Failed("the hub did not accept the range", 0) }
             r.status in 300..399 -> return refuse("the hub tried to redirect")
             r.status != 200 && r.status != 206 -> return if (r.status >= 500) Step.Failed("the hub answered ${r.status}", offset) else refuse("the hub answered ${r.status}")
@@ -166,11 +188,16 @@ class UpdateDownloader(
             if (total != entry.bytes) return refuse("the hub's file has another size than the signed one")
             if (from != offset) return refuse("the hub answered another range")
             if (to < from || to > last) return refuse("the hub sent more than asked")
+            // A hub that hands out a few bytes per request would keep the phone busy for hours: that is a failure, not progress.
+            val asked = last - offset + 1
+            if (to - from + 1 < minOf(asked, minRangeBytes.toLong())) return Step.Failed("the hub sent too little at a time", offset)
             end = to
             if (length != null && length.toLongOrNull() != end - start + 1) return refuse("the hub's length does not match its range")
         } else {
             // 200 to a range request: the whole file from the start. Never appended to what is already here.
             if (length == null || length.toLongOrNull() != entry.bytes) return refuse("the hub's file has another size than the signed one")
+            // The client holds an answer in memory: a whole-file answer cannot arrive. Say what the hub did wrong.
+            if (entry.bytes > transport.maxAnswerBytes) return refuse("the hub ignored the byte range and sent the whole file")
             start = 0; end = entry.bytes - 1; restarted = offset > 0
             if (restarted) { part.delete(); sidecar.delete() }
         }
@@ -178,19 +205,21 @@ class UpdateDownloader(
         var written = 0L
         val expected = end - start + 1
         var dropped = false
-        RandomAccessFile(part, "rw").use { raf ->
-            raf.setLength(start); raf.seek(start)
-            val buf = ByteArray(bufferBytes)
-            while (written < expected) {
-                if (cancelled()) break
-                // Never read, and so never write, past the range that was asked for and announced.
-                val n = try { r.body.read(buf, 0, minOf(buf.size.toLong(), expected - written).toInt()) } catch (e: IOException) { dropped = true; break }
-                if (n < 0) { dropped = true; break }
-                raf.write(buf, 0, n); written += n
+        try {
+            RandomAccessFile(part, "rw").use { raf ->
+                raf.setLength(start); raf.seek(start)
+                val buf = ByteArray(bufferBytes)
+                while (written < expected) {
+                    if (cancelled()) break
+                    // Never read, and so never write, past the range that was asked for and announced.
+                    val n = try { r.body.read(buf, 0, minOf(buf.size.toLong(), expected - written).toInt()) } catch (e: IOException) { dropped = true; break }
+                    if (n < 0) { dropped = true; break }
+                    raf.write(buf, 0, n); written += n
+                }
+                raf.fd.sync()
             }
-            raf.fd.sync()
-        }
-        if (written > 0 || restarted) saveSidecar(sidecar, entry, offer, start + written)
+            if (written > 0 || restarted) saveSidecar(sidecar, entry, offer, start + written)
+        } catch (e: IOException) { throw LocalWriteFailure(e) }
         val now = start + written
         return when {
             written == expected -> Step.Progress(now, restarted)
@@ -233,6 +262,17 @@ class UpdateDownloader(
         return b.long
     }
 
+    /** Waits [seconds] in short slices; false when [cancelled] says stop. */
+    private fun wait(seconds: Long, cancelled: () -> Boolean): Boolean {
+        var left = seconds * 1000
+        while (left > 0) {
+            if (cancelled()) return false
+            val slice = minOf(left, 250L)
+            sleep(slice); left -= slice
+        }
+        return !cancelled()
+    }
+
     private fun sha256(file: File): ByteArray {
         val md = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input: InputStream ->
@@ -248,6 +288,9 @@ class UpdateDownloader(
         const val CHUNK = 256 * 1024
         const val BUFFER = 64 * 1024
         const val RESERVE = 20L * 1024 * 1024
+        const val MIN_RANGE = 64 * 1024
+        const val BUSY_RETRIES = 8
+        const val MAX_BUSY_WAIT = 30L
         private val MAGIC = "PMDL".toByteArray(Charsets.US_ASCII)
     }
 }

@@ -100,7 +100,7 @@ object UpdateMetadata {
     fun recovery(payload: ByteArray): Recovery? = try {
         val f = Fields(payload)
         val r = Recovery(f.u64(), f.u16(), f.raw(65), f.u64(), f.u32())
-        need(publicKey(r.catalogKey) != null && r.epoch > 0 && r.catalogKeyId != RECOVERY_KEY_ID)
+        need(publicKey(r.catalogKey) != null && r.epoch > 0 && r.catalogKeyId != RECOVERY_KEY_ID && r.catalogKeyId != 0)
         f.end(); r
     } catch (_: Bad) { null } catch (_: RuntimeException) { null }
 

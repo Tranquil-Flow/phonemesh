@@ -59,28 +59,29 @@ class FileTrustStoreTest {
         dir().mkdirs()
         File(dir(), "trust-0.bin").writeBytes(ByteArray(FileTrustStore.MAX_BYTES + 1))
         assertEquals(FileTrustStore.MAX_BYTES + 1, s.load(0)!!.size)
-        assertTrue(UpdateTrust.open(s, TestCatalogs.roots, 3, TestCatalogs.baseline) is UpdateTrust.Opened.Corrupt)
+        assertTrue(UpdateTrust.open(s, TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) is UpdateTrust.Opened.Corrupt)
     }
 
     @Test fun theWholeLifeOfATrustStateSurvivesAProcessRestart() {
-        val first = (UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust
+        val first = (UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         val v2 = TestCatalogs.pack("voice-fr-siwis", 2)
         assertTrue(first.acceptCatalog(TestCatalogs.catalog(1, 2, listOf(v2))) is UpdateTrust.CatalogResult.Accepted)
         assertTrue(first.recordInstalled(v2))
-        val reopened = (UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust
+        val reopened = (UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         assertEquals(2L, reopened.state.sequence)
         assertEquals(2L, reopened.floor(UpdateMetadata.VOICE, "voice-fr-siwis"))
         assertArrayEquals(first.state.encode(), reopened.state.encode())
     }
 
-    @Test fun aTornSecondSlotFallsBackToTheWholeOne() {
+    /** U7-12: the file store writes by atomic rename, so a slot that does not read is damage, not a torn write: say so, change nothing. */
+    @Test fun aDamagedSecondSlotIsReportedAndNothingIsReplaced() {
         val store = FileTrustStore(dir())
-        val t = (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust
+        val t = (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         val good = t.state.encode()
-        // slot 1 holds the first state; a later write cut short in slot 0 (by an old-style non-atomic writer) is just damage.
         File(dir(), "trust-0.bin").writeBytes(good.copyOf(good.size / 2))
-        val again = UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline)
-        assertTrue(again is UpdateTrust.Opened.Ready)
-        assertArrayEquals(good, (again as UpdateTrust.Opened.Ready).trust.state.encode())
+        val again = UpdateTrust.open(FileTrustStore(dir()), TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true)
+        assertTrue("$again", again is UpdateTrust.Opened.Corrupt)
+        assertArrayEquals("the whole slot is untouched", good, File(dir(), "trust-1.bin").readBytes())
+        assertEquals(good.size / 2, File(dir(), "trust-0.bin").length().toInt())
     }
 }

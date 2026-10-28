@@ -7,6 +7,9 @@ class MemoryTrustStore(initial: List<ByteArray?> = listOf(null, null)) : TrustSt
     val slots: MutableList<ByteArray?> = initial.map { it?.copyOf() }.toMutableList()
     val saves = ArrayList<Pair<Int, ByteArray>>()
     var failNext = false
+    /** Declares the store's writes atomic (like the file store), so a damaged slot is damage and not a torn write. */
+    var atomic = false
+    override val atomicSlotWrites: Boolean get() = atomic
     /** When set, the next save writes [tear] of its bytes (a prefix, over the old content) and then crashes. */
     var tear: ((slot: Int, bytes: ByteArray, old: ByteArray?) -> ByteArray)? = null
 
@@ -19,5 +22,5 @@ class MemoryTrustStore(initial: List<ByteArray?> = listOf(null, null)) : TrustSt
         slots[slot] = bytes.copyOf()
     }
 
-    fun copy() = MemoryTrustStore(slots)
+    fun copy() = MemoryTrustStore(slots).also { it.atomic = atomic }
 }

@@ -15,6 +15,12 @@ interface HubTransport {
     val route: UpdateRoute
 
     /**
+     * The most bytes one answer can carry (the app's client holds an answer in memory). A `200` that announces more than this
+     * answered a range request with the whole file: the downloader names that as the hub's fault, not as a dropped connection.
+     */
+    val maxAnswerBytes: Long get() = Long.MAX_VALUE
+
+    /**
      * `GET` [path] (always under `/updates/v1/`) with `Range: bytes=<first>-<last>` when [range] is given. The transport must
      * not follow redirects or decode content; it returns what the hub said, with header names in any case.
      */

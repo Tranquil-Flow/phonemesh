@@ -225,15 +225,18 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
     /** Removes staging directories that no install in this process is using (left by a killed install). */
     private fun sweepStaging() {
         directory.listFiles().orEmpty()
-            .filter { it.name.startsWith(STAGING) && it.absolutePath !in activeStaging }
+            .filter { (it.name.startsWith(STAGING) && it.absolutePath !in activeStaging) || (it.name.startsWith(PENDING) && it.absolutePath !in activePending) }
             .forEach { it.deleteRecursively() }
     }
 
     /**
      * Installs [input]. With [retainOlder] the older copies of the same pack stay on disk (the new one is the one [list]
      * returns, being newer) until [retireOlder], so a caller can still go back with [discard] if the new pack does not open.
+     * With [pending] the new copy is published under a name [list] never returns (`.pending-...`) until [promote]: the pack
+     * in use stays the old one at every moment, also if the process dies before the new one is accepted (a store opened later
+     * removes the leftover). Implies [retainOlder].
      */
-    fun install(input: InputStream, retainOlder: Boolean = false): PackInfo {
+    fun install(input: InputStream, retainOlder: Boolean = false, pending: Boolean = false): PackInfo {
         require(maxBytes > 0)
         val stage = directory.resolve("$STAGING${UUID.randomUUID()}")
         activeStaging += stage.absolutePath // before the directory exists, so a sweep never sees it unclaimed
@@ -255,9 +258,10 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
                 return same
             }
             // A same-version pack with another manifest is replaced by this verified one.
-            val ready = directory.resolve(UUID.randomUUID().toString())
-            if (!stage.renameTo(ready)) throw IOException("Could not publish model pack")
-            if (!retainOlder) existing.forEach { forget(it.root); it.root.deleteRecursively() } // Older or superseded copies of this pack only.
+            val ready = directory.resolve((if (pending) PENDING else "") + UUID.randomUUID().toString())
+            if (pending) activePending += ready.absolutePath
+            if (!stage.renameTo(ready)) { activePending -= ready.absolutePath; throw IOException("Could not publish model pack") }
+            if (!retainOlder && !pending) existing.forEach { forget(it.root); it.root.deleteRecursively() } // Older or superseded copies of this pack only.
             return info.copy(root = ready)
         } catch (error: Throwable) {
             stage.deleteRecursively() // Only this failed import's newly-created staging files.
@@ -278,11 +282,29 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
         .filter { it.isDirectory && !it.name.startsWith('.') }
         .mapNotNull { runCatching { inspectInstalled(it) }.getOrNull() }
 
+    /**
+     * Ids of installed packs the phone must not load: the accepted update list withdraws them (U7-6). They stay on disk (to be
+     * replaced or removed) and in [list]; [usable] and [readiness] leave them out.
+     */
+    @Volatile var blockedIds: Set<String> = emptySet()
+
+    /** [list] without the packs in [blockedIds]. */
+    fun usable(): List<PackInfo> = list().let { all -> blockedIds.let { b -> if (b.isEmpty()) all else all.filter { it.id !in b } } }
+
     fun list(): List<PackInfo> = installed().groupBy { it.id }.values.map { same -> same.maxBy { it.version } }
         .sortedWith(compareBy({ it.kind }, { it.label }))
 
     /** Removes one installed copy, for example a just-installed pack that did not open. */
-    fun discard(root: File) { forget(root); root.deleteRecursively() }
+    fun discard(root: File) { forget(root); activePending -= root.absolutePath; root.deleteRecursively() }
+
+    /** Makes a [pending] copy a normal installed pack (one atomic rename); [list] returns it from then on. */
+    fun promote(info: PackInfo): PackInfo {
+        require(info.root.name.startsWith(PENDING)) { "not a pending pack" }
+        val live = directory.resolve(UUID.randomUUID().toString())
+        if (!info.root.renameTo(live)) throw IOException("Could not publish model pack")
+        activePending -= info.root.absolutePath
+        return info.copy(root = live)
+    }
 
     /** Removes the other, older copies of [kept]'s pack once [kept] has been accepted for good. */
     fun retireOlder(kept: PackInfo) {
@@ -297,6 +319,9 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
 
     private companion object {
         const val STAGING = ".incoming-"
+        const val PENDING = ".pending-"
+        /** Pending copies of installs running in this process, across every store instance. */
+        val activePending: MutableSet<String> = ConcurrentHashMap.newKeySet()
         /** Staging directories of installs running in this process, across every store instance. */
         val activeStaging: MutableSet<String> = ConcurrentHashMap.newKeySet()
     }
@@ -329,7 +354,7 @@ sealed interface Readiness {
  * for [languageTag], and checks that the engine's tokens include the voice's Whisper language.
  */
 fun PackStore.readiness(engineId: String?, languageTag: String): Readiness {
-    val packs = list()
+    val packs = usable()
     val engines = packs.filter { it.kind == PackKind.ENGINE }
     val engine = engines.firstOrNull { it.id == engineId }
         ?: engines.firstOrNull { it.id == "engine-whisper-tiny" }

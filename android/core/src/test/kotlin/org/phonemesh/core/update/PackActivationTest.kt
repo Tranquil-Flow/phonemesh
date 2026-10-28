@@ -19,7 +19,7 @@ class PackActivationTest {
     private val packs by lazy { folder.newFolder("packs") }
     private val work by lazy { folder.newFolder("work") }
     private val store = MemoryTrustStore()
-    private val trust: UpdateTrust by lazy { (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust }
+    private val trust: UpdateTrust by lazy { (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust }
     private val v1 = TestPackZips.voice(1)
     private val compiled get() = listOf(CatalogEntry("voice-fr-siwis", 1, PackKind.VOICE, "x.zip", v1.zip.size.toLong(), hex(v1.entry.sums)))
     private val activation by lazy { PackActivation(packs, compiled) }
@@ -33,6 +33,7 @@ class PackActivationTest {
     }
     private fun active() = PackStore(packs, compiled).list().single { it.id == "voice-fr-siwis" }
     private fun dirs() = packs.listFiles()!!.filter { it.isDirectory && !it.name.startsWith(".") }.size
+    private fun pendingDirs() = packs.listFiles()!!.filter { it.isDirectory && it.name.startsWith(".pending-") }.size
 
     @Test fun aNewVersionReplacesTheOldOneOnlyAfterItOpensAndTheFloorIsSaved() {
         installV1()
@@ -40,7 +41,7 @@ class PackActivationTest {
         val offer = offerFor(v2)
         var seenWhileOpening = 0
         val r = activation.activate(trust, offer, file(v2.zip)) { info ->
-            seenWhileOpening = dirs() // old and new are both on disk while the new one is tried
+            seenWhileOpening = dirs() + pendingDirs() // old and new are both on disk while the new one is tried
             assertEquals("floor not yet raised", 0L, trust.floor(UpdateMetadata.VOICE, "voice-fr-siwis"))
             info.version == 2
         }
@@ -146,7 +147,7 @@ class PackActivationTest {
         try { activation.activate(trust, offer, file(v2.zip)); fail("expected the crash") } catch (_: MemoryTrustStore.Crash) { }
         // The new pack is on disk next to the old one; the floor never moved.
         assertEquals(2, dirs()); assertEquals(2, active().version)
-        val again = (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust
+        val again = (UpdateTrust.open(store, TestCatalogs.roots, 3, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         assertEquals(0L, again.floor(UpdateMetadata.VOICE, "voice-fr-siwis"))
         assertEquals("the accepted catalog is the one from before the crash", 2L, again.state.sequence)
         assertEquals(1, PackActivation(packs, compiled).reconcile(again))
@@ -157,7 +158,7 @@ class PackActivationTest {
     @Test fun packsThatCameWithTheAppGetTheirFloorsFromTheBaseline() {
         installV1()
         // A baseline that names the installed pack, as the real baseline names the real compiled packs.
-        fun trustWithBaseline() = (UpdateTrust.open(MemoryTrustStore(), TestCatalogs.roots, 3, TestCatalogs.catalog(1, 1, listOf(v1.entry))) as UpdateTrust.Opened.Ready).trust
+        fun trustWithBaseline() = (UpdateTrust.open(MemoryTrustStore(), TestCatalogs.roots, 3, TestCatalogs.catalog(1, 1, listOf(v1.entry)), allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         val t = trustWithBaseline()
         assertEquals(0L, t.floor(UpdateMetadata.VOICE, "voice-fr-siwis"))
         assertEquals(1, PackActivation(packs, compiled).reconcile(t))
@@ -167,5 +168,43 @@ class PackActivationTest {
         PackStore(packs, compiled).remove("voice-fr-siwis")
         PackStore(packs, listOf(CatalogEntry("voice-fr-siwis", 1, PackKind.VOICE, "x", strange.zip.size.toLong(), hex(strange.entry.sums)))).install(strange.zip.inputStream())
         assertEquals(0, PackActivation(packs, compiled).reconcile(trustWithBaseline()))
+    }
+
+    /** U7-5: the old pack is the active one at every moment until the new one has opened; also if the process dies meanwhile. */
+    @Test fun theOldPackStaysTheActiveOneWhileTheNewOneIsBeingTried() {
+        installV1()
+        val v2 = TestPackZips.voice(2)
+        val offer = offerFor(v2)
+        var inside = -1; var pendingInside = -1; var rootName = ""
+        val r = activation.activate(trust, offer, file(v2.zip)) { info ->
+            inside = active().version; pendingInside = pendingDirs(); rootName = info.root.name
+            // The list a speech loop would read, taken in another thread while the check runs.
+            var other = -1
+            Thread { other = active().version }.also { it.start(); it.join() }
+            assertEquals(1, other)
+            true
+        }
+        assertTrue(r is PackActivation.Result.Activated)
+        assertEquals("the old version is active inside the open check", 1, inside)
+        assertEquals(1, pendingInside); assertTrue(rootName.startsWith(".pending-"))
+        assertEquals(2, active().version); assertEquals(0, pendingDirs()); assertEquals(1, dirs())
+    }
+
+    @Test fun aProcessThatDiesDuringTheOpenCheckLeavesTheOldPackActiveAndNoFloor() {
+        installV1()
+        val v2 = TestPackZips.voice(2)
+        val offer = offerFor(v2)
+        val snapshot = folder.newFolder("after-crash")
+        try {
+            activation.activate(trust, offer, file(v2.zip)) { _ ->
+                packs.copyRecursively(snapshot, overwrite = true) // the disk at the moment the power goes
+                throw MemoryTrustStore.Crash()
+            }
+        } catch (_: MemoryTrustStore.Crash) { }
+        assertEquals("a pending copy was on disk", 1, snapshot.listFiles()!!.count { it.name.startsWith(".pending-") })
+        val reopened = PackStore(snapshot, compiled) // the next start
+        assertEquals(1, reopened.list().single { it.id == "voice-fr-siwis" }.version)
+        assertEquals("the leftover is removed", 0, snapshot.listFiles()!!.count { it.name.startsWith(".pending-") })
+        assertEquals(0L, trust.floor(UpdateMetadata.VOICE, "voice-fr-siwis"))
     }
 }

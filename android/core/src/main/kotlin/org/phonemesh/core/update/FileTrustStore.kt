@@ -12,6 +12,8 @@ import java.nio.file.StandardCopyOption
  * leftover temp file from a crash is ignored (and replaced by the next save). Nothing here touches History or its version.
  */
 class FileTrustStore(private val dir: File) : TrustStore {
+    override val atomicSlotWrites: Boolean get() = true
+
     private fun slotFile(slot: Int): File { require(slot == 0 || slot == 1) { "two slots only" }; return File(dir, "trust-$slot.bin") }
 
     override fun load(slot: Int): ByteArray? {

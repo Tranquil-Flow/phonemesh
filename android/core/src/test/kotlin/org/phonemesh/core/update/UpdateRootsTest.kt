@@ -23,7 +23,7 @@ class UpdateRootsTest {
         assertEquals(1, r.catalogKeyId); assertEquals(100, r.recoveryKeyId)
         assertArrayEquals(TestKeys.catalog.public, r.catalogKey)
         assertArrayEquals(TestKeys.recovery.public, r.recoveryKey)
-        assertFalse(r.isTest)
+        assertTrue("the known label-derived keys are TEST keys even without a status line", r.isTest)
         assertTrue(UpdateRoots.parse("# status: TEST keys, not the owner's\n$good").isTest)
         assertNotNull(UpdateMetadata.publicKey(r.catalogKey))
     }
@@ -81,7 +81,7 @@ class UpdateRootsTest {
 
     /** What the real swap will rely on: the roots in the build decide, and nothing signed by another key is believed. */
     @Test fun aCatalogOrPolicySignedByAKeyOutsideTheCompiledRootsIsRefused() {
-        val trust = (UpdateTrust.open(MemoryTrustStore(), UpdateRoots.compiled, 3) as UpdateTrust.Opened.Ready).trust
+        val trust = (UpdateTrust.open(MemoryTrustStore(), UpdateRoots.compiled, 3, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         val before = trust.state.encode()
         val entries = listOf(TestCatalogs.pack("voice-fr-siwis", 5))
         for ((name, key, id) in listOf(Triple("another catalog key", TestKeys.catalog2, 1), Triple("a third key", TestKeys.catalog3, 1),
@@ -96,10 +96,10 @@ class UpdateRootsTest {
         assertArrayEquals("nothing changed", before, trust.state.encode())
     }
 
-    @Test fun theBuildKeysAreTheOneFileAndStayMarkedTestUntilTheOwnersReplaceIt() {
-        // The swap is one file: update/public-keys.txt (then re-sign baseline-catalog.pmup). A release gate can read isTest.
+    @Test fun theBuildKeysAreTheOneFileAndOpenOnlyWhenTheyAreRealOrTheBuildAllowsTestKeys() {
+        // The swap is one owner step (sign-baseline writes update/public-keys.txt and baseline-catalog.pmup together).
         val roots = UpdateRoots.compiled
-        assertTrue(roots.isTest)
-        assertTrue(UpdateTrust.open(MemoryTrustStore(), roots, 3) is UpdateTrust.Opened.Ready)
+        assertTrue(UpdateTrust.open(MemoryTrustStore(), roots, 3, allowTestRoots = true) is UpdateTrust.Opened.Ready)
+        assertEquals(roots.isTest, UpdateTrust.open(MemoryTrustStore(), roots, 3) is UpdateTrust.Opened.NotSetUp)
     }
 }

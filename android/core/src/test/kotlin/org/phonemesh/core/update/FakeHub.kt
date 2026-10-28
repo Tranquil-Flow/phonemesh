@@ -7,6 +7,9 @@ import java.io.InputStream
 /** A hub's `/updates/v1/` routes in memory, answering as the real ones do, with hooks to bend an answer. */
 class FakeHub : HubTransport {
     override val route = UpdateRoute.PINNED_HUB_WIFI
+    /** What one answer may carry; the real client holds an answer in memory. */
+    var maxAnswer: Long = Long.MAX_VALUE
+    override val maxAnswerBytes: Long get() = maxAnswer
     var catalog: ByteArray? = null
     var recovery: ByteArray? = null
     val objects = HashMap<String, ByteArray>()

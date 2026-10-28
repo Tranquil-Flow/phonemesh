@@ -13,4 +13,10 @@ interface TrustStore {
 
     /** Replaces the bytes of [slot], durably (synced) before returning; throws [java.io.IOException] if it cannot. */
     fun save(slot: Int, bytes: ByteArray)
+
+    /**
+     * True when a save can never leave a torn slot (temp file, sync, atomic rename). Then a slot that exists but does not decode
+     * is damage, not a crash artifact, and [UpdateTrust.open] reports it instead of quietly using the older slot (U7-12).
+     */
+    val atomicSlotWrites: Boolean get() = false
 }

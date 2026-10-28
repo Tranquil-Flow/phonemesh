@@ -44,6 +44,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testProguardFiles("proguard-rules.pro")
         buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
+        // Hub updates under TEST roots (keys anyone can compute) are for debug, minifiedDebug and demo builds only; release refuses them (U7-1).
+        buildConfigField("boolean", "ALLOW_TEST_ROOTS", "false")
         buildConfigField("boolean", "SECURE_SCREENS", "true")
         buildConfigField("boolean", "PICTURES", picturesBuild.toString())
         buildConfigField("String", "FAKE_COUNTRY", "\"\"")
@@ -64,6 +66,7 @@ android {
     buildTypes {
         debug {
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "true")
+            buildConfigField("boolean", "ALLOW_TEST_ROOTS", "true")
             buildConfigField("boolean", "SECURE_SCREENS", (!screenshotBuild).toString())
             buildConfigField("String", "FAKE_COUNTRY", "\"$fakeCountry\"")
             buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: emulatorPackBaseUrl}\"")
@@ -90,6 +93,8 @@ android {
             applicationIdSuffix = ".demo"
             versionNameSuffix = "-demo"
             buildConfigField("boolean", "ALLOW_UNKNOWN_PACKS", "false")
+            // The demo trusts demo-only keys made fresh on the phone (DemoUpdateKeys); it may run under TEST-marked roots.
+            buildConfigField("boolean", "ALLOW_TEST_ROOTS", "true")
             buildConfigField("boolean", "SECURE_SCREENS", "false")
             buildConfigField("String", "FAKE_COUNTRY", "\"\"")
             buildConfigField("String", "PACK_BASE_URL", "\"${packBaseUrl ?: publishedPackBaseUrl}\"")

@@ -748,4 +748,13 @@
     <string name="archives_failed">Saved chats could not be read.</string>
     <string name="archives_removing">Removing this copy…</string>
     <string name="archives_remove_failed">Not removed. Try again.</string>
+    <string name="updates_not_set_up">Updates are not set up in this version.</string>
+    <string name="updates_off_build">Updates are off. This build is not ready.</string>
+    <string name="updates_test_banner">TEST keys. For testing only.</string>
+    <string name="updates_notice_hub_older">This hub has an older list.</string>
+    <string name="updates_list_date">List made %1$s</string>
+    <string name="updates_list_old">This list is old. Ask the hub\'s owner.</string>
+    <string name="updates_withdrawn">%1$s was withdrawn. Messages still work.</string>
+    <string name="updates_withdrawn_fix">Add a replacement in Settings.</string>
+    <string name="updates_done_restart">Installed. Restart the app to use it.</string>
 </resources>

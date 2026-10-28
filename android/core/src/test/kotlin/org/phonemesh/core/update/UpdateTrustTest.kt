@@ -14,7 +14,7 @@ import org.phonemesh.core.update.UpdateTrust.Reason
 class UpdateTrustTest {
     private val roots get() = TestCatalogs.roots
     private fun open(store: TrustStore = MemoryTrustStore(), reader: Long = 3): UpdateTrust =
-        (UpdateTrust.open(store, roots, reader, TestCatalogs.baseline) as UpdateTrust.Opened.Ready).trust
+        (UpdateTrust.open(store, roots, reader, TestCatalogs.baseline, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
 
     private fun cat(seq: Long, vararg e: UpdateMetadata.Entry, epoch: Long = 1, revoked: List<ByteArray> = emptyList(), minReader: Long = 1,
         key: TestKeys.Pair = TestKeys.catalog, keyId: Int = 1) = TestCatalogs.catalog(epoch, seq, e.toList(), revoked, minReader, key, keyId)
@@ -39,12 +39,12 @@ class UpdateTrustTest {
         val other = TestCatalogs.catalog(1, 1, TestCatalogs.baselineEntries, key = TestKeys.catalog2)
         for (bad in listOf(other, TestCatalogs.baseline.copyOf().also { it[40] = (it[40] + 1).toByte() }, TestCatalogs.policy(2, TestKeys.catalog2), ByteArray(5))) {
             val store = MemoryTrustStore()
-            assertTrue(UpdateTrust.open(store, roots, 3, bad) is UpdateTrust.Opened.BadBaseline)
+            assertTrue(UpdateTrust.open(store, roots, 3, bad, allowTestRoots = true) is UpdateTrust.Opened.BadBaseline)
             assertTrue("nothing written", store.saves.isEmpty())
         }
         // A baseline of another epoch than 1 or with a lower reader than the app's own is also a build mistake.
         val needsNewer = TestCatalogs.catalog(1, 1, TestCatalogs.baselineEntries, minReader = 9)
-        assertTrue(UpdateTrust.open(MemoryTrustStore(), roots, 3, needsNewer) is UpdateTrust.Opened.BadBaseline)
+        assertTrue(UpdateTrust.open(MemoryTrustStore(), roots, 3, needsNewer, allowTestRoots = true) is UpdateTrust.Opened.BadBaseline)
     }
 
     @Test fun aNewerCatalogIsAcceptedAndKept() {
@@ -253,7 +253,7 @@ class UpdateTrustTest {
         t.acceptCatalog(cat(2, pack("voice-fr-siwis", 2)))
         assertEquals(2, store.saves.size)
         val damaged = MemoryTrustStore(store.slots.map { it?.copyOf()?.also { b -> b[b.size / 2] = (b[b.size / 2] + 1).toByte() } })
-        val r = UpdateTrust.open(damaged, roots, 3, TestCatalogs.baseline)
+        val r = UpdateTrust.open(damaged, roots, 3, TestCatalogs.baseline, allowTestRoots = true)
         assertTrue(r is UpdateTrust.Opened.Corrupt)
         assertTrue("and it wrote nothing", damaged.saves.isEmpty())
         val olderDamaged = MemoryTrustStore(listOf(store.slots[0], store.slots[1]?.copyOf()?.also { it[3] = 0 }))
@@ -270,7 +270,7 @@ class UpdateTrustTest {
         assertArrayEquals(open(MemoryTrustStore()).state.encode(), t.state.encode())
         // The same garbage in the other slot of a one-slot history would be real corruption.
         val other = MemoryTrustStore(List(2) { if (it != first.first) first.second.copyOf(100) else null })
-        assertTrue(UpdateTrust.open(other, roots, 3, TestCatalogs.baseline) is UpdateTrust.Opened.Corrupt)
+        assertTrue(UpdateTrust.open(other, roots, 3, TestCatalogs.baseline, allowTestRoots = true) is UpdateTrust.Opened.Corrupt)
     }
 
     @Test fun theStateRecordRoundTripsAndRejectsAnyDamage() {
@@ -286,7 +286,7 @@ class UpdateTrustTest {
     }
 
     @Test fun thePackagedRootsAndBaselineOpenAFreshStore() {
-        val r = UpdateTrust.open(MemoryTrustStore(), UpdateRoots.compiled, 1)
+        val r = UpdateTrust.open(MemoryTrustStore(), UpdateRoots.compiled, 1, allowTestRoots = true)
         assertTrue(r.toString(), r is UpdateTrust.Opened.Ready)
     }
 }

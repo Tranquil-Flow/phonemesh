@@ -21,6 +21,10 @@ import org.phonemesh.core.update.UpdateController.Why
  */
 class UpdatesActivity : ScreenActivity() {
     private lateinit var notice: TextView
+    private lateinit var testBanner: TextView
+    private lateinit var listDate: TextView
+    private lateinit var listOld: TextView
+    private lateinit var withdrawn: LinearLayout
     private lateinit var list: LinearLayout
     private lateinit var check: View
     private var updates: HubUpdates? = null
@@ -37,8 +41,16 @@ class UpdatesActivity : ScreenActivity() {
         column.addView(backBar(getString(R.string.updates_title)))
         column.addView(noteLine())
         column.addView(Ui.text(this, getString(R.string.updates_source), palette.muted).apply { tag = "updates_source" })
+        testBanner = Ui.text(this, getString(R.string.updates_test_banner), palette.bad, bold = true).apply { tag = "updates_test"; visibility = View.GONE }
+        column.addView(testBanner, LinearLayout.LayoutParams(-1, -2).apply { topMargin = pad() / 2 })
         notice = Ui.text(this, "", palette.text, 20f, bold = true).apply { tag = "updates_notice" }
         column.addView(notice, LinearLayout.LayoutParams(-1, -2).apply { topMargin = pad() })
+        listDate = Ui.text(this, "", palette.muted).apply { tag = "updates_list_date"; visibility = View.GONE }
+        column.addView(listDate, LinearLayout.LayoutParams(-1, -2))
+        listOld = Ui.text(this, getString(R.string.updates_list_old), palette.bad, bold = true).apply { tag = "updates_list_old"; visibility = View.GONE }
+        column.addView(listOld, LinearLayout.LayoutParams(-1, -2))
+        withdrawn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "updates_withdrawn" }
+        column.addView(withdrawn, LinearLayout.LayoutParams(-1, -2))
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "updates_list" }
         column.addView(list, LinearLayout.LayoutParams(-1, -2))
         check = Ui.button(this, palette, getString(R.string.updates_check), R.drawable.ic_play).apply {
@@ -81,14 +93,29 @@ class UpdatesActivity : ScreenActivity() {
     override fun render() {
         val opened = updates
         val controller = opened?.controller
-        if (opened == null) { show(R.string.updates_notice_checking, palette.text); list.removeAllViews(); check.visibility = View.GONE; return }
+        fun noExtras() { testBanner.visibility = View.GONE; listDate.visibility = View.GONE; listOld.visibility = View.GONE; withdrawn.removeAllViews() }
+        if (opened == null) { show(R.string.updates_notice_checking, palette.text); list.removeAllViews(); check.visibility = View.GONE; noExtras(); return }
         if (controller == null) {
-            show(opened.problem ?: R.string.updates_off, palette.bad)
-            list.removeAllViews(); check.visibility = View.GONE
+            // "Not set up in this version" is a plain fact, not an error; a damaged or unready state is shown as one.
+            val words = opened.problem ?: R.string.updates_off
+            show(words, if (words == R.string.updates_not_set_up) palette.text else palette.bad)
+            list.removeAllViews(); check.visibility = View.GONE; noExtras()
             return
         }
         check.visibility = View.VISIBLE
+        // Only a debug or demo build can run under TEST keys; the screen says so while it does (U7-3).
+        testBanner.visibility = if (opened.testKeys) View.VISIBLE else View.GONE
         val view = controller.view()
+        listDate.visibility = if (view.listIssuedAt > 0) View.VISIBLE else View.GONE
+        if (view.listIssuedAt > 0) listDate.text = getString(R.string.updates_list_date, Ui.date(this, view.listIssuedAt * 1000, "yMMMd", java.time.ZoneOffset.UTC))
+        listOld.visibility = if (view.listOld) View.VISIBLE else View.GONE
+        withdrawn.removeAllViews()
+        for (id in view.revoked) {
+            val label = core.store.list().firstOrNull { it.id == id }?.label ?: id
+            withdrawn.addView(Ui.text(this, getString(R.string.updates_withdrawn, label), palette.bad, bold = true).apply { tag = "update_withdrawn:$id" },
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = pad() / 2 })
+            withdrawn.addView(Ui.text(this, getString(R.string.updates_withdrawn_fix), palette.text).apply { tag = "update_withdrawn_fix:$id" })
+        }
         // The hub's Wi-Fi may come up after the screen did: look again, a few times at most.
         if (view.notice == Notice.NO_WIFI && retriedForWifi < MAX_WIFI_RETRIES && core.hub?.wire() != null) {
             retriedForWifi++
@@ -112,6 +139,7 @@ class UpdatesActivity : ScreenActivity() {
         Notice.CHECKING -> R.string.updates_notice_checking to palette.text
         Notice.NO_UPDATES -> R.string.updates_notice_none to palette.text
         Notice.UP_TO_DATE -> R.string.updates_notice_current to palette.text
+        Notice.HUB_OLDER -> R.string.updates_notice_hub_older to palette.text
         Notice.UNREACHABLE -> R.string.updates_notice_unreachable to palette.bad
         Notice.LIST_NOT_TRUSTED -> R.string.updates_notice_untrusted to palette.bad
         Notice.NEEDS_NEWER_APP -> R.string.updates_notice_newer_app to palette.bad
@@ -187,7 +215,9 @@ class UpdatesActivity : ScreenActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(Ui.icon(this@UpdatesActivity, R.drawable.ic_check, palette.good, 28))
-                addView(Ui.text(this@UpdatesActivity, getString(R.string.updates_done), palette.good, bold = true).apply { tag = "update_state:${row.id}" },
+                // A recogniser that is already loaded keeps its old model until the app starts again (U7-15).
+                val done = if (row.kind == org.phonemesh.core.update.UpdateMetadata.ENGINE) R.string.updates_done_restart else R.string.updates_done
+                addView(Ui.text(this@UpdatesActivity, getString(done), palette.good, bold = true).apply { tag = "update_state:${row.id}" },
                     LinearLayout.LayoutParams(-2, -2).apply { marginStart = pad() / 2 })
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = pad() / 2 })
             is State.Failed -> {

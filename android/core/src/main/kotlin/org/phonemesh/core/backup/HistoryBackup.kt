@@ -15,11 +15,16 @@ import java.security.MessageDigest
  * record, so a copy streams through one bounded record at a time; cross-references go through an [Index] (memory in
  * tests, a staging database on the phone). Never keys, sessions or packets: there is no record type for them.
  *
- * Deviations from the drafted format, for the crypto review: colours are RGB (as in contacts-only copies), and
- * message text may hold line breaks.
+ * Deviations from the drafted format, for the crypto review: colours are RGB (as in contacts-only copies), message
+ * text may hold line breaks, and schema 2 (v0.1.2) adds chat kind 3, a private group's history, under scope bit 16.
+ * Schema 2 is written exactly when bit 16 is set, so a copy without private groups stays schema 1 with the same
+ * bytes as before. A group's messages name their senders by author label (and by contact when the sender is one):
+ * never a group key, member list, epoch or any other group state (decision 75).
  */
 object HistoryBackup {
     const val SCHEMA = 1
+    /** The schema of a copy with private group history ([GROUPS]); see the class comment. */
+    const val SCHEMA_GROUPS = 2
     const val MAX_CHATS = 10_000
     const val MAX_MESSAGES = 500_000
     const val MAX_REACTIONS = 500_000
@@ -28,15 +33,21 @@ object HistoryBackup {
     const val MAX_PICTURE_BYTES = 3_200
     const val MAX_FRAME = 65_536
 
-    /** Scope bits (spec 5.5): shared-channel chats, old radio chats, unsent and planned text, picture bytes. */
+    /** Scope bits (spec 5.5): shared-channel chats, old radio chats, unsent and planned text, picture bytes, private groups. */
     const val SHARED = 1
     const val LEGACY = 2
     const val UNSENT = 4
     const val PICTURE_DATA = 8
+    const val GROUPS = 16
+    private const val SCOPE_BITS = 31
 
     const val PERSON = 0
     const val SHARED_CHAT = 1
     const val LEGACY_CHAT = 2
+    /** A private group's history, read only: schema 2. */
+    const val GROUP_CHAT = 3
+
+    private fun schemaFor(flags: Int) = if (flags and GROUPS != 0) SCHEMA_GROUPS else SCHEMA
 
     private const val MANIFEST = 1
     private const val CONTACT = 2
@@ -113,7 +124,7 @@ object HistoryBackup {
         private var missing = 0
 
         init {
-            need(m.scopeFlags and 0xF.inv() == 0)
+            need(m.scopeFlags and SCOPE_BITS.inv() == 0)
             need((m.scopeStart == 0L && m.scopeEnd == 0L) || m.scopeStart <= m.scopeEnd)
             need(m.contacts in 0..ContactsBackup.MAX_CONTACTS && m.chats in 0..MAX_CHATS && m.messages in 0..MAX_MESSAGES)
             need(m.reactions in 0..MAX_REACTIONS && m.pictures in 0..MAX_PICTURES && m.missingPictures in 0..m.pictures)
@@ -152,6 +163,7 @@ object HistoryBackup {
                         PERSON -> need(r.contactId != 0L && index.hasContact(r.contactId))
                         SHARED_CHAT -> need(r.contactId == 0L && m.scopeFlags and SHARED != 0)
                         LEGACY_CHAT -> need(r.contactId == 0L && m.scopeFlags and LEGACY != 0)
+                        GROUP_CHAT -> need(r.contactId == 0L && m.scopeFlags and GROUPS != 0 && r.title.isNotEmpty())
                         else -> throw RecordBad()
                     }
                     need(index.addChat(r.id, r.contactId))
@@ -207,7 +219,7 @@ object HistoryBackup {
         init {
             frame(MANIFEST, RecordWriter().apply {
                 val m = manifest
-                u16(SCHEMA); identity(m.sourceIdentity); u64(m.createdAt); u64(m.generation); name(m.ownName, ContactsBackup.MAX_NAME_BYTES)
+                u16(schemaFor(m.scopeFlags)); identity(m.sourceIdentity); u64(m.createdAt); u64(m.generation); name(m.ownName, ContactsBackup.MAX_NAME_BYTES)
                 rgb(m.ownColour); u64(m.scopeStart); u64(m.scopeEnd); u16(m.scopeFlags)
                 u32(m.contacts); u32(m.chats); u32(m.messages); u32(m.reactions); u32(m.pictures); u32(m.missingPictures)
             }.bytes())
@@ -280,9 +292,11 @@ object HistoryBackup {
         val (firstType, mp) = frame()
         need(firstType == MANIFEST)
         val m = RecordReader(mp).run {
-            need(u16() == SCHEMA)
+            val schema = u16()
+            need(schema == SCHEMA || schema == SCHEMA_GROUPS)
             val manifest = Manifest(identity(), u64(), u64(), name(ContactsBackup.MAX_NAME_BYTES), rgb(), u64(), u64(), u16(),
                 u32(), u32(), u32(), u32(), u32(), u32())
+            need(schema == schemaFor(manifest.scopeFlags))
             end(); manifest
         }
         val rules = Rules(m, index)

@@ -192,6 +192,17 @@ class AppCore private constructor(
     private val personPictures = PersonPictures(history)
     private var pictureWorkAt: Long? = null
     val picturesDir: File get() = File(app.filesDir, "pictures").apply { mkdirs() }
+    /** Private scratch for saving and restoring chat copies (backup spec 5.6): never backed up, swept at start. */
+    val backupDir: File get() = File(app.noBackupFilesDir, "backup-work").apply { mkdirs() }
+    /** Where a restored copy's pictures live, one folder per saved copy. */
+    val archivesDir: File get() = File(app.filesDir, "archives").apply { mkdirs() }
+
+    /** A sender's name for a saved copy: what the group knows of a member, a claimed name or an old radio's label; null in a person chat. */
+    fun exportLabel(chat: Chat, sender: String): String? = when (chat.kind) {
+        ChatKind.PRIVATE_GROUP -> personName(chat.address, sender)
+        ChatKind.GROUP, ChatKind.DIRECT -> senderName(sender)
+        ChatKind.PERSON -> null
+    }
     private val t1 = if (BuildConfig.T1_PROBE) RadioProbe.load("T1ProbeRun", app) { radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, it, PRIMARY_CHANNEL) } else null
 
     init {

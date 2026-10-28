@@ -145,4 +145,94 @@ class HistoryBackupTest {
         reader.join()
         assertEquals(10, got.size)
     }
+
+    // ---- Schema 2: a private group's history (decision 75), read only, never a group key or state.
+
+    private fun groupManifest(flags: Int = 0b11000, messages: Int = 4, reactions: Int = 1, pictures: Int = 1, chats: Int = 2) = HistoryBackup.Manifest(
+        hex("me"), 1_790_000_000_000, 5, "Awa", 0x2E7D32, 1_780_000_000_000, 1_790_000_000_000, flags, 1, chats, messages, reactions, pictures, 0)
+
+    private fun groupRecords(): List<HistoryBackup.Record> = listOf(
+        HistoryBackup.Contact(ContactsBackup.Contact(1, hex("kofi"), hex("kofi"), "Kofi", 0x1E88E5, true, null, 1_789_000_000_000)),
+        HistoryBackup.Chat(1, HistoryBackup.PERSON, 1, "Kofi", false),
+        HistoryBackup.Chat(2, HistoryBackup.GROUP_CHAT, 0, "Famille", true),
+        HistoryBackup.Message(1, 2, false, 1, "Kofi", "On se retrouve ?", "fr", 1_789_700_000_000, 0, 0, false, 0, 0),
+        HistoryBackup.Message(2, 2, false, 0, "Yaw", "Oui !", null, 1_789_700_030_000, 0, 1, false, 0, 0),
+        HistoryBackup.Message(3, 2, true, 0, null, "Moi aussi", "fr", 1_789_700_060_000, 1, 2, false, 0, 0),
+        HistoryBackup.Message(4, 2, false, 1, "Kofi", "", null, 1_789_700_090_000, 0, 0, false, 0, 1),
+        HistoryBackup.Reaction(1, 3, 0, "Yaw", "👍", 1_789_700_070_000, false),
+        HistoryBackup.Picture(1, 4, true, 1, 64, 48, hex("sketch"), hex("picture")),
+    )
+
+    private fun writeGroups(m: HistoryBackup.Manifest = groupManifest(), rs: List<HistoryBackup.Record> = groupRecords()) = write(m, rs)
+
+    @Test fun aGroupHistoryMatchesTheIndependentStreamByteForByte() {
+        assertArrayEquals(hex("groups_stream"), writeGroups())
+    }
+
+    @Test fun aGroupHistoryReadsBackAndWritesTheSameBytes() {
+        val got = ArrayList<HistoryBackup.Record>()
+        val m = read(hex("groups_stream"), got)!!
+        assertEquals(9, got.size)
+        val chat = got.filterIsInstance<HistoryBackup.Chat>().single { it.kind == HistoryBackup.GROUP_CHAT }
+        assertEquals("Famille", chat.title); assertEquals(0L, chat.contactId); assertTrue(chat.pinned)
+        val yaw = got.filterIsInstance<HistoryBackup.Message>().single { it.id == 2L }
+        assertEquals("Yaw", yaw.authorLabel); assertEquals(0L, yaw.authorContactId)
+        assertArrayEquals(hex("groups_stream"), write(m, got))
+    }
+
+    @Test fun aCopyWithoutGroupsStaysSchemaOneAndAGroupCopyIsSchemaTwo() {
+        fun schema(b: ByteArray) = java.nio.ByteBuffer.wrap(b, 6, 2).short.toInt()
+        assertEquals(1, schema(write()))
+        assertEquals(2, schema(writeGroups()))
+        assertEquals("schema 1 with groups is not a copy", 1, schema(hex("stream")))
+    }
+
+    /** Recomputes END after [patch] changed the bytes before it, so a rule (not the digest) has to refuse the copy. */
+    private fun reseal(stream: ByteArray, patch: (ByteArray) -> Unit): ByteArray {
+        val before = stream.copyOf(stream.size - 54).also(patch)
+        val records = java.nio.ByteBuffer.wrap(stream, stream.size - 48, 8).long
+        val end = java.nio.ByteBuffer.allocate(54).put(255.toByte()).put(0).putInt(48).putLong(records).putLong(before.size.toLong())
+            .put(java.security.MessageDigest.getInstance("SHA-256").digest(before)).array()
+        return before + end
+    }
+
+    @Test fun theSchemaMustAgreeWithTheScopeBits() {
+        val g = hex("groups_stream")
+        assertNotNull(read(reseal(g) { }))
+        assertNull("schema 1 cannot carry the group bit", read(reseal(g) { it[7] = 1 }))
+        assertNull("schema 3 does not exist", read(reseal(g) { it[7] = 3 }))
+        val plain = hex("stream")
+        assertNotNull(read(reseal(plain) { }))
+        assertNull("schema 2 needs the group bit", read(reseal(plain) { it[7] = 2 }))
+    }
+
+    @Test fun everyFlippedBitCutAndExtraByteOfAGroupHistoryIsRefused() {
+        val s = hex("groups_stream")
+        for (i in s.indices) for (bit in 0..7) {
+            val bad = s.copyOf().also { it[i] = (it[i].toInt() xor (1 shl bit)).toByte() }
+            assertNull("byte $i bit $bit", read(bad))
+        }
+        for (n in 0 until s.size) assertNull("cut at $n", read(s.copyOf(n)))
+        assertNull(read(s + 0))
+    }
+
+    @Test fun theRulesRefuseWhatAGroupHistoryMustNotHold() {
+        val g = groupRecords()
+        assertTrue("a group chat needs the group bit", runCatching { writeGroups(groupManifest(flags = 0b01000), g) }.isFailure)
+        assertTrue("an unknown scope bit", runCatching { writeGroups(groupManifest(flags = 0b111000), g) }.isFailure)
+        assertTrue("a group is not one person's chat", runCatching {
+            // The person's own chat is left out, so contact 1 is free: only the group rule can refuse this.
+            writeGroups(groupManifest(chats = 1), g.toMutableList().also { it.removeAt(1); it[1] = HistoryBackup.Chat(2, HistoryBackup.GROUP_CHAT, 1, "Famille", true) })
+        }.isFailure)
+        assertNotNull("the same without the contact is a good copy", read(writeGroups(groupManifest(chats = 1), g.toMutableList().also { it.removeAt(1); it[1] = HistoryBackup.Chat(2, HistoryBackup.GROUP_CHAT, 0, "Famille", true) })))
+        assertTrue("a group has a name", runCatching {
+            writeGroups(rs = g.toMutableList().also { it[2] = HistoryBackup.Chat(2, HistoryBackup.GROUP_CHAT, 0, "", true) })
+        }.isFailure)
+        assertTrue("a group message names an author who is a contact or none", runCatching {
+            writeGroups(rs = g.toMutableList().also { it[4] = HistoryBackup.Message(2, 2, false, 7, "Yaw", "Oui !", null, 0, 0, 0, false, 0, 0) })
+        }.isFailure)
+        assertTrue("kind 4 is not a chat", runCatching {
+            writeGroups(rs = g.toMutableList().also { it[2] = HistoryBackup.Chat(2, 4, 0, "Famille", true) })
+        }.isFailure)
+    }
 }

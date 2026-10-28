@@ -103,4 +103,59 @@ class BackupStreamTest {
         assertTrue(runCatching { BackupStream.seal(root, BackupFile.Purpose.CONTACTS, ByteArrayInputStream(ByteArray(12)), 11, out) }.isFailure)
         assertTrue(runCatching { BackupStream.seal(root, BackupFile.Purpose.CONTACTS, ByteArrayInputStream(ByteArray(0)), 0, out) }.isFailure)
     }
+
+    // ---- The plaintext as a pull stream: the parser reads it, a problem anywhere is thrown from a read.
+
+    private fun plainOf(file: ByteArray, key: RecoveryKey = root): Result<ByteArray> {
+        val opened = BackupStream.openStream(key, ByteArrayInputStream(file))
+        if (opened !is BackupStream.Streamed.Ok) return Result.failure(IllegalStateException((opened as BackupStream.Streamed.Failed).problem.name))
+        return runCatching { opened.stream.readBytes() }
+    }
+
+    @Test fun aPlainStreamGivesTheSameBytesAsTheCallbackForm() {
+        val big = ByteArray(65_536 * 2 + 5) { ((it * 11 + 1) and 0xFF).toByte() }
+        val file = sealStream(BackupFile.Purpose.HISTORY, big)
+        assertArrayEquals(big, plainOf(file).getOrThrow())
+        val one = (BackupStream.openStream(root, ByteArrayInputStream(file)) as BackupStream.Streamed.Ok).stream
+        assertEquals(big[0].toInt() and 0xFF, one.read())
+        assertEquals(BackupFile.Purpose.HISTORY, one.purpose)
+        assertEquals(big.size.toLong(), one.size)
+    }
+
+    @Test fun aPlainStreamRefusesEveryBreakAndTheEndOfTheFileTooAsAFileAndAKey() {
+        val plain = ByteArray(65_536 + 40) { (it % 97).toByte() }
+        val file = sealStream(BackupFile.Purpose.HISTORY, plain)
+        for (i in 0 until BackupFile.HEADER + 8) for (bit in 0..7) {
+            val bad = file.copyOf().also { it[i] = (it[i].toInt() xor (1 shl bit)).toByte() }
+            assertTrue("header byte $i bit $bit", plainOf(bad).isFailure)
+        }
+        for (i in listOf(BackupFile.HEADER, BackupFile.HEADER + 3, BackupFile.HEADER + 100, 120 + 4 + 65_536 + 16 + 2, file.size - 1, file.size - 20)) {
+            val bad = file.copyOf().also { it[i] = (it[i].toInt() xor 1).toByte() }
+            assertTrue("byte $i", plainOf(bad).isFailure)
+        }
+        for (n in listOf(0, 10, 119, 120, 121, 130, 200, 65_536 + 130, file.size - 17, file.size - 1)) assertTrue("cut $n", plainOf(file.copyOf(n)).isFailure)
+        assertTrue("a byte after the last chunk", plainOf(file + 0).isFailure)
+        assertTrue("another key", plainOf(file, RecoveryKey.generate()).isFailure)
+        assertArrayEquals(plain, plainOf(file).getOrThrow())
+    }
+
+    @Test fun aPlainStreamNamesTheProblemAsTheCallbackFormDoes() {
+        val file = sealStream(BackupFile.Purpose.CONTACTS, ByteArray(100) { 1 })
+        val wrong = BackupStream.openStream(RecoveryKey.generate(), ByteArrayInputStream(file)) as BackupStream.Streamed.Failed
+        assertEquals(BackupFile.Problem.KEY_OR_FILE_DOES_NOT_MATCH, wrong.problem)
+        assertEquals(BackupFile.Problem.NOT_A_BACKUP, (BackupStream.openStream(root, ByteArrayInputStream("hello".toByteArray())) as BackupStream.Streamed.Failed).problem)
+        assertEquals(BackupFile.Problem.TOO_BIG, (BackupStream.openStream(root, ByteArrayInputStream(file), maxSize = 50) as BackupStream.Streamed.Failed).problem)
+        val stream = (BackupStream.openStream(root, ByteArrayInputStream(file + 0)) as BackupStream.Streamed.Ok).stream
+        val e = runCatching { stream.readBytes() }.exceptionOrNull() as BackupStream.Broken
+        assertEquals(BackupFile.Problem.NOT_A_BACKUP, e.problem)
+    }
+
+    @Test fun theHeadShowsThePurposeAndIdBeforeAnyKeyWork() {
+        val file = sealStream(BackupFile.Purpose.HISTORY, ByteArray(10) { 2 })
+        val head = BackupStream.head(file.copyOf(120))!!
+        assertEquals(BackupFile.Purpose.HISTORY, head.purpose)
+        assertArrayEquals(file.copyOfRange(12, 28), head.archiveId)
+        assertEquals(null, BackupStream.head("hello, this is not a saved copy at all".toByteArray()))
+        assertEquals(null, BackupStream.head(file.copyOf(27)))
+    }
 }

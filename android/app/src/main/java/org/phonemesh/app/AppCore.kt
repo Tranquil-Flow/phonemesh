@@ -209,6 +209,7 @@ class AppCore private constructor(
         t1?.start()
         if (BuildConfig.T2_PROBE) RadioProbe.load("T2ProbeRun", app)?.start()
         history.expireWaiting()
+        runCatching { ArchiveImport.recover(history, archivesDir, backupDir) }.onFailure { Log.w(TAG, "saved copies wait", it) }
         history.loseUnfinishedPictures()
         // Pictures received from people finish from their stored pieces, even before a radio is ready.
         main.post { materializePictures() }

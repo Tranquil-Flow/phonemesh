@@ -229,6 +229,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             GroupRows.createTables(db)
             if (!hasColumn(db, "messages", "shared_by")) db.execSQL("ALTER TABLE messages ADD COLUMN shared_by TEXT")
         }
+        // Saved chat copies read back (v0.1.2): read-only archive tables, kept apart from every live table.
+        if (oldVersion < 22) ArchiveRows.createTables(db)
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -992,7 +994,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 21
+        const val VERSION = 22
         const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */

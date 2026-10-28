@@ -62,7 +62,7 @@ class GroupStorageTest {
             val upgraded = History(context, OLD)
             try {
                 val db = upgraded.readableDatabase
-                assertEquals(21, db.version)
+                assertEquals(22, db.version)
                 assertTrue(tables(db).containsAll(groupTables))
                 assertTrue(columns(db, "messages").contains("shared_by"))
                 val chat = upgraded.chats().single { it.name == "Kofi" }

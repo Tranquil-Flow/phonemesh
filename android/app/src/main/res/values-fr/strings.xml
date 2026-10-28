@@ -611,4 +611,7 @@
     <string name="group_need_contacts">Ajoutez d’abord %1$s à vos contacts.</string>
     <string name="group_full">Un groupe compte 20 personnes au plus.</string>
     <string name="group_cannot_send">Ce groupe ne peut pas envoyer.</string>
+    <string name="group_cannot_reach">Impossible de joindre %1$s. Ajoutez ce contact.</string>
+    <string name="group_leave_first">Quittez d’abord le groupe, puis supprimez-le.</string>
+    <string name="group_key_not_sent">Une clé de groupe n’a pas atteint %1$s.</string>
 </resources>

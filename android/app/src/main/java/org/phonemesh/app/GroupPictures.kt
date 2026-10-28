@@ -83,6 +83,21 @@ internal class GroupPictures(private val history: History, private val rows: Gro
         "SELECT idx, data FROM group_picture_pieces WHERE group_id = ? AND account_id = ? AND picture_id = ?", arrayOf(groupId, accountId, pictureId.toString()),
     ).use { c -> buildMap { while (c.moveToNext()) put(c.getInt(0), c.getBlob(1)) } }
 
+    /**
+     * Pieces of pictures that did not complete by [before] go (review G9-10): a picture with its head shows as lost,
+     * parts that waited for a head that never came are simply dropped.
+     */
+    fun expire(before: Long) {
+        val stale = history.readableDatabase.rawQuery(
+            "SELECT group_id, account_id, picture_id FROM group_picture_pieces GROUP BY group_id, account_id, picture_id HAVING MIN(at) < CAST(? AS INTEGER)",
+            arrayOf(before.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(Triple(c.getString(0), c.getString(1), c.getInt(2))) } }
+        for ((g, a, p) in stale) {
+            rows.group(g)?.let { row -> newest(row.chatId, a, p) }?.let { (message, shown) -> if (shown.file == null && !shown.lost) history.setPictureLost(message) }
+            drop(g, a, p)
+        }
+    }
+
     /** Group pictures whose every piece is kept and checks out, oldest first, for the app to write their files. */
     fun ready(): List<Ready> {
         val found = history.readableDatabase.rawQuery(

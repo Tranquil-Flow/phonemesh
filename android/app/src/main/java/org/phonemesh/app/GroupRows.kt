@@ -80,6 +80,11 @@ class GroupRows(private val history: History) {
         db.update("group_members", ContentValues().apply { put("profile", profile) }, "group_id = ? AND account_id = ?", arrayOf(groupId, accountId))
     }
 
+    /** The newest profile [accountId] sent in any group, if one is kept. */
+    fun anyProfile(accountId: String): ByteArray? =
+        db.query("group_profiles", arrayOf("profile"), "account_id = ?", arrayOf(accountId), null, null, "revision DESC", "1")
+            .use { if (it.moveToFirst()) it.getBlob(0) else null }
+
     /** The newest profile [accountId] sent in [groupId] (kept after they leave, for old messages' names). */
     fun profile(groupId: String, accountId: String): ByteArray? =
         db.query("group_profiles", arrayOf("profile"), "group_id = ? AND account_id = ?", arrayOf(groupId, accountId), null, null, null)
@@ -107,6 +112,22 @@ class GroupRows(private val history: History) {
     }
 
     fun dropPrivate(id: Long) { db.delete("group_private_out", "id = ?", arrayOf(id.toString())) }
+
+    /** Private bodies queued before [before] go; returns (contact, kind) of each, so a key that never went can be reported. */
+    fun expirePrivate(before: Long): List<Pair<String, Int>> {
+        val gone = db.query("group_private_out", arrayOf("account_id", "kind"), "at < ?", arrayOf(before.toString()), null, null, "id")
+            .use { c -> buildList { while (c.moveToNext()) add(c.getString(0) to c.getInt(1)) } }
+        if (gone.isNotEmpty()) db.delete("group_private_out", "at < ?", arrayOf(before.toString()))
+        return gone
+    }
+
+    /** Hub-only packets still waiting for a hub since before [before] can no longer be read by anyone: they stop waiting. */
+    fun expireHubOnly(before: Long) {
+        db.execSQL("UPDATE group_outbox SET state = '${AppGroupStore.STATE_EXPIRED}' WHERE state = 'WAITING' AND hub_only = 1 AND created < ?", arrayOf<Any>(before))
+    }
+
+    /** Photo pieces of a member or group photo that never became whole, kept since before [before], go. */
+    fun expirePhotoPieces(before: Long) { db.delete("group_photo_pieces", "at < ?", arrayOf(before.toString())) }
 
     fun addOut(groupId: String, packet: ByteArray, hubOnly: Boolean, messageId: Long?, epoch: Long, seq: Long, audience: Int, at: Long): Long =
         db.insertOrThrow("group_outbox", null, ContentValues().apply {

@@ -59,8 +59,11 @@ class GroupScreensTest {
         /** Others this phone has as contacts besides Awa (a third phone in some tests). */
         val contacts = HashMap<AccountId, ByteArray>()
         override fun identityOf(account: AccountId) = contacts[account] ?: if (account == bea.awa) awaIdentity else null
-        override fun myProfile() = Profile(bea.name, bea.colour)
-        override fun myPhotoPieces(): List<ByteArray> = emptyList()
+        /** A photo for Bea's profile, as pieces sized for a group packet (head first); none by default. */
+        var photoPieces: List<ByteArray> = emptyList()
+        var photoId: ByteArray? = null
+        override fun myProfile() = Profile(bea.name, bea.colour, photoId?.let { Avatar.Photo(it) } ?: Avatar.Letter)
+        override fun myPhotoPieces(): List<ByteArray> = photoPieces
         override fun groupPhotoPieces(group: ByteArray): List<ByteArray> = emptyList()
         var recentToShare: List<GroupShared> = emptyList()
         var recentAsked: Pair<Long, Int>? = null
@@ -357,5 +360,44 @@ class GroupScreensTest {
         until { resumed("ConversationActivity") != null }
         assertEquals(1, TestCore.onMain { core.history.chats().count { it.kind == ChatKind.PRIVATE_GROUP } })
         assertNotNull(group)
+    }
+
+    /** Review G9-2: a member's photo of more than one part reaches the app whole through a hub (it never joined before). */
+    @Test fun beasPhotoOfSeveralPartsBecomesHerPictureInTheGroup() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        val webp = ByteArray(600) { (it * 7 + 3).toByte() }
+        beaGroups.photoPieces = org.phonemesh.core.account.AvatarPhotos.pieces(webp, 64, 64, byteArrayOf(1, 2, 3), group = true)
+        beaGroups.photoId = org.phonemesh.core.account.AvatarPhotos.id(webp)
+        assertEquals("a head and five parts of at most 133 bytes", 6, beaGroups.photoPieces.size)
+        beaGroups.post.profileChanged(2_500_000)
+        beaGroups.post.tick(2_600_000)
+        val sent = beaGroups.packets.toList(); beaGroups.packets.clear()
+        for (p in sent) PersonFixture.deliver(p.sealed.packet) // by radio or hub: the app reads group packets the same way
+        val hex = AppGroupStore.hex(group)
+        until(10_000) { TestCore.onMain { core.groupStore.rows.photo(hex, bea.account) } != null }
+        val photo = TestCore.onMain { core.groupStore.rows.photo(hex, bea.account)!! }
+        assertArrayEquals(webp, photo.webp)
+        assertEquals(64, photo.width)
+        assertNotNull(chatId)
+    }
+
+    /** Review G9-5: deleting the chat of a group this phone is still in is refused; once left it removes chat and group. */
+    @Test fun aLiveGroupCannotBeDeletedFromTheChatListButALeftOneCan() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        val hex = AppGroupStore.hex(group)
+        assertFalse(TestCore.onMain { core.deleteChat(chatId) })
+        assertEquals("Leave the group first. Then delete it.", TestCore.onMain { core.text(core.lastNote!!) })
+        assertNotNull("the chat is still there", TestCore.onMain { core.history.chat(chatId) })
+        assertNotNull("and the group", TestCore.onMain { core.groupStore.rows.group(hex) })
+        assertFalse("the group's own delete is refused as well", TestCore.onMain { core.forgetGroup(chatId) })
+        assertNotNull(TestCore.onMain { core.history.chat(chatId) })
+        // Leaving first: the group is LEFT, and then both go.
+        assertTrue(TestCore.onMain { core.leaveGroup(chatId, null) })
+        assertEquals(GroupMember.State.LEFT, TestCore.onMain { core.groupView(chatId)!!.state })
+        assertTrue(TestCore.onMain { core.deleteChat(chatId) })
+        assertNull(TestCore.onMain { core.history.chat(chatId) })
+        assertNull("no live group behind a deleted chat", TestCore.onMain { core.groupStore.rows.group(hex) })
     }
 }

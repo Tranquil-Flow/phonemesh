@@ -89,7 +89,22 @@ class AppGroupStore(
     }
 
     override fun commit(change: GroupPost.Change): Boolean = try {
-        history.transaction { apply(change); true }
+        val db = history.writableDatabase
+        if (db.inTransaction()) {
+            // Inside another transaction (a hub letter and the cursor that moves past it): a change that fails undoes
+            // itself alone. Ending an inner transaction without success would roll the outer one back with it, so the
+            // hub cursor would never move past the letter (review G9-3).
+            db.execSQL("SAVEPOINT group_change")
+            try {
+                apply(change)
+                db.execSQL("RELEASE group_change")
+                true
+            } catch (e: RuntimeException) {
+                db.execSQL("ROLLBACK TO group_change")
+                db.execSQL("RELEASE group_change")
+                throw e
+            }
+        } else history.transaction { apply(change); true }
     } catch (e: RuntimeException) {
         if (e is IllegalStateException || e is IllegalArgumentException || e is android.database.SQLException) {
             // Nothing of the change was kept; the engine tries again later. The kind only: never group content.
@@ -163,8 +178,7 @@ class AppGroupStore(
                 else -> Unit
             }
             is GroupPost.Event.InvitationArrived -> Unit
-            // Told in the chat from the storage commit on (review G9-7).
-            is GroupPost.Event.CannotReach -> Unit
+            is GroupPost.Event.CannotReach -> history.addNote(chat, GroupNotes.unreachable(e.people.map { it.toString() }), now())
         }
     }
 
@@ -247,6 +261,23 @@ class AppGroupStore(
         }
     }
 
+    /** What [prune] let go of that the person should hear about: people who never got a group key. */
+    class Pruned(val keysNotSent: List<AccountId>)
+
+    /**
+     * Old state goes (review G9-10): finished outbox rows, private bodies and hub-only packets that waited past the
+     * 72-hour horizon (an epoch's key is wiped after that anyway), and picture pieces whose picture never completed.
+     */
+    fun prune(now: Long): Pruned = history.transaction {
+        val horizon = now - GroupMember.KEEP_MS
+        rows.pruneOut(now - OUT_KEEP_MS)
+        val unsent = rows.expirePrivate(horizon)
+        rows.expireHubOnly(horizon)
+        rows.expirePhotoPieces(horizon)
+        pictures.expire(horizon)
+        Pruned(unsent.filter { it.second == GroupControl.KEY }.map { AppMailStore.idOf(it.first) }.distinct())
+    }
+
     /** The private bodies waiting for the Postman, opened: (row id, contact, body). */
     fun privates(): List<Triple<Long, AccountId, Body.Group>> = rows.privates().mapNotNull { r ->
         val bytes = vault.open(r.sealed, privateLabel(r.accountId, r.kind)) ?: run { rows.dropPrivate(r.id); return@mapNotNull null }
@@ -257,6 +288,10 @@ class AppGroupStore(
         const val STATE_WAITING = "WAITING"
         const val STATE_SENT = "SENT"
         const val STATE_HUB = "HUB"
+        /** A hub-only packet that no hub took within the reading horizon (nobody can read it any more). */
+        const val STATE_EXPIRED = "EXPIRED"
+        /** Finished outbox rows of no shown message are kept this long. */
+        const val OUT_KEEP_MS = 7 * 86_400_000L
         /** How many times one group packet goes by radio at most (first airing plus repairs). */
         const val MAX_AIRINGS = 3
 
@@ -308,4 +343,6 @@ object GroupNotes {
     const val REMOVED = "removed"
     fun joined(accounts: List<String>) = "joined:" + accounts.joinToString(",")
     fun left(accounts: List<String>) = "left:" + accounts.joinToString(",")
+    /** People an admin's epoch could not reach because they are no longer contacts (review G9-7). */
+    fun unreachable(accounts: List<String>) = "unreachable:" + accounts.joinToString(",")
 }

@@ -664,11 +664,7 @@ class AppCore private constructor(
     }
 
     /** Drops a group this phone left or was removed from, and its chat. */
-    fun forgetGroup(chatId: Long): Boolean {
-        val g = groupBytes(chatId) ?: return deleteChat(chatId)
-        mailOperation { groups.forget(g) }
-        return deleteChat(chatId)
-    }
+    fun forgetGroup(chatId: Long): Boolean = deleteChat(chatId)
 
     /** "Delivered to N of M" for this phone's own group message: (N, M), or null for any other message. */
     fun groupDelivered(message: Message): Pair<Int, Int>? {
@@ -688,6 +684,7 @@ class AppCore private constructor(
             code == GroupNotes.REMOVED -> text(UiText(R.string.group_removed))
             code.startsWith("joined:") -> names(code.removePrefix("joined:")).joinToString(" ") { text(UiText(R.string.group_joined, listOf(it))) }
             code.startsWith("left:") -> names(code.removePrefix("left:")).joinToString(" ") { text(UiText(R.string.group_left, listOf(it))) }
+            code.startsWith("unreachable:") -> names(code.removePrefix("unreachable:")).joinToString(" ") { text(UiText(R.string.group_cannot_reach, listOf(it))) }
             else -> ""
         }
     }
@@ -1088,10 +1085,34 @@ class AppCore private constructor(
      * contact without a session drops them), then every group packet still waiting goes to a hub or the radio.
      * A private body may go twice after a crash: receivers take it twice without harm.
      */
+    /** Group key rows already reported as "cannot reach" in this run (one note each). */
+    private val keysNoted = HashSet<Long>()
+
+    /** When group state was last pruned (once an hour); tests set it back to run the prune at once. */
+    internal var groupsPrunedAt = 0L
+
+    /** A contact's name, else a name they sent some group, else "Someone". */
+    private fun nameOfAnyone(account: String): String =
+        history.contactRow(account)?.name ?: groupStore.rows.anyProfile(account)?.let { org.phonemesh.core.account.Profile.decode(it)?.name }
+            ?: text(UiText(R.string.group_someone))
+
+    /** Once an hour: old group state goes (review G9-10), and anyone who never got a key is named. */
+    private fun pruneGroups(now: Long) {
+        if (now - groupsPrunedAt < 3_600_000L) return
+        groupsPrunedAt = now
+        for (a in groupStore.prune(now).keysNotSent) note(UiText(R.string.group_key_not_sent, listOf(nameOfAnyone(a.toString()))))
+    }
+
     private fun flushGroups() {
         val now = System.currentTimeMillis()
         for ((rowId, to, body) in groupStore.privates()) {
             val out = try { postman.send(to, body, null, now) } catch (_: IllegalStateException) {
+                if (body.kind == org.phonemesh.core.group.GroupControl.KEY) {
+                    // A key is kept for a contact who may come back (it is let go after the 72-hour horizon, with a note),
+                    // and the person is told who cannot be reached (review G9-7).
+                    if (keysNoted.add(rowId)) note(UiText(R.string.group_cannot_reach, listOf(nameOfAnyone(to.toString()))))
+                    continue
+                }
                 groupStore.rows.dropPrivate(rowId); continue
             } finally { body.wipe() }
             if (out == null) continue
@@ -1307,6 +1328,7 @@ class AppCore private constructor(
         mailOperation {
             if (postman.recoverIncoming(System.currentTimeMillis()).isNotEmpty()) changed(Change.MESSAGES)
             groups.tick(System.currentTimeMillis())
+            pruneGroups(System.currentTimeMillis())
             materializePictures()
             val hubUp = hubWire() != null
             if (!hubUp && (!mayTransmit() || mailBlocked || mailFlight != null)) { schedulePostman(); return@mailOperation }
@@ -2152,6 +2174,16 @@ class AppCore private constructor(
 
     /** Deletes a chat's messages on this phone only (a private chat goes too); its draft and playback go with them. */
     fun deleteChat(chatId: Long): Boolean {
+        // A group this phone still belongs to is left first: deleting only its chat would leave a live group nobody can see (review G9-5).
+        history.chat(chatId)?.takeIf { it.kind == ChatKind.PRIVATE_GROUP }?.let { chat ->
+            val row = groupStore.rows.group(chat.address)
+            if (row != null) {
+                if (!row.left) { note(UiText(R.string.group_leave_first)); return false }
+                // A group this phone left is dropped with its chat; if dropping it fails the chat stays with it.
+                var forgotten = false
+                if (!mailOperation { forgotten = groups.forget(AppGroupStore.hexBytes(chat.address)) } || !forgotten) return false
+            }
+        }
         val playing = playingId?.let { history.message(it) }
         if (playing?.chatId == chatId) stopPlayback()
         setDraft(chatId, null)

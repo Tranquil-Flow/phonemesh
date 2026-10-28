@@ -615,4 +615,7 @@
     <string name="group_need_contacts">Add %1$s to your contacts first.</string>
     <string name="group_full">A group has at most 20 people.</string>
     <string name="group_cannot_send">This group cannot send now.</string>
+    <string name="group_cannot_reach">Cannot reach %1$s. Add them as a contact.</string>
+    <string name="group_leave_first">Leave the group first. Then delete it.</string>
+    <string name="group_key_not_sent">A group key did not reach %1$s.</string>
 </resources>

@@ -1,0 +1,13 @@
+# The signed baseline catalog of the packs every Phonemesh build knows (GeneratedPackCatalog), made with:
+#   phonemesh-hub sign-catalog --key catalog-key.pem --list update-baseline.list --out baseline-release
+# Copy this file into the folder that holds the four pack archives (android/model-packs) first: paths are relative to the list.
+# The result's catalog.pmup is core/src/main/resources/update/baseline-catalog.pmup. Until the owner's real keys arrive it is signed
+# by the TEST catalog key (core/src/main/resources/update/public-keys.txt); re-sign it with the real key, same list, then.
+epoch = 1
+sequence = 1
+issued-at = 1793145600
+min-reader = 1
+pack file=phonemesh-engine-whisper-tiny-1.zip
+pack file=phonemesh-engine-whisper-base-1.zip
+pack file=phonemesh-voice-en-US-ljspeech-1.zip
+pack file=phonemesh-voice-fr-siwis-1.zip

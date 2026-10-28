@@ -240,7 +240,39 @@ All phone calls use TLS pinned to the hub public key from the card (over Wi-Fi o
 | `GET` or `HEAD /updates/v1/objects/<sha256>` | An imported app or pack file; one byte range at most (206, 416 for a bad range); 429 when two downloads are already running or this phone has one |
 
 The update routes only serve what was imported and checked from a USB folder (`UpdateImport`); phones check every byte
-against the signed catalog themselves. The import has no command yet, and no update signing key exists yet.
+against the signed catalog themselves. The hub vouches for nothing.
+
+## Signed updates: signing a release
+
+This command does not start the hub. It is run as `bin/phonemesh-hub sign-catalog ...` (`./gradlew :hub:run --args="sign-catalog ..."`
+while developing). Exit code 0 means done; 2 means refused or misused, and nothing was changed.
+
+| Command | Who | What it does |
+|---|---|---|
+| `sign-catalog --key catalog-key.pem --list packs.list --out release-1 [--public-keys public-keys.txt]` | Owner, on the offline machine | Reads the encrypted catalog key (asks for the passphrase at the terminal, or reads one line from standard input; never from an argument, never printed) and a pack list. Writes `release-1/catalog.pmup` and `release-1/objects/<sha256>`. Needs a new or empty `--out` folder. |
+
+**Pack list** for `sign-catalog` (paths are relative to the list's folder, never outside it, never links; `#` starts a comment):
+
+```text
+epoch = 1
+sequence = 2
+issued-at = 1793145600        # seconds since 1970, UTC. These three are needed.
+# review-after = ...          # default: issued-at + 180 days. A hint only.
+# min-reader = 1              # oldest app versionCode that may read this catalog
+# revoke = <64 hex digits>    # an artifact digest phones must stop using (repeat for more)
+pack file=phonemesh-voice-fr-siwis-1.zip
+pack file=phonemesh-engine-whisper-tiny-1.zip min-app=1 max-app=0 min-api=26
+```
+
+A pack's id, version and kind come from the archive's own `pack.properties`; the tool also sizes it, counts its files, takes the digest of
+its `SHA256SUMS`, and trial-installs it through the phone's own pack rules, so it refuses what a phone would refuse.
+`apk file=... version=N abi=arm64-v8a label=0.1.2 cert=<64 hex digits>` lines exist for app files; phones take packs first.
+`update-baseline.list` is the list for the four packs every build knows.
+
+**Keys.** The key file is the one `make-update-keys.sh` writes (PKCS#8, AES-256-CBC, passphrase). An unencrypted key, another curve, a wrong
+passphrase, the recovery key, or any key that is not the catalog key in the public key file is refused. Until the real public keys are
+handed over, the build carries TEST keys (`core/src/main/resources/update/public-keys.txt`, marked `# status: TEST`) and the tool says so.
+Check a release on another computer with the public keys before it goes on a stick.
 
 Implementation: [config](src/main/kotlin/org/phonemesh/hub/HubConfig.kt),
 [startup](src/main/kotlin/org/phonemesh/hub/HubMain.kt),

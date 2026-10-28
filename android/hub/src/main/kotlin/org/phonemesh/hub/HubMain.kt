@@ -6,12 +6,20 @@ import java.util.Date
 import org.phonemesh.core.hub.HubCard
 import java.util.Locale
 import kotlin.concurrent.thread
+import kotlin.system.exitProcess
 
 /**
  * `phonemesh-hub hub.conf` (or `./gradlew :hub:run --args="/path/to/hub.conf"`): the local hub on macOS, Linux or
  * Windows. `phonemesh-hub --ports` lists the serial ports, to find the radio's.
  */
 fun main(args: Array<String>) {
+    if (args.firstOrNull() in UpdateCli.COMMANDS) {
+        val console = System.console()
+        // With a terminal the passphrase is typed unseen; without one it is the first line of standard input.
+        val passphrase = { if (console != null) console.readPassword("Key passphrase: ") else System.`in`.bufferedReader().readLine()?.toCharArray() }
+        System.out.flush()
+        exitProcess(UpdateCli.run(args.toList(), UpdateCli.Io(System.out, System.err, passphrase)))
+    }
     if (args.firstOrNull() == "--ports") {
         SerialPorts.describe(SerialPorts.list()).forEach(::println)
         return

@@ -1,0 +1,4 @@
+# status: TEST
+# TEST keys: their private parts are derived from a public label. Replace this whole file with the owner's public-keys.txt.
+catalog key_id=1 public_key=03fdb408c61ac3b82df72a7ebde885a12eaf3e5d66c7eaf23c2b84c42820498c88
+recovery key_id=100 public_key=03d866f3bd7de3b7caea20559a84dfda764ae8283b389ced76e866eab709dbead9

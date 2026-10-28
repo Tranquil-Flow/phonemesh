@@ -696,4 +696,5 @@
     <string name="archives_empty_chat">No messages in this chat.</string>
     <string name="archives_storage">Some files of this copy are missing.</string>
     <string name="recovery_check_button">Check a saved copy</string>
+    <string name="updates_off">Updates are off. Saved data is damaged.</string>
 </resources>

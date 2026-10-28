@@ -101,6 +101,8 @@ android {
     testBuildType = "minifiedDebug"
     // minifiedDebug does not inherit src/debug; the minified test build must reach the local test server.
     sourceSets {
+        // Test helpers for signed updates, shared by JVM tests, instrumentation and the demo's tests (never in an APK).
+        listOf("test", "androidTest", "testDemo").forEach { getByName(it) { java.srcDir("src/testKit/java") } }
         getByName("minifiedDebug") {
             manifest.srcFile("src/debug/AndroidManifest.xml")
             res.srcDirs("src/debug/res")

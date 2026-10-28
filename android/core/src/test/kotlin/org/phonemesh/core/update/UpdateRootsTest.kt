@@ -78,4 +78,28 @@ class UpdateRootsTest {
             assertEquals(c.manifestSha256, hex(e.sums))
         }
     }
+
+    /** What the real swap will rely on: the roots in the build decide, and nothing signed by another key is believed. */
+    @Test fun aCatalogOrPolicySignedByAKeyOutsideTheCompiledRootsIsRefused() {
+        val trust = (UpdateTrust.open(MemoryTrustStore(), UpdateRoots.compiled, 3) as UpdateTrust.Opened.Ready).trust
+        val before = trust.state.encode()
+        val entries = listOf(TestCatalogs.pack("voice-fr-siwis", 5))
+        for ((name, key, id) in listOf(Triple("another catalog key", TestKeys.catalog2, 1), Triple("a third key", TestKeys.catalog3, 1),
+            Triple("another key under an unlisted id", TestKeys.catalog2, 2), Triple("the recovery key signing a catalog", TestKeys.recovery, 1))) {
+            val r = trust.acceptCatalog(TestCatalogs.catalog(1, 99, entries, key = key, keyId = id))
+            assertTrue("$name: $r", r is UpdateTrust.CatalogResult.Refused && r.reason == UpdateTrust.Reason.NOT_SIGNED)
+        }
+        // A recovery policy needs the recovery key; a catalog key cannot start a new epoch.
+        val policy = TestCatalogs.policy(2, TestKeys.catalog3, 3, by = TestKeys.catalog2)
+        val p = trust.acceptRecovery(policy)
+        assertTrue("$p", p is UpdateTrust.RecoveryResult.Refused && p.reason == UpdateTrust.Reason.NOT_SIGNED)
+        assertArrayEquals("nothing changed", before, trust.state.encode())
+    }
+
+    @Test fun theBuildKeysAreTheOneFileAndStayMarkedTestUntilTheOwnersReplaceIt() {
+        // The swap is one file: update/public-keys.txt (then re-sign baseline-catalog.pmup). A release gate can read isTest.
+        val roots = UpdateRoots.compiled
+        assertTrue(roots.isTest)
+        assertTrue(UpdateTrust.open(MemoryTrustStore(), roots, 3) is UpdateTrust.Opened.Ready)
+    }
 }

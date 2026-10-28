@@ -1,7 +1,11 @@
 package org.phonemesh.core.hub
 
+import org.phonemesh.core.update.HubResponse
+import org.phonemesh.core.update.HubTransport
+import org.phonemesh.core.update.UpdateRoute
 import org.phonemesh.core.wire.WireV2
 import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -36,6 +40,12 @@ interface HubWire {
 
     /** The hub's newest mail seq: lower than a saved cursor means the hub lost its mail. */
     fun latest(): Long
+
+    /**
+     * The way to this hub's signed updates, or null. Only a hub reached over its own Wi-Fi network (pinned TLS on the joined
+     * network's sockets) can give one: updates never travel over Bluetooth or the radio (decision 45).
+     */
+    fun updates(): HubTransport? = null
 }
 
 /**
@@ -69,7 +79,7 @@ class HubClient(
     /** One letter from the hub's mailbox: its [seq] (the cursor to ask from next), the port it came in on, its bytes. */
     class Mail(val seq: Long, val port: Int, packet: ByteArray) { val packet: ByteArray = packet.copyOf() }
 
-    private class Reply(val status: Int, val body: ByteArray) { val text: String get() = String(body, Charsets.UTF_8) }
+    private class Reply(val status: Int, val body: ByteArray, val lines: List<Pair<String, String>> = emptyList()) { val text: String get() = String(body, Charsets.UTF_8) }
 
     /** The sockets of one request, so the watchdog or [close] can shut them from another thread. */
     private class Attempt {
@@ -159,6 +169,28 @@ class HubClient(
             ?: throw IOException("the hub gave no newest seq")
     }
 
+    /**
+     * The hub's `/updates/v1/` routes over this same pinned Wi-Fi link (hub updates spec 5.4). A `GET` with at most one byte range,
+     * answered in memory (at most [MAX_REPLY] bytes, so the downloader's 256 KiB ranges fit); every header line is kept as sent so
+     * the downloader can refuse a doubled or odd header. Null on the Bluetooth link: bulk updates are Wi-Fi only.
+     */
+    override fun updates(): HubTransport? {
+        if (sockets == null) return null
+        return object : HubTransport {
+            override val route = UpdateRoute.PINNED_HUB_WIFI
+
+            override fun get(path: String, range: LongRange?): HubResponse {
+                if (!path.startsWith("/updates/v1/") || path.any { it.code <= 32 || it.code > 126 || it == '?' || it == '#' }) throw IOException("not an update path")
+                val extra = StringBuilder("Accept-Encoding: identity").append(CRLF)
+                if (range != null) extra.append("Range: bytes=").append(range.first).append('-').append(range.last).append(CRLF)
+                val reply = call("GET", path, ByteArray(0), UPDATE_MILLIS, extra.toString())
+                val headers = HashMap<String, MutableList<String>>()
+                reply.lines.forEach { (k, v) -> headers.getOrPut(k) { ArrayList() }.add(v) }
+                return HubResponse(reply.status, headers, ByteArrayInputStream(reply.body))
+            }
+        }
+    }
+
     private fun letter(line: String): Mail {
         val part = line.trim().split(' ')
         if (part.size != 3) throw IOException("bad mail line")
@@ -169,7 +201,7 @@ class HubClient(
         return Mail(seq, port, ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() })
     }
 
-    private fun call(method: String, path: String, body: ByteArray, totalMillis: Int): Reply {
+    private fun call(method: String, path: String, body: ByteArray, totalMillis: Int, extraHeaders: String = ""): Reply {
         if (closed) throw IOException("this hub link is closed")
         val attempt = Attempt()
         live.add(attempt)
@@ -185,6 +217,7 @@ class HubClient(
             val head = StringBuilder(method).append(' ').append(path).append(" HTTP/1.1").append(CRLF)
             head.append("Host: ").append(host).append(':').append(hubPort).append(CRLF)
             if (method == "POST") head.append("Content-Type: application/octet-stream").append(CRLF).append("Content-Length: ").append(body.size).append(CRLF)
+            head.append(extraHeaders)
             head.append("Connection: close").append(CRLF).append(CRLF)
             val out = secure.output
             out.write(head.toString().toByteArray(Charsets.US_ASCII))
@@ -238,14 +271,15 @@ class HubClient(
         fun reply(): Reply {
             val lines = head().split(CRLF)
             val status = lines[0].split(' ').getOrNull(1)?.toIntOrNull() ?: throw IOException("bad reply")
-            val headers = lines.drop(1).filter { ':' in it }.associate { it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim() }
+            val pairs = lines.drop(1).filter { ':' in it }.map { it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim() }
+            val headers = pairs.toMap()
             val body = when {
                 headers["transfer-encoding"]?.lowercase() == "chunked" -> chunked()
                 headers["content-length"] != null ->
                     exact(headers.getValue("content-length").toIntOrNull()?.takeIf { it in 0..MAX_REPLY } ?: throw IOException("bad length"))
                 else -> rest()
             }
-            return Reply(status, body)
+            return Reply(status, body, pairs)
         }
 
         private fun late() {
@@ -327,6 +361,9 @@ class HubClient(
         const val MAX_CODES = 5000
         const val MAX_HEAD = 8192
         const val MAX_REPLY = 512 * 1024
+
+        /** One update request (a range of at most 256 KiB, or a small catalog): longer than a mail call, still bounded. */
+        const val UPDATE_MILLIS = 60_000
         const val MAX_HEX = WireV2.MAX_PACKET * 2
 
         /** One idle daemon thread at most, ending every request that outlives its budget. */

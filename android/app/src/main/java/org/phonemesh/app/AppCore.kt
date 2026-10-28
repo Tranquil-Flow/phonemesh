@@ -254,7 +254,28 @@ class AppCore private constructor(
         started++
         radioLetGo = false
         main.removeCallbacks(backgroundStop)
-        if (started == 1) { autoReconnect(); hubOpen() }
+        if (started == 1) { autoReconnect(); hubOpen(); openUpdatesSoon() }
+    }
+
+    /**
+     * Hub pack updates (U5). The saved trust state is opened once, off the main thread, and the versions of packs already
+     * installed are reconciled with it. Tests and the demo may set their own [updates] before any screen starts.
+     */
+    @Volatile internal var updates: HubUpdates? = null
+    private val updatesLock = Any()
+    private var updatesOpening = false
+
+    fun hubUpdates(): HubUpdates = synchronized(updatesLock) {
+        updates ?: HubUpdates.open(File(app.filesDir, "updates"), File(app.filesDir, "packs"), store,
+            // Only the hub reached over its own Wi-Fi (pinned TLS on that network) can give a route: never Bluetooth, radio or mobile data.
+            transport = { hub?.wire()?.updates() }).also { updates = it }
+    }
+
+    private fun openUpdatesSoon() {
+        if (updates != null || updatesOpening) return
+        updatesOpening = true
+        Thread({ try { hubUpdates() } catch (e: RuntimeException) { Log.w(TAG, "could not open the update state", e) } finally { updatesOpening = false } }, "updates-open")
+            .apply { isDaemon = true }.start()
     }
 
     /** No background service in 3a: the radio is let go a minute after the last screen closes. */

@@ -692,4 +692,5 @@
     <string name="archives_empty_chat">Aucun message dans cette discussion.</string>
     <string name="archives_storage">Des fichiers de cette copie manquent.</string>
     <string name="recovery_check_button">Vérifier une copie</string>
+    <string name="updates_off">Mises à jour coupées. Données abîmées.</string>
 </resources>

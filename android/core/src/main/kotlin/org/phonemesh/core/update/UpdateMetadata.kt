@@ -11,7 +11,7 @@ import java.security.spec.ECPoint
  * Signed update metadata, `PMUP` (hub updates spec 5.2; decision 45). An envelope is
  * `PMUP | schema 1 | kind | key id u16 | payload length u32 | payload | raw P-256 signature (64, low S)`, signed over
  * `"phonemesh-update-v1\0" | header | payload`. Kind 1 is a release catalog signed by the catalog key; kind 2 a
- * recovery policy signed only by the recovery key. Not used by the app or hub yet: this is the verifier both will share.
+ * recovery policy signed only by the recovery key. The verifier the hub's signing and import tools and the phone's [UpdateTrust] share.
  * Nothing here trusts a URL, a file name or the hub: only these bytes and the keys the app ships.
  */
 object UpdateMetadata {

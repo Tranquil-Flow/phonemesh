@@ -229,7 +229,11 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
             .forEach { it.deleteRecursively() }
     }
 
-    fun install(input: InputStream): PackInfo {
+    /**
+     * Installs [input]. With [retainOlder] the older copies of the same pack stay on disk (the new one is the one [list]
+     * returns, being newer) until [retireOlder], so a caller can still go back with [discard] if the new pack does not open.
+     */
+    fun install(input: InputStream, retainOlder: Boolean = false): PackInfo {
         require(maxBytes > 0)
         val stage = directory.resolve("$STAGING${UUID.randomUUID()}")
         activeStaging += stage.absolutePath // before the directory exists, so a sweep never sees it unclaimed
@@ -253,7 +257,7 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
             // A same-version pack with another manifest is replaced by this verified one.
             val ready = directory.resolve(UUID.randomUUID().toString())
             if (!stage.renameTo(ready)) throw IOException("Could not publish model pack")
-            existing.forEach { forget(it.root); it.root.deleteRecursively() } // Older or superseded copies of this pack only.
+            if (!retainOlder) existing.forEach { forget(it.root); it.root.deleteRecursively() } // Older or superseded copies of this pack only.
             return info.copy(root = ready)
         } catch (error: Throwable) {
             stage.deleteRecursively() // Only this failed import's newly-created staging files.
@@ -276,6 +280,14 @@ class PackStore(private val directory: File, private val catalog: List<CatalogEn
 
     fun list(): List<PackInfo> = installed().groupBy { it.id }.values.map { same -> same.maxBy { it.version } }
         .sortedWith(compareBy({ it.kind }, { it.label }))
+
+    /** Removes one installed copy, for example a just-installed pack that did not open. */
+    fun discard(root: File) { forget(root); root.deleteRecursively() }
+
+    /** Removes the other, older copies of [kept]'s pack once [kept] has been accepted for good. */
+    fun retireOlder(kept: PackInfo) {
+        installed().filter { it.id == kept.id && it.root != kept.root && it.version <= kept.version }.forEach { discard(it.root) }
+    }
 
     fun remove(id: String): Boolean {
         val matching = installed().filter { it.id == id }

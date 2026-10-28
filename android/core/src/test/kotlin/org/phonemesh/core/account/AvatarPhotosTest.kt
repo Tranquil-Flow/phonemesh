@@ -63,4 +63,28 @@ class AvatarPhotosTest {
         assertNull(Body.decode(byteArrayOf(9, 1, 2, 3)))
         assertTrue(runCatching { Body.encode(Body.AvatarPiece(byteArrayOf(1, 2))) }.isFailure)
     }
+
+    /** Review G9-2: group and member photos are cut for a group packet (133 bytes); joining must use that cut. */
+    @Test fun aGroupCutPhotoJoinsBackAtEverySize() {
+        for (size in listOf(1, 133, 134, 266, 267, 600, 1024)) {
+            val photo = ByteArray(size) { (it * 7 + 3).toByte() }
+            val pieces = AvatarPhotos.pieces(photo, 64, 64, sketch, group = true)
+            assertEquals("head + ceil($size / 133) parts", 1 + (size + 132) / 133, pieces.size)
+            val joined = AvatarPhotos.join(pieces.reversed(), group = true)
+            assertNotNull("$size bytes join", joined)
+            assertArrayEquals(photo, joined!!.webp)
+            if (pieces.size > 2) assertNull("$size bytes: the chat-sized cut does not read a group cut", AvatarPhotos.join(pieces, group = false))
+        }
+    }
+
+    @Test fun aPartThatIsNotAFullGroupPartIsRefused() {
+        val photo = ByteArray(400) { (it * 5 + 1).toByte() }
+        val decoded = AvatarPhotos.pieces(photo, 64, 64, sketch, group = true).map { PictureWire.decodeGroup(it)!! }
+        val head = decoded.filterIsInstance<PictureWire.Head>().single()
+        val parts = decoded.filterIsInstance<PictureWire.Part>().associate { it.index to it.data }
+        assertEquals(4, parts.size)
+        assertArrayEquals(photo, org.phonemesh.core.PictureJoin.join(head, parts, PictureWire.PART_BYTES_GROUP))
+        assertNull("a middle part shorter than the cut", org.phonemesh.core.PictureJoin.join(head, parts + (1 to parts.getValue(1).copyOf(100)), PictureWire.PART_BYTES_GROUP))
+        assertNull("the group cut is not the chat cut", org.phonemesh.core.PictureJoin.join(head, parts, PictureWire.PART_BYTES_V2))
+    }
 }

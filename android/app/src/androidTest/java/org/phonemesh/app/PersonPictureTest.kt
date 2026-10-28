@@ -245,7 +245,7 @@ class PersonPictureTest {
         val got = (listOf(air[0]) + mixed(air.drop(1), 3)).mapNotNull { bea.postman.receive(it, 2_000) }
         val head = PictureWire.decodeV2(got.map { it.body }.filterIsInstance<Body.PictureHead>().single().bytes) as PictureWire.Head
         val parts = got.map { it.body }.filterIsInstance<Body.PicturePart>().map { PictureWire.decodeV2(it.bytes) as PictureWire.Part }.associate { it.index to it.data }
-        assertArrayEquals(picture.bytes, PictureJoin.join(head, parts))
+        assertArrayEquals(picture.bytes, PictureJoin.join(head, parts, PictureWire.PART_BYTES_V2))
         assertTrue("the head names the bubble", got.first().ref.contentEquals(AppMailStore.refBytes(TestCore.onMain { core.history.message(message.id)!!.packetId!! })))
         deliver(bea.postman.due(60_000).single().packet)
         TestCore.onMain {
@@ -322,7 +322,7 @@ class PersonPictureTest {
         val got = TestCore.radio.broadcasts.mapNotNull { bea.postman.receive(it.payload, 2_000) }
         val head = PictureWire.decodeV2(got.map { it.body }.filterIsInstance<Body.PictureHead>().single().bytes) as PictureWire.Head
         val parts = got.map { it.body }.filterIsInstance<Body.PicturePart>().map { PictureWire.decodeV2(it.bytes) as PictureWire.Part }.associate { it.index to it.data }
-        assertArrayEquals(picture.bytes, PictureJoin.join(head, parts))
+        assertArrayEquals(picture.bytes, PictureJoin.join(head, parts, PictureWire.PART_BYTES_V2))
         deliver(bea.postman.due(60_000).single().packet)
         TestCore.onMain {
             val live = core.history.outbox(bea.account).filter { it.messageId == id && it.state != "SUPERSEDED" }

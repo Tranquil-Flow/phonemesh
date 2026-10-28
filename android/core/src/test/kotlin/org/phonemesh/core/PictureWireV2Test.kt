@@ -83,22 +83,22 @@ class PictureWireV2Test {
         val packets = PictureWire.splitV2(9, PictureCodec.WEBP, 64, 48, original, sketch)
         val head = packets[0] as PictureWire.Head
         val parts = packets.drop(1).map { it as PictureWire.Part }.shuffled(Random(4)).associate { it.index to it.data }
-        assertArrayEquals(original, PictureJoin.join(head, parts))
+        assertArrayEquals(original, PictureJoin.join(head, parts, PictureWire.PART_BYTES_V2))
     }
 
     @Test fun joinRefusesAMissingShortOrCorruptPart() {
         val packets = PictureWire.splitV2(9, PictureCodec.WEBP, 64, 48, picture(1000), sketch)
         val head = packets[0] as PictureWire.Head
         val parts = packets.drop(1).map { it as PictureWire.Part }.associate { it.index to it.data }
-        assertNull("a part is missing", PictureJoin.join(head, parts - 2))
-        assertNull("a middle part is short", PictureJoin.join(head, parts + (1 to parts.getValue(1).copyOf(100))))
-        assertNull("a part is longer than the wire allows", PictureJoin.join(head, parts + (2 to parts.getValue(2) + byteArrayOf(1))))
-        assertNull("the CRC-32 fails", PictureJoin.join(head, parts + (0 to parts.getValue(0).copyOf().also { it[0] = (it[0] + 1).toByte() })))
+        assertNull("a part is missing", PictureJoin.join(head, parts - 2, PictureWire.PART_BYTES_V2))
+        assertNull("a middle part is short", PictureJoin.join(head, parts + (1 to parts.getValue(1).copyOf(100)), PictureWire.PART_BYTES_V2))
+        assertNull("a part is longer than the wire allows", PictureJoin.join(head, parts + (2 to parts.getValue(2) + byteArrayOf(1)), PictureWire.PART_BYTES_V2))
+        assertNull("the CRC-32 fails", PictureJoin.join(head, parts + (0 to parts.getValue(0).copyOf().also { it[0] = (it[0] + 1).toByte() }), PictureWire.PART_BYTES_V2))
     }
 
     @Test fun aSketchOnlyPictureJoinsToNothing() {
         val packets = PictureWire.splitV2(3, PictureCodec.SKETCH, 8, 8, ByteArray(0), sketch)
         assertEquals(1, packets.size)
-        assertEquals(0, PictureJoin.join(packets[0] as PictureWire.Head, emptyMap())!!.size)
+        assertEquals(0, PictureJoin.join(packets[0] as PictureWire.Head, emptyMap(), PictureWire.PART_BYTES_V2)!!.size)
     }
 }

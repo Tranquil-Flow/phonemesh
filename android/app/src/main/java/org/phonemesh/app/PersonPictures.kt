@@ -93,7 +93,7 @@ internal class PersonPictures(private val history: History) {
         val all = pieces(accountId, pictureId)
         val head = (all[HEAD]?.let { PictureWire.decodeV2(it) } as? PictureWire.Head) ?: return
         history.setPictureProgress(messageId, (0 until head.parts).count { it in all })
-        if ((0 until head.parts).all { it in all } && PictureJoin.join(head, all) == null) lose(messageId, accountId, pictureId)
+        if ((0 until head.parts).all { it in all } && PictureJoin.join(head, all, PictureWire.PART_BYTES_V2) == null) lose(messageId, accountId, pictureId)
     }
 
     private fun lose(messageId: Long, accountId: String, pictureId: Int) {
@@ -144,7 +144,7 @@ internal class PersonPictures(private val history: History) {
         return rows.mapNotNull { (messageId, account, pictureId) ->
             val all = pieces(account, pictureId)
             val head = (all[HEAD]?.let { PictureWire.decodeV2(it) } as? PictureWire.Head) ?: return@mapNotNull null
-            PictureJoin.join(head, all)?.let { Ready(messageId, account, pictureId, head.parts, it) }
+            PictureJoin.join(head, all, PictureWire.PART_BYTES_V2)?.let { Ready(messageId, account, pictureId, head.parts, it) }
         }
     }
 

@@ -52,7 +52,7 @@ object AvatarPhotos {
             if (earlier != null && !earlier.contentEquals(p.data)) return null
         }
         if (parts.size != head.parts) return null
-        val webp = PictureJoin.join(head, parts) ?: return null
+        val webp = PictureJoin.join(head, parts, if (group) PictureWire.PART_BYTES_GROUP else PictureWire.PART_BYTES_V2) ?: return null
         val id = id(webp)
         if ((((id[0].toInt() and 0xFF) shl 8) or (id[1].toInt() and 0xFF)) != head.id) return null
         return Photo(webp, head.width, head.height)

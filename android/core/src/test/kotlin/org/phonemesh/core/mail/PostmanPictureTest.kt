@@ -113,7 +113,7 @@ class PostmanPictureTest {
         val bodies = side.store.kept.map { it.body }
         val head = bodies.filterIsInstance<Body.PictureHead>().firstOrNull()?.let { PictureWire.decodeV2(it.bytes) as PictureWire.Head } ?: return null
         val parts = bodies.filterIsInstance<Body.PicturePart>().map { PictureWire.decodeV2(it.bytes) as PictureWire.Part }.associate { it.index to it.data }
-        return PictureJoin.join(head, parts)
+        return PictureJoin.join(head, parts, PictureWire.PART_BYTES_V2)
     }
 
     @Test fun everyPacketOfAPictureIsSealedAloneKeptAndFitsTheRadio() {

@@ -4,9 +4,13 @@ What a designer or tester can do in the demo build ("Phonemesh Demo"), screen by
 real app. Only the radio, the other people, their phones and the local hub are simulated (see
 `docs/specs/2026-10-25-demo-build-design.md`).
 
-**Verified** means walked on an Android 15 emulator on 2026-10-26, with no crash reported in the system log during the
-walk. The laptop launcher was run once from a clean folder on a Mac with Apple silicon: first start 11 minutes,
-6.2 GB on disk; a second clean Mac run took 3.5 minutes on a faster connection. **Not yet** means the screen is reachable but was not walked.
+**Verified** in the tables up to "Not in the demo" means walked on an Android 15 emulator on 2026-10-26 on an earlier demo
+build, with no crash reported in the system log during the walk. Those results are historical: they were not repeated for
+v0.1.2 and are not counted as v0.1.2 checks (see [v0.1.2 demo pre-release](#v012-demo-pre-release) for what was done
+on that build). That includes the voice, microphone and speaker rows, which this release did not exercise. The laptop
+launcher was run once from a clean folder on a Mac with Apple silicon: first start 11 minutes, 6.2 GB on disk; a second
+clean Mac run took 3.5 minutes on a faster connection. Those measurements belong to the earlier build as well. **Not yet**
+means the screen is reachable but was not walked.
 
 Demo controls open from the notification "Phonemesh Demo · Tap for the demo controls" (pull down from the top of the
 screen) or from the "Demo controls" icon.
@@ -96,3 +100,63 @@ through the hub's pinned key. This is the shipped behaviour, worth a design look
 - **Pairing a Bluetooth radio, and Android's Bluetooth permission and "turn on Bluetooth" screens.** The demo radio
   needs neither.
 - **Receiving voice packs from a friend's phone.** This needs a second device. Two phones with the demo can do it.
+
+## v0.1.2 demo pre-release
+
+The demo-only pre-release [v0.1.2-demo.1](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.2-demo.1) was built from
+commit `fa49a8c`. It adds private groups and the saved-chats flow to the demo, and keeps the simulated hub pack update. It is
+not the production v0.1.2 release, which is unsigned and unpublished. The checks below are the only ones made on this build.
+Nothing above was re-walked on it.
+
+| What | How it was checked | Result |
+| --- | --- | --- |
+| The seven release files | Downloaded anonymously and compared byte for byte (2026-10-28) | Match |
+| arm64-v8a demo APK | Installed on an Android 15 arm64 emulator and read back from the device | Identical to the release file |
+| A private group message | Typed a message into the Market group, silently (no microphone, no sound) | Showed **Delivered to 2 of 2**; Kofi and Yaw replied; no new crash or demo errors in the logs |
+| x86_64 demo APK | Built and checked for its architecture | **Not run** on an x86_64 emulator |
+| armeabi-v7a demo APK | Built | **Not run** |
+| Laptop launcher | Unchanged from the earlier build | **Not run** through a fresh download for this pre-release |
+| Agent setup block on the release page | Remote text and public page read back | Text verified; no end-to-end agent setup run is recorded here |
+
+### v0.1.2 flows in the demo
+
+| Flow | How, in the demo | Real or simulated | Status on this build |
+| --- | --- | --- | --- |
+| Start a group | **Add someone**, **New private group**, choose Kofi and Yaw (and Ama once accepted), name it, **Create group** | Real group code; simulated people | Covered by app instrumentation tests; the Market message above is the only demo-build walk |
+| Kofi, Ama and Yaw join | They tap **Join** a few seconds after the invitation | Simulated people | Part of the Market message walk for Kofi and Yaw; Ama not separately recorded |
+| Kofi and Yaw answer in the group | Write in the group | Simulated people | Yes (both replied) |
+| Ama in a group | She joins, never writes | Simulated | Not separately walked |
+| Group details, group code, **Leave group** | Tap the group's title | Real | Instrumentation tests; no demo walk |
+| A member outside your contacts, or a group change waiting for an absent member | Not staged by the demo | None | **Not in the demo** |
+| Pack update **Demo voice** | Settings, Local hub, **Updates**, **Download** | Real screens, verifier and downloader; keys made on the phone at each start | Verified on 2026-10-26 on an earlier build (see Hub above); not re-walked on `fa49a8c` |
+| Save and restore chats | **Settings → Recovery kit → Contacts and chats** | Real | Instrumentation coverage only; no manual demo walk in this release |
+
+### Instrumentation coverage, not demo walks
+
+These came from the app's own emulator tests, not from using the demo as a person would. They do not show that the demo build
+behaves the same.
+
+- Broad silent run on `232cadb`: 868 selected, 857 passed, 11 explicit skips, 8 speech tests excluded; every selector reconciled.
+- Accessibility fix: two assertions failed first because three screens lacked accessible names (group chooser row, group member
+  row, recent-history switch). After the names were added, 11 focused tests passed: nine group-screen tests and two accessibility
+  tests (English and French, light and dark). The test wrapper expected nine and refused; the 11 passes are adjudicated
+  separately, and this is not a fresh full-suite run.
+- All three independent accessible-name deletion mutants compiled and failed the intended assertions. Restored GREEN
+  passed, followed by a final 12-test focused pass including the non-skipped secure-window check.
+- The 22 group, 20 backup and eight Updates light/dark frames were captured, pulled and visually reviewed. The current
+  source/selector composite reconciles 862 passes and 10 explicit skips across 872 selected tests, not a fresh broad run.
+  The eight speech exclusions remain. Details and capture-recovery limits are in [Android verification](android-verification.md).
+
+### Later production-candidate demo check
+
+On software source `c02cb4a`, the newly built arm64 demo APK was over-installed without resetting the existing demo
+and read back byte for byte. A fresh typed **v012 candidate checked** message in the existing private Market group
+showed **Delivered to 2 of 2**. Kofi and Yaw replied; the sent bubble was above the later replies and was verified
+after scrolling back. No demo crash appeared in the crash buffer. This was silent: no microphone or speech check.
+It did not create a new group, run x86_64 or requalify a fresh launcher download. The published `v0.1.2-demo.1`
+assets and tag were not replaced.
+
+### Not shown by any v0.1.2 check
+
+Physical phones, radios, real speech or microphone use, range, battery, the owner-signed v0.1.1 to v0.1.2 upgrade, and the
+production update keys.

@@ -1,5 +1,127 @@
 # Android qualification record
 
+## v0.1.2 production candidate, 2026-10-29
+
+**Software qualification, not a signed release.** The software source is
+`c02cb4a2a1866daa52e7344fa20e5dbce534c095`; later documentation-only commits do not change
+these application inputs. Production version is **0.1.2 / code 3**, schema **22**. The published
+`v0.1.2-demo.1` remains a separate pre-release on `fa49a8c`. No main promotion, production tag
+or production publication is established here.
+
+### Source and test reconciliation
+
+- Broad silent instrumentation on `232cadb5048735da48226f8e0a403672c809ebfc`: **857 passes,
+  11 explicit skips, 868 selected**, with eight real-speech tests excluded. Every selected
+  terminal was reconciled; none was missing, extra, conflicting or failing.
+- `fa49a8c` changed version metadata and added two release-unit assertions. Both wrong-version
+  mutants were caught. The later production delta is exactly three accessible-name assignments
+  in `GroupPeopleActivity` and `GroupDetailsActivity`; no wire, storage, group-key or routing
+  implementation changed. Capture callbacks and the new qualification class are test-only.
+- Two intended missing-description assertions failed before the names were added. The old
+  GREEN wrapper expected nine tests although eleven passed; its refusal remains preserved,
+  separately adjudicated, rather than rewritten as a product failure or a successful wrapper.
+- Each of the three new names was independently deleted. Every mutant compiled and failed
+  its intended missing-description assertion: chooser row, member row, recent-history switch.
+  All original bytes were restored and hash-checked. Earlier transformation-only failures are
+  retained and are not counted as killed mutants.
+- Restored-source GREEN passed eleven focused tests. The final secure-build run passed
+  **12 tests without skips**: nine `GroupScreensTest` methods, the two new accessibility methods
+  (English/French and light/dark), and `ScreenChecksTest.everyScreenIsSecure`.
+- The current exact-selector **composite** reconciles **862 passes and 10 explicit skips across
+  872 selected tests**. It replaces the affected old selectors with fresh outcomes and adds the
+  four new qualification/capture methods. All inherited raw receipts and unchanged source
+  hashes were checked. **This is not a fresh whole-suite run.** The original 857/11 R1 result
+  remains historical and unchanged; the eight speech exclusions remain.
+
+The ten remaining composite skips are:
+
+- `CaptionClipExport.exportCaptionClips`
+- `HelpFrameRate.measureTheHelpPage`
+- `HowToClipExport.exportHowToClips`
+- `NameClipExport.exportNameClip`
+- `PackDownloadTest.lowSpaceIsRefusedBeforeDownloading`
+- `PackDownloadTest.resumesAfterTheConnectionDrops`
+- `PackEquivalenceTest.candidateDecoderTranscriptsAndTiming`
+- `PackEquivalenceTest.singleVariantSynthesis`
+- `ScreenshotTour.captureEveryScreen`
+- `ScreenshotTour.captureAccountsPolishStates`
+
+### Captures and visual review
+
+**50 expected frames** were captured and pulled: 22 group, 20 backup and eight Updates,
+with exact filename sets derived from the capture labels. Both light and dark were reviewed,
+including the admin-leave dialog, lower group-details controls and the production Updates-off
+screen. The group flow, member actions, recent-history switch and code were compared with the
+approved mockup; native scrolling and platform dialogs are not pixel-identical mockups.
+No blocking layout/theme defect or ANR overlay was found. Minor existing English plurals such
+as "1 pictures are missing" remain; this was not a redesign or full language audit.
+
+The first capture attempt completed groups and light backup, then Updates met a null initial
+accessibility root. A bounded wait for the target package's root plus an explicit package
+assertion corrected that capture-readiness failure without removing theme or ANR checks.
+Updates and dark backup then passed. Earlier passed frames were preserved and hash-matched:
+**the capture set is composite across attempts**, not one uninterrupted successful invocation.
+Independent light/dark fixtures generate fresh group codes and recovery cards; they do not
+prove same-identity theme-toggle equivalence. The group-name image shows a scrollable top of
+the form, not every control fitting at once.
+
+Only six reviewed conversation/saved-list/Updates-off fixture frames are used in the README.
+Recovery-card and restore-word frames stay out of public documentation, even as disposable
+fixtures. The normal secure build was restored and its non-skipped window-flag test passed.
+
+### Canonical build checks and measured unsigned APKs
+
+Directly in the public tree, with Java 17 and Python path injection removed:
+
+```sh
+env -u PYTHONPATH -u PYTHONHOME \
+  JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home \
+  scripts/check.sh
+```
+
+The gate ended **CHECK_OK**: Ruff, 298 Python tests, six network-boundary tests, Android lint,
+APK size/network checks, assembly, hub distribution and 24 Linux-bridge tests. Its JUnit
+reports have no failures, errors or skips:
+
+| Canonical JUnit task | Tests |
+| --- | ---: |
+| core test | 773 |
+| hub test | 176 |
+| radio-ble debug unit | 112 |
+| app debug unit | 132 |
+| app release unit | 139 |
+| app demo unit | 165 |
+
+These are task-specific executions, not a deduplicated cross-variant test count.
+
+| Public-tree unsigned release APK | Bytes | SHA-256 |
+| --- | ---: | --- |
+| arm64-v8a | 16,795,788 | `a16c5d16d612ef625af199c7b1031893661dd86261a37b0fab8848ebe474b57d` |
+| armeabi-v7a | 14,786,086 | `447d30fb0eb054e1c13dc890e1bed08f22622844e1e0496669117e960ec03c48` |
+
+These are **unsigned public-tree measurements**, not signed or isolated-build hashes. Signing
+inputs must come from the separately verified corresponding-source-ZIP build; its manifest,
+build receipt and artifact checks bind the exact documentation-inclusive candidate. Never
+infer byte reproducibility from equal lengths. Owner-signed ceilings remain 16,901,233 bytes
+for arm64 and 14,890,111 for armv7; signed values do not exist yet.
+
+### Fresh silent demo check and remaining exclusions
+
+The new arm64 demo APK was over-installed without resetting its existing data and read back
+byte for byte. The existing private Market group accepted a fresh typed
+**v012 candidate checked** message and visibly showed **Delivered to 2 of 2**; Kofi and Yaw
+replied. The sent bubble was above later replies and was checked after scrolling. No demo
+crash appeared in the crash buffer. The published demo assets and tag stayed unchanged.
+
+No physical phone, microphone, real speech, real radio, range or battery check was performed.
+x86_64 runtime, a clean launcher first-start, the owner's real update-key round-trip, APK
+signing and a signed v0.1.1-to-v0.1.2 data-preserving upgrade remain unverified here. Production
+updates stay off under TEST-root refusal. Only the owner can supply the offline-signed public
+resource pair and sign APKs; a key swap requires a tested commit and entirely rebuilt signing
+inputs. Promotion/publication need separate explicit approval.
+
+The sections below are historical records, not claims of current physical qualification.
+
 ## v0.1.1 branch (not released), 2026-10-27
 
 **Not a release record.** Emulator only (API 35, software graphics); no phones, radios or microphone were used.

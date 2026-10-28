@@ -32,7 +32,7 @@ instead of a long number. The app is in French and English.
 
 ## Status
 
-**v0.1.1, released 2026-10-27.** Download the APK for your phone from the
+**Latest release: v0.1.1, released 2026-10-27.** Download the APK for your phone from the
 [v0.1.1 release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1) and check
 its SHA-256 against `SHA256SUMS` there. The [release notes](docs/releases/v0.1.1.md) say
 what is new, what was tested and what was not.
@@ -43,10 +43,27 @@ fewer resends on a busy radio. It was checked on an emulator; v0.1.0 was tested 
 phones and a small number of radios. It is not a finished product and makes no range,
 capacity or delivery guarantee.
 
-**Try it without a radio.** Phonemesh Demo is the real app with a pretend radio, pretend
-people and a pretend local hub. It runs on an Android phone, or in an emulator on a Mac.
-Downloads and step-by-step instructions are on the
-[v0.1.1 release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.1).
+**The v0.1.2 production release is not signed or published.** The `v0.1.2` branch adds
+[private group chats](#private-groups), [saved chats](#saving-your-chats) and hub speech-pack updates.
+Release builds currently refuse the TEST update keys, so their Updates screen says
+"Updates are not set up in this version." The [candidate notes](docs/releases/v0.1.2.md)
+separate completed checks from owner signing and physical tests that remain.
+
+**Try the v0.1.2 demo without a radio.** Download the laptop ZIP from the
+[demo pre-release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.2-demo.1),
+unzip it and open **Start Phonemesh Demo.command** on a Mac. The ZIP carries its own demo
+APKs, including private groups and simulated hub pack updates; a bare launcher without those
+files still fetches the latest stable v0.1.1 demo. The [demo guide](docs/demo.md) has the steps
+and tested limits. Typing does not need a microphone. The release page also has a block to paste
+into an agent on your own computer, which sets the demo up for you; it starts without a
+microphone or sound and pins the ZIP's SHA-256.
+
+<p align="center">
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots-v012/group-dark.png"><img src="docs/screenshots-v012/group-light.png" width="180" alt="Private group conversation with a member receipt"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots-v012/saved-chats-dark.png"><img src="docs/screenshots-v012/saved-chats-light.png" width="180" alt="Saved chats kept apart from live conversations"></picture>
+  <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots-v012/updates-off-dark.png"><img src="docs/screenshots-v012/updates-off-light.png" width="180" alt="Updates are not set up without the owner's real update keys"></picture>
+</p>
+<p align="center"><sub>v0.1.2 emulator fixtures, in light and dark themes. The production update-key gate stays closed.</sub></p>
 
 ## How it works
 
@@ -103,13 +120,125 @@ both phones, nobody is in the middle pretending to be the other person. Compare 
 by side, or over a phone call for a contact added by link. No reading is needed.
 
 **Settings → Recovery kit** makes a recovery card (a QR code and twelve words) and a sealed
-copy of your contacts, or of your contacts and chosen chats. On a new phone the kit lists
-your people again, and you add each one again: a new phone has a new account, so your
-safety pictures change. Saved chats, private groups included, come back as read-only
-history marked "from this saved copy", apart from your live chats: they never send,
-speak or notify, and they hold no keys. Without a kit, a lost phone means a new account
-that your contacts add again. The [explainer](docs/how-it-works.md#accounts-and-contacts)
-covers keys and encryption.
+copy of your contacts. On a new phone the kit lists your people again, and you add each
+one again: a new phone has a new account, so your safety pictures change. Without a kit,
+a lost phone means a new account that your contacts add again. In the v0.1.2 candidate the
+kit can also [save your chats](#saving-your-chats). The
+[explainer](docs/how-it-works.md#accounts-and-contacts) covers keys and encryption.
+
+### Saving your chats
+
+*New in the v0.1.2 candidate. v0.1.1 saves contacts only.*
+
+**Settings → Recovery kit** now asks what to keep: **Contacts only** or **Contacts and chats**.
+Choose chats when you want your history to survive a lost or broken phone. Contacts only is
+enough when all you need back is your list of people.
+
+1. **Choose the chats** to save. Private chats, private groups, the shared chat and old radio
+   chats are listed and labelled. Then pick **Last 90 days** or **All history**, and say whether
+   to include pictures and messages that were not sent or not confirmed.
+2. **Count and size** shows how many chats, messages and pictures the copy will hold, and how
+   big the file will be, before anything is written. It also says what is left out.
+3. Switch on **I wrote the card down**, then save the file in a place you choose with Android's
+   file picker. The app reads the file back and says **Saved**. **Check it now** opens the file
+   with your card, to prove the two match.
+
+On a new phone, restoring the kit puts the chats in **Saved chats**, apart from your live
+chats. Each one is marked "From this saved copy" and is read only: it never sends, speaks or
+notifies, and you cannot reply in it. The copy holds no live secret keys, so a saved private group is
+history only. Your phone is not back in the group, and an admin has to add you again. A
+phone keeps at most eight saved copies, and **Remove from this phone** deletes one (the file
+you saved stays where you put it).
+
+The card opens the file, and the phone never stores the card. Anyone who has both the file
+and the card can read the chats, so keep them in different places. A copy walks the selected
+rows rather than freezing the whole phone at one instant: a message deleted while the copy
+was being made may be missing, and messages
+longer than 4,096 bytes are shortened and counted. The
+[backup specification](docs/specs/2026-10-26-encrypted-chat-backup-design.md) lists the other
+limits.
+
+Example: Amina saves a **Contacts and chats** copy to a memory card and keeps the card's
+paper at home. Her phone is stolen. On a new phone she restores the kit, adds Kofi again by
+scanning his code, and finds her old chat with him under **Saved chats**, with the Market
+group that Kofi runs. Kofi has to add her to Market again.
+
+## Private groups
+
+*New in the v0.1.2 candidate. v0.1.1 has the shared chat and one-to-one chats only.*
+
+A private group is a chat for up to 20 people that you choose, yourself included. The shared
+chat is open to everyone on your radio channel and is only as private as the channel key. A
+private group is encrypted for its members, the way a private chat is for two.
+
+**When a group is useful:** a family, a clinic team or a row of market stalls wants one thread
+that only its members can read. **When you do not need one:** two people can use a private
+chat, and an announcement for everyone nearby belongs in the shared chat.
+
+**Starting one.** In **Add someone**, tap **New private group** and choose people you have
+already added ("Only people you added can join."). Then say or type a short name, pick a
+colour and a letter, emoji or photo, and tap **Create group**. Each person gets a card that
+says "&lt;name&gt; added you to &lt;group&gt;" with **Join** and **Ignore**. Nobody is in a group
+without tapping **Join**, and joining shows your own name and picture to the other members.
+
+**Admins.** The person who makes a group is its admin. Admins can add people, make another
+member an admin, remove people, change the name and picture, and switch on **New members
+see recent messages**. Open **Group details** by tapping the group's title. The last admin
+to leave chooses who becomes admin next.
+
+**Keys, in short.** The group has one secret key. Whenever someone joins, leaves or is
+removed, an admin makes a new key and sends it to each member through that member's private
+chat session, together with the new member list. Messages are encrypted with the key and
+signed by their sender's own key for that group. Several joins and leaves within about a
+minute share one change.
+
+**Who must know whom.** Keys travel through private chat sessions, so an admin can change a
+group only while every other member is that admin's contact. Otherwise the app says "Add
+&lt;name&gt; to your contacts first." Ordinary members do not need to know each other: someone you
+have not added shows under the name they chose, with "Not in your contacts", and
+**Add to my contacts** is in Group details.
+
+**Sending.** Group messages go out like your other messages, over your radio; a phone on a
+hub's Wi-Fi gives them to the hub first. Your messages show **Delivered to 2 of 3**: how many
+of the other members, counted when you sent it, have sent back a receipt.
+
+**Pictures and recent messages.** A full picture, a member's photo and the group photo go
+only through a local hub, never by radio. Members who do not use that hub see a colour sketch
+("Others see a sketch"), one radio packet. With **New members see recent messages** on (it
+starts off), an admin who adds people shares the last 7 days of messages, at most 50, through a
+hub only. New members see them marked "Shared by &lt;admin&gt;". Without that switch a new member
+sees nothing from before: "You joined. Earlier messages are not shown."
+
+**Leaving and removing.** **Leave group** asks first; messages already sent may still arrive.
+Someone who is removed keeps the messages they already have.
+
+**Group code.** Group details shows four pictures worked out from the member list. Compare
+them to look for different lists. They are a short check of the list, not proof that its
+key bindings are honest. Each member's signing key is bound to them by the admin, and the app trusts that
+binding even when the codes match.
+
+**What others can see.** Someone listening on the radio sees that a packet was sent, when,
+how big it was and which radio sent it. Nothing on the air names the group or the sender. A
+hub stores and passes on group packets without being able to read them.
+
+**What you are trusting.**
+
+- Members. Anyone in a group can copy, screenshot or forward what they read. A member with a
+  modified app could also read the recent messages meant for a later joiner.
+- Admins. They hold the member list. An admin who lies about it could make a message look as
+  if another member wrote it, for the others. Comparing group codes can reveal different
+  lists. It cannot show that an admin bound each person's signing key honestly: that
+  binding is trusted even when the codes match.
+- Counts and names. "Delivered to N of M" counts what members' phones report, and the author
+  and time on a "Shared by" message are the admin's word.
+- Reviewers. AI agents reviewed the group code and every finding was fixed. No human
+  cryptographer has reviewed it.
+
+Example: Kofi makes **Market** with Amina and Yaw. Amina and Yaw have never met, so each sees
+the other marked "Not in your contacts". Kofi writes "Who brings bread?" and sees
+"Delivered to 1 of 2" until Yaw's phone, which was off, comes back and sends its receipt.
+Later Kofi adds Ama. While the new key has not reached Amina's phone, it says "Group change
+on its way. Sending paused." and offers **Ask Kofi again**.
 
 ## The local hub
 
@@ -129,6 +258,10 @@ set up by someone on site. Phones connect to it over its Wi-Fi or Bluetooth.
   phone retries, and the hub sends the same message again.
 - **A fixed, always-on radio.** The hub's radio can stay in one place on mains power, for
   example high up in a central building, instead of moving around with a person.
+- **Pictures in groups** (v0.1.2). Full group pictures, group photos and recent messages for
+  new group members go only through a hub, so a hub is the way they travel.
+- **Updates without internet** (v0.1.2). The hub's operator can bring signed speech-pack
+  updates on a stick. Phones copy them over the hub's Wi-Fi after you tap **Download**.
 
 **When you do not need one:** people who each have a radio and are in range of each
 other talk directly. A hub also does not extend reach past what radios can hear, does not
@@ -143,8 +276,8 @@ flowchart LR
   away["Ama's phone<br/>was away"] -.->|"collects her mail<br/>when she is back"| hub
 ```
 
-The hub cannot read private messages: they are encrypted from phone to phone, and the hub
-only stores and forwards the encrypted packets. You add a hub by scanning the hub code its
+The hub cannot read private messages or, in v0.1.2, group messages: they are encrypted from
+phone to phone, and the hub only stores and forwards the encrypted packets. You add a hub by scanning the hub code its
 operator shows you; from then on your phone checks that it is talking to that hub and no
 other.
 
@@ -231,8 +364,10 @@ See [Run a local hub](#run-a-local-hub).
   proven. Posting to it needs your own radio.
 - **The chats list** keeps the shared chat at the top. Long-press a private chat to
   **Pin to top** or **Delete chat**.
-- **Private group chats** (a group of chosen people, encrypted for them only) are not
-  in v0.1.1. They are planned for v0.1.2.
+- **Private group chats** (v0.1.2; not in v0.1.1): a group of up to 20 people you have added,
+  encrypted for them only. Start one with **Add someone → New private group**, and answer an
+  invitation on the chats list with **Join** or **Ignore**. See
+  [Private groups](#private-groups).
 
 ### Talking and listening
 
@@ -259,6 +394,17 @@ See [Run a local hub](#run-a-local-hub).
 - **Send later:** tap **Later** under a draft, choose a day and time, and the phone sends
   it then (the radio must be in Bluetooth range at that time).
 - **Resend:** a message that failed or was not confirmed shows a **Resend** button.
+- **In a private group** (v0.1.2): each message shows who wrote it, with their picture.
+  Someone you have not added is marked **Not in your contacts**. Your messages show
+  **Delivered to 2 of 3**. Reply, React and pictures work as in a private chat; members
+  without the hub see a picture as a colour sketch. Tap the group's title for
+  **Group details**:
+  - **People in this group**, tagged **Admin**, **Not joined yet** or **Not in your
+    contacts**. Tap a person for **Add to my contacts**, or, as an admin, **Make admin** and
+    **Remove from group**.
+  - For admins: **Name and picture**, **Add people** and **New members see recent messages**.
+  - **Group code:** four pictures to compare with another member.
+  - **Leave group:** the last admin chooses who becomes admin next.
 
 ### Settings
 
@@ -271,13 +417,19 @@ See [Run a local hub](#run-a-local-hub).
 - **Show my code:** your QR code and link for adding someone.
 - **Local hub** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
   sent, and **Keep hub when app is closed**.
-  - **Updates:** copies newer speech packs from the hub over its Wi-Fi, only after you tap
-    **Download**. It uses no mobile data.
+  - **Updates** (v0.1.2): copies newer speech packs from the hub over its Wi-Fi, only after
+    you tap **Download** (the button shows the size). It uses no mobile data. You can
+    **Pause** and **Resume**. A new pack replaces the old one only after it checks out and
+    opens; if anything fails the old pack stays. It needs the hub's Wi-Fi ("Join the hub
+    Wi-Fi first.") and a hub whose operator has brought a signed release. A build without the
+    project's real update keys says "Updates are not set up in this version." This branch
+    carries only test keys so far, and release builds refuse those.
 - **Read new messages aloud:** off by default.
 - **Share the app:** send the app and speech packs to another phone.
-- **Recovery kit:** make a recovery card and a sealed copy of your contacts, or of your
-  contacts and chats (the last 90 days or all history, counted and sized before saving,
-  checked after saving), restore one, or check one. **Saved chats** lists restored copies.
+- **Recovery kit:** make a recovery card and a sealed copy of your contacts, restore one, or
+  check one. In v0.1.2 the copy can also hold your chats (**Contacts and chats**: the last 90
+  days or all history, counted and sized before saving, read back after saving), and
+  **Saved chats** lists restored copies. See [Saving your chats](#saving-your-chats).
 - **Show the guide again:** replay the welcome story and the tips.
 
 The **?** button on the chats screen opens Help, which explains each feature with
@@ -290,9 +442,29 @@ pictures.
   are the supported voice path.
 - **Hub Wi-Fi must be WPA2-Personal** (or open). Android 10 phones cannot join a
   WPA2/WPA3 mixed-mode network through the app.
-- **Recovery keeps your contacts and saved chats, not your account.** A new phone has a new
-  account; the recovery kit lists your people so you can add each one again. Restored chats
-  are read-only history: you cannot reply in them, and a copy is a picture of one moment.
+- **Recovery keeps your contacts, not your account.** A new phone has a new account; the
+  recovery kit lists your people so you can add each one again. In v0.1.2 it can also keep
+  chats: restored chats are read-only history, you cannot reply in them, a saved private
+  group is history only (you are not back in the group), and a copy is a picture of one
+  moment. A phone keeps at most eight saved copies.
+- **Private groups (v0.1.2) hold 20 people at most.** An admin can change a group only while
+  every other member is that admin's contact. A change reaches members with a new key, and
+  several changes within about a minute share one. A phone still waiting for it says "Group
+  change on its way. Sending paused." If two admins change a group at once, sending stops
+  until an admin taps **Fix the group**.
+- **Group counts and authors are claims.** "Delivered to N of M" counts what members' phones
+  report, and the author and time on a "Shared by" message are the admin's word. Messages
+  longer than about 126 bytes are not shared with new members.
+- **Group pictures and photos need a local hub.** Members without it see a sketch or the
+  member's emoji or letter. Recent messages for new members go only through a hub too.
+- **The last admin of a two-person group cannot hand it over.** If that admin leaves, the
+  other person keeps a group with no admin and nobody is told. Both people leaving is
+  cleaner.
+- **Hub updates cover speech packs, not the app.** They need the hub's Wi-Fi and a build
+  that carries the project's real update keys. The app itself is still updated by installing
+  a new APK.
+- **Review.** The v0.1.2 group, backup and update code was reviewed by AI agents, and every
+  finding was fixed. No human cryptographer has reviewed it.
 - **Photos need a local hub.** Your photo goes only through a local hub, never by radio.
   Contacts who never use that hub see your emoji or letter.
 - History is stored in the app's private storage under Android's file encryption, not in
@@ -304,15 +476,13 @@ pictures.
 
 ## Coming next
 
-Planned for v0.1.2, each with its own specification:
+Private group chats, saved chats and signed speech-pack updates through the local hub were
+the plan for v0.1.2, and the candidate on this branch contains all three. After v0.1.2:
+**Ewe and Kabiyè**, for the pilot in Togo.
 
-- **Private group chats:** a group of chosen contacts, encrypted for them only.
-- **Encrypted chat backup**, for a lost or new phone.
-- **Updates passed on through the local hub**, signed, for places without internet.
-
-Then **Ewe and Kabiyè**, for the pilot in Togo.
-
-Planned for later: TalkBack support and quantum-safe keys.
+Planned for later: TalkBack support, quantum-safe keys, app updates through a hub (v0.1.2
+passes on speech packs only), and the radio settings profile that cuts automatic
+broadcasts.
 
 ## Run a local hub
 
@@ -374,8 +544,10 @@ The full project check is `scripts/check.sh` (Python, hub JVM and Android). Run 
 - [How Phonemesh works](docs/how-it-works.md): the explainer.
 - [Phonemesh Demo](docs/demo.md): try the app without a radio, and
   [what the demo covers](docs/demo-coverage.md).
-- [Release notes for v0.1.1](docs/releases/v0.1.1.md) (and [v0.1.0](docs/releases/v0.1.0.md)) and the
+- [Release notes for v0.1.1](docs/releases/v0.1.1.md) (and [v0.1.0](docs/releases/v0.1.0.md)),
+  the [draft notes for the unreleased v0.1.2](docs/releases/v0.1.2.md) and the
   [verification record](docs/android-verification.md).
+- [Update signing keys](docs/update-keys.md): the owner's steps for hub updates.
 - [Android design](docs/android-design.md) and the
   [accounts and hub specification](docs/specs/2026-10-14-accounts-design.md).
 - [Hub guide](android/hub/README.md) and [Bluetooth bridge](hub-ble-bridge/README.md).

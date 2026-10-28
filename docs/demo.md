@@ -17,6 +17,28 @@ Each release from v0.1.1 has demo files next to the normal app, for example
 - **On a laptop (macOS, Linux or Windows):** run the launcher in [`demo/laptop`](../demo/laptop/README.md). It sets up a
   virtual Android phone in one folder and opens the demo in it.
 
+**For v0.1.2, download the laptop ZIP from the
+[demo pre-release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.2-demo.1).**
+Unzip it, keep the folder together and open **Start Phonemesh Demo.command** on a Mac.
+It contains version `0.1.2-demo` / code 3 and checks its included APK before installing.
+A bare launcher without the included APK still uses the latest stable release, v0.1.1.
+The full v0.1.2 production release is separate and remains unsigned.
+
+The arm64 app was silently exercised on an Android 15 emulator: a typed Market group message
+showed **Delivered to 2 of 2**, Kofi and Yaw replied, and fresh crash/error logs were empty.
+The x86_64 APK was built and checked, but not run on an x86_64 emulator. The unchanged laptop
+launcher was not run through a fresh download again for this pre-release. Older launcher
+measurements in [demo-coverage.md](demo-coverage.md) belong to the earlier build.
+
+**Let an agent set it up.** The demo pre-release page has a **Let your agent set it up** block. Paste it into an agent that
+can run commands on your own computer. It downloads the exact ZIP and checks its SHA-256, checks the included APKs, starts the
+launcher without microphone or sound, and helps you finish the first-run steps in the app. It is meant to leave an
+existing demo installation and emulators alone unless you approve. The block belongs to the already published
+pre-release; this guide does not change it.
+
+To build a newer branch demo, use `:app:assembleDemo` (add `-Pphonemesh.x86_64=true` for
+an x86_64 emulator), then `./start-demo.sh --apk <your demo file>` (Windows: `-Apk`).
+
 ## Who is in the demo
 
 - **Demo radio**: your radio. **Find radio** lists it; tap it to connect.
@@ -26,8 +48,13 @@ Each release from v0.1.1 has demo files next to the normal app, for example
   **Ignore**.
 - **Sena**: she uses the plain Meshtastic app, not Phonemesh. She writes in the shared chat.
 - **The local hub**: in Settings, **Local hub**, **Scan hub code**, pick "The local hub's code".
-  Then **Updates** offers a newer "Demo voice" pack, signed with demo-only keys that the real app
+  Then **Updates** (v0.1.2 demo only) offers a newer "Demo voice" pack, signed with demo-only keys that the real app
   does not trust. Tap **Download** to watch the real copy, check and install.
+- **A private group** (v0.1.2 demo only): in **Add someone**, tap **New private group**, choose Kofi and Yaw (and Ama once
+  you have accepted her), name the group and tap **Create group**. A few seconds later they tap Join for themselves.
+  Kofi and Yaw answer what you write in the group; Ama joins but never writes. Your message shows
+  **Delivered to 2 of 2** once both have sent their receipts. Open **Group details** from the group's title to see
+  the people, the group code and **Leave group**.
 
 Kofi and Yaw answer your private messages. Everyone nearby sometimes writes in the shared chat. Each person has
 their own picture: Kofi an emoji, Ama her letter, Yaw his letter on a colour from the colour wheel.
@@ -72,6 +99,16 @@ as in the real app, on your device only.
 The demo cannot tell you how far a real radio reaches, how busy a real channel gets, or how real Bluetooth pairing and
 Android's Bluetooth permission screens behave. Joining the hub's Wi-Fi and the hub's key check are also simulated.
 Timings follow the real radio settings (LongFast), but they are an estimate, not a measurement.
+
+In a demo group, Kofi, Ama and Yaw only know you, so they answer you and never each other. The demo does not set up a
+member who is not in your contacts, or a group change that waits for a member who is away. The pack update in the demo
+is signed with keys made on the phone each time the demo starts, so it shows how updates look and behave, not that the
+project's real update keys work.
+
+To save chats, open **Settings → Recovery kit → Contacts and chats**, select chats and the
+time range, count the copy, write its recovery card down, then save and check it. Restoring
+keeps the old messages in read-only **Saved chats**, never as live group membership. This
+flow has instrumentation coverage; it has not had a manual demo walk in this release.
 
 ## Good to know
 

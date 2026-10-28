@@ -6,6 +6,10 @@ accounts, encryption, delivery, the local hub, and how a phone connects. The
 [README](../README.md) has the short version and setup steps; the
 [specifications](#further-reading) have every byte.
 
+This page follows the v0.1.2 candidate. The production release is not signed; the
+[demo pre-release](https://github.com/Tranquil-Flow/phonemesh/releases/tag/v0.1.2-demo.1)
+can be tried now. v0.1.1 remains the latest stable release.
+
 ## Who it is for, and the main constraint
 
 Phonemesh is for anyone who needs to message where there is no mobile signal or internet:
@@ -79,8 +83,8 @@ under a Keystore key. Backup is off, so keys never leave the phone.
 
 There is no username search and no list of accounts. You add people in one of two ways.
 
-**QR code, in person.** Both phones show a contact card of about 205 bytes as a QR code
-(identity key, prekey and its signature, name, colour) and scan each other. The contact
+**QR code, in person.** Both phones show a contact card as a QR code
+(identity key, prekey, signature and profile) and scan each other. The contact
 is marked *met in person*.
 
 **Link, at a distance.** **Send my link** shares
@@ -94,11 +98,130 @@ contact shows *not met in person* until you compare safety pictures.
 **Safety pictures.** Each pair of contacts sees the same six pictures out of 64, computed
 from both identity keys with a deliberately slow hash. You compare them in person or over
 a channel you trust (a phone call, for example) and press *They are the same* or *Not the
-same*. Faking a match would take about 2^52 hash attempts. This is the real check: the
-name and colour in a card or link are not signed, only the prekey is.
+same*. The card signature covers both keys and the whole profile (including name, colour
+and picture choice); those are what the person chose, not proof of who they are. Comparing
+safety pictures checks the identity keys through a channel you trust.
 
-**No recovery.** If you lose the phone or clear the app's data, the account is gone. A
-new phone makes a new account and your contacts add it again.
+**Recovery kit.** Save a sealed copy of contacts, or (in v0.1.2) contacts and chosen chats,
+with a separate twelve-word card. A restored phone still makes a new account; contacts
+must add it again. Old chats are read-only history, not restored live sessions or group keys.
+See [Saving your chats](#saving-your-chats).
+
+## Saving your chats
+
+*New in the v0.1.2 candidate. v0.1.1 saves contacts only.*
+
+**Settings → Recovery kit** now asks what to keep: **Contacts only** or **Contacts and chats**.
+Choose chats when you want your history to survive a lost or broken phone. Contacts only is
+enough when all you need back is your list of people.
+
+1. **Choose the chats** to save. Private chats, private groups, the shared chat and old radio
+   chats are listed and labelled. Then pick **Last 90 days** or **All history**, and say whether
+   to include pictures and messages that were not sent or not confirmed.
+2. **Count and size** shows how many chats, messages and pictures the copy will hold, and how
+   big the file will be, before anything is written. It also says what is left out.
+3. Switch on **I wrote the card down**, then save the file in a place you choose with Android's
+   file picker. The app reads the file back and says **Saved**. **Check it now** opens the file
+   with your card, to prove the two match.
+
+On a new phone, restoring the kit puts the chats in **Saved chats**, apart from your live
+chats. Each one is marked "From this saved copy" and is read only: it never sends, speaks or
+notifies, and you cannot reply in it. The copy holds no live secret keys, so a saved private group is
+history only. Your phone is not back in the group, and an admin has to add you again. A
+phone keeps at most eight saved copies, and **Remove from this phone** deletes one (the file
+you saved stays where you put it).
+
+The card opens the file, and the phone never stores the card. Anyone who has both the file
+and the card can read the chats, so keep them in different places. A copy walks the selected
+rows rather than freezing the whole phone at one instant: a message deleted while the copy
+was being made may be missing, and messages
+longer than 4,096 bytes are shortened and counted. The
+[backup specification](specs/2026-10-26-encrypted-chat-backup-design.md) lists the other
+limits.
+
+Example: Amina saves a **Contacts and chats** copy to a memory card and keeps the card's
+paper at home. Her phone is stolen. On a new phone she restores the kit, adds Kofi again by
+scanning his code, and finds her old chat with him under **Saved chats**, with the Market
+group that Kofi runs. Kofi has to add her to Market again.
+
+
+## Private groups
+
+*New in the v0.1.2 candidate. v0.1.1 has the shared chat and one-to-one chats only.*
+
+A private group is a chat for up to 20 people that you choose, yourself included. The shared
+chat is open to everyone on your radio channel and is only as private as the channel key. A
+private group is encrypted for its members, the way a private chat is for two.
+
+**When a group is useful:** a family, a clinic team or a row of market stalls wants one thread
+that only its members can read. **When you do not need one:** two people can use a private
+chat, and an announcement for everyone nearby belongs in the shared chat.
+
+**Starting one.** In **Add someone**, tap **New private group** and choose people you have
+already added ("Only people you added can join."). Then say or type a short name, pick a
+colour and a letter, emoji or photo, and tap **Create group**. Each person gets a card that
+says "&lt;name&gt; added you to &lt;group&gt;" with **Join** and **Ignore**. Nobody is in a group
+without tapping **Join**, and joining shows your own name and picture to the other members.
+
+**Admins.** The person who makes a group is its admin. Admins can add people, make another
+member an admin, remove people, change the name and picture, and switch on **New members
+see recent messages**. Open **Group details** by tapping the group's title. The last admin
+to leave chooses who becomes admin next.
+
+**Keys, in short.** The group has one secret key. Whenever someone joins, leaves or is
+removed, an admin makes a new key and sends it to each member through that member's private
+chat session, together with the new member list. Messages are encrypted with the key and
+signed by their sender's own key for that group. Several joins and leaves within about a
+minute share one change.
+
+**Who must know whom.** Keys travel through private chat sessions, so an admin can change a
+group only while every other member is that admin's contact. Otherwise the app says "Add
+&lt;name&gt; to your contacts first." Ordinary members do not need to know each other: someone you
+have not added shows under the name they chose, with "Not in your contacts", and
+**Add to my contacts** is in Group details.
+
+**Sending.** Group messages go out like your other messages, over your radio; a phone on a
+hub's Wi-Fi gives them to the hub first. Your messages show **Delivered to 2 of 3**: how many
+of the other members, counted when you sent it, have sent back a receipt.
+
+**Pictures and recent messages.** A full picture, a member's photo and the group photo go
+only through a local hub, never by radio. Members who do not use that hub see a colour sketch
+("Others see a sketch"), one radio packet. With **New members see recent messages** on (it
+starts off), an admin who adds people shares the last 7 days of messages, at most 50, through a
+hub only. New members see them marked "Shared by &lt;admin&gt;". Without that switch a new member
+sees nothing from before: "You joined. Earlier messages are not shown."
+
+**Leaving and removing.** **Leave group** asks first; messages already sent may still arrive.
+Someone who is removed keeps the messages they already have.
+
+**Group code.** Group details shows four pictures worked out from the member list. Compare
+them to look for different lists. They are a short check of the list, not proof that its
+key bindings are honest. Each member's signing key is bound to them by the admin, and the app trusts that
+binding even when the codes match.
+
+**What others can see.** Someone listening on the radio sees that a packet was sent, when,
+how big it was and which radio sent it. Nothing on the air names the group or the sender. A
+hub stores and passes on group packets without being able to read them.
+
+**What you are trusting.**
+
+- Members. Anyone in a group can copy, screenshot or forward what they read. A member with a
+  modified app could also read the recent messages meant for a later joiner.
+- Admins. They hold the member list. An admin who lies about it could make a message look as
+  if another member wrote it, for the others. Comparing group codes can reveal different
+  lists. It cannot show that an admin bound each person's signing key honestly: that
+  binding is trusted even when the codes match.
+- Counts and names. "Delivered to N of M" counts what members' phones report, and the author
+  and time on a "Shared by" message are the admin's word.
+- Reviewers. AI agents reviewed the group code and every finding was fixed. No human
+  cryptographer has reviewed it.
+
+Example: Kofi makes **Market** with Amina and Yaw. Amina and Yaw have never met, so each sees
+the other marked "Not in your contacts". Kofi writes "Who brings bread?" and sees
+"Delivered to 1 of 2" until Yaw's phone, which was off, comes back and sends its receipt.
+Later Kofi adds Ama. While the new key has not reached Amina's phone, it says "Group change
+on its way. Sending paused." and offers **Ask Kofi again**.
+
 
 ## Encryption
 
@@ -115,8 +238,8 @@ Private messages use the same building blocks as Signal, sized for the radio.
   Message bodies are encrypted with AES-256-GCM.
 - **Hidden sender and recipient.** Each packet starts with an 8-byte recipient code that
   changes with every message. The recipient's phone knows which codes to expect; nobody
-  else can link two packets or tell who they are for. Nothing in the packet names the
-  sender.
+  else sees a stable account identifier in that code. Radio identifiers, timings and hub
+  requests can still correlate traffic. Nothing in the application packet names the sender.
 - **Room for later changes.** Every message carries a key-type marker, so a move to
   other curves or quantum-safe keys will not strand older phones.
 
@@ -323,6 +446,8 @@ own Wi-Fi (never mobile data, Bluetooth or the radio) and checks it against the 
 is copied until you tap **Download** on that pack. You can **Pause** and **Resume**; what was copied is kept, and
 leaving the screen pauses. The finished file is checked against its signed hash before it replaces the old pack,
 and the old pack stays in use if anything fails. Each failure is written next to the pack it belongs to.
+The current production candidate refuses TEST roots and says updates are not set up. Demo/test
+updates do not establish that the owner's real signing keys work.
 
 ## Speech packs
 
@@ -356,11 +481,11 @@ used. Release builds accept only packs in that built-in catalog.
 
 - TalkBack is not supported: recording can capture TalkBack's own speech, and the send
   status is not announced.
-- No private group chats yet: there is one shared chat per radio channel and private
-  one-to-one chats. Private groups, and reacting with any emoji, are planned for the
-  next version.
+- Private groups and saved chats are in the v0.1.2 candidate, not the stable v0.1.1 app.
+  Their trust and recovery limits are described above. Any-emoji reactions are already in v0.1.1.
 - Hub Wi-Fi must be WPA2-Personal (or open) for Android 10 phones.
-- No account recovery or transfer; no quantum-safe encryption yet.
+- A recovery kit restores contacts/history, not the original live account or group keys.
+  Quantum-safe encryption is not included.
 - The first message to a contact added by link is protected only by their signed prekey
   until they reply.
 - The hub is a Mac prototype, without power-cut safety or exactly-once delivery.

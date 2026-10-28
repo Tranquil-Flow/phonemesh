@@ -555,4 +555,109 @@ class GroupMembersTest {
         esi.member.receive(byteArrayOf(1, 2, 3), 101)
         assertFalse(esi.member.took)
     }
+
+    // ---- review G9 fixes
+
+    /** G9-4: a rival key for the epoch held counts only soon after that epoch was taken. */
+    private fun rivalFromARemovedAdmin(arrivesAt: Long, saveFirst: Boolean = false): Pair<GroupMember.State, Boolean> {
+        val (ama, kofi, esi) = three() // epoch 1: Ama and Kofi admins
+        // Ama removes Kofi (epoch 2); Kofi's phone never processes it and starts his own epoch 2 from epoch 1.
+        deliver(ama, ama.member.newEpoch(roster(ama.entry(true), esi.entry(), name = "Puits"), 100), listOf(ama, esi), 100)
+        assertEquals(2L, esi.member.epoch)
+        if (saveFirst) esi.reload() // the time the epoch was taken is part of what a phone saves
+        val rival = kofi.member.newEpoch(roster(ama.entry(true), kofi.entry(true), esi.entry(), name = "Evil"), 100)
+        val taken = esi.member.receiveKey(kofi.id, GroupKey.decode(rival.keys.getValue(esi.id.toList()))!!, arrivesAt)
+        for (p in rival.rosterPackets) esi.member.receive(p, arrivesAt)
+        return esi.member.state to taken
+    }
+
+    @Test fun aRivalKeyFromAnAdminTheListRemovedStartsAConflictOnlyJustAfterTheEpoch() {
+        val (inside, taken) = rivalFromARemovedAdmin(100 + GroupMember.RIVAL_MS)
+        assertTrue(taken)
+        assertEquals("while two admins may still be acting at once", GroupMember.State.CONFLICT, inside)
+    }
+
+    @Test fun aRivalKeyFromARemovedAdminLongAfterTheEpochIsNotBelieved() {
+        val (state, taken) = rivalFromARemovedAdmin(100 + GroupMember.RIVAL_MS + 1)
+        assertFalse("refused like any other key", taken)
+        assertEquals(GroupMember.State.ACTIVE, state)
+    }
+
+    @Test fun theTimeAnEpochWasTakenIsKeptAcrossASave() {
+        assertEquals(GroupMember.State.CONFLICT, rivalFromARemovedAdmin(100 + GroupMember.RIVAL_MS, saveFirst = true).first)
+        val (late, taken) = rivalFromARemovedAdmin(100 + GroupMember.RIVAL_MS + 1, saveFirst = true)
+        assertFalse(taken); assertEquals(GroupMember.State.ACTIVE, late)
+    }
+
+    /** G9-11: an Ask is answered once per member per epoch, and that is remembered across a save. */
+    @Test fun anAskIsAnsweredOncePerMemberPerEpoch() {
+        val (ama, kofi, esi) = three()
+        val out = ama.member.newEpoch(roster(ama.entry(true), kofi.entry(), esi.entry(), name = "Puits 2"), 100)
+        val ask = GroupControl.Ask(group, 2)
+        val (first, again) = ama.member.receiveControl(esi.id, ask, 200)
+        assertTrue(first); assertEquals(out.rosterPackets.size, again!!.rosterPackets.size)
+        val (second, none) = ama.member.receiveControl(esi.id, ask, 201)
+        assertFalse("not again", second); assertNull(none)
+        ama.reload()
+        assertFalse("not after a restart either", ama.member.receiveControl(esi.id, ask, 202).first)
+        assertTrue("another member is answered", ama.member.receiveControl(kofi.id, ask, 203).first)
+        // The next epoch starts afresh.
+        ama.member.newEpoch(roster(ama.entry(true), kofi.entry(), esi.entry(), name = "Puits 3"), 300)
+        assertTrue(ama.member.receiveControl(esi.id, GroupControl.Ask(group, 3), 301).first)
+    }
+
+    private val offChain = listOf(GroupBody.SHARED to false, GroupBody.MEMBER_PHOTO to false, GroupBody.PROFILE to true, GroupBody.RECEIPT to true)
+
+    /** G9-12: an op travels only on the chains the draft names; sealing it anywhere else is refused. */
+    @Test fun anOpIsSealedOnlyOnItsOwnChains() {
+        val (_, kofi, esi) = three()
+        for ((op, hub) in offChain) {
+            assertFalse("op $op hub=$hub", GroupBody.allowed(op, hub))
+            assertTrue("op $op hub=$hub is refused when sealing", runCatching { kofi.member.seal(op, byteArrayOf(1, 2, 3), hub) }.isFailure)
+        }
+        for ((op, hub) in listOf(GroupBody.MESSAGE to false, GroupBody.MESSAGE to true, GroupBody.PROFILE to false, GroupBody.RECEIPT to false,
+            GroupBody.SHARED to true, GroupBody.MEMBER_PHOTO to true, GroupBody.GROUP_PHOTO to false, GroupBody.GROUP_PHOTO to true)) {
+            assertTrue("op $op hub=$hub", GroupBody.allowed(op, hub))
+            assertEquals(op, esi.member.receive(kofi.member.seal(op, byteArrayOf(1, 2, 3), hub).packet, 11).single().op)
+        }
+        assertFalse(GroupBody.allowed(GroupBody.ROSTER, false))
+        assertFalse(GroupBody.allowed(0, false)); assertFalse(GroupBody.allowed(8, true))
+    }
+
+    /** G9-12: and a modified client that seals one anyway is not read. */
+    @Test fun anOpOnTheWrongChainIsNotRead() {
+        val (_, kofi, esi) = three()
+        for ((op, hub) in offChain) {
+            val forged = kofi.member.sealUnchecked(op, byteArrayOf(1, 2, 3), hub)
+            assertTrue("op $op hub=$hub is dropped on reading", esi.member.receive(forged.packet, 10).isEmpty())
+        }
+        // The chain moved on with each, so the next real packet is still read in order.
+        assertEquals("x", String(esi.member.receive(kofi.member.seal(GroupBody.MESSAGE, "x".toByteArray()).packet, 12).single().body))
+    }
+
+    /** G9-14: a Leave far behind the epoch held is a stale notice, not a member leaving now. */
+    @Test fun aLeaveFromLongAgoIsNotTaken() {
+        val (ama, kofi, esi) = three()
+        var now = 100L
+        repeat(6) { i ->
+            deliver(ama, ama.member.newEpoch(roster(ama.entry(true), kofi.entry(), esi.entry(), name = "P$i"), now), listOf(ama, kofi, esi), now); now += 10
+        }
+        assertEquals(7L, ama.member.epoch)
+        assertFalse("epoch 1 of 7", ama.member.receiveControl(esi.id, GroupControl.Leave(group, 1), now).first)
+        assertTrue(ama.member.leaving().isEmpty())
+        assertTrue("a notice a few epochs behind is still honoured", ama.member.receiveControl(esi.id, GroupControl.Leave(group, 7L - GroupMember.MAX_AHEAD), now).first)
+        assertEquals(1, ama.member.leaving().size)
+    }
+
+    /** The state added in v0.1.2 (epoch time, join epoch, shared count, Asks answered) is an appended block: older saves still load. */
+    @Test fun aSaveWithoutTheNewBlockStillLoadsAndTheNewOnesRoundTrip() {
+        val (_, _, esi) = three()
+        val bytes = esi.member.encode()
+        val block = 1 + 8 + 4 + 1 + 1 // version | epoch time | join epoch | shared taken | no Asks answered
+        val legacy = GroupMember.decode(esi.id, esi.sk, { P256.sign(esi.signing.private, it) }, group, bytes.copyOf(bytes.size - block))
+        assertNotNull("a save from before the block", legacy)
+        assertArrayEquals("with the join epoch worked out from the lists", bytes, legacy!!.encode())
+        assertNull("a block cut short is not a save", GroupMember.decode(esi.id, esi.sk, { P256.sign(esi.signing.private, it) }, group, bytes.copyOf(bytes.size - 3)))
+        assertNull("trailing bytes are not a save", GroupMember.decode(esi.id, esi.sk, { P256.sign(esi.signing.private, it) }, group, bytes + byteArrayOf(1)))
+    }
 }

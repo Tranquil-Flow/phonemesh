@@ -143,6 +143,18 @@ object GroupBody {
     const val MEMBER_PHOTO = 6
     const val GROUP_PHOTO = 7
     const val LAST = GROUP_PHOTO
+
+    /**
+     * Whether [op] may travel on the radio chain, or (with [hub]) on the hub chain (draft GK4, review G9-12): a message
+     * and the group photo on either (their parts go through a hub), a profile and a receipt on the radio chain only,
+     * recent messages and a member's photo on the hub chain only. A list part is made by the engine, never sealed here.
+     */
+    fun allowed(op: Int, hub: Boolean): Boolean = when (op) {
+        MESSAGE, GROUP_PHOTO -> true
+        PROFILE, RECEIPT -> !hub
+        SHARED, MEMBER_PHOTO -> hub
+        else -> false
+    }
 }
 
 /**
@@ -404,6 +416,12 @@ class GroupMember(
         private set
     private var previousDigest: ByteArray = ByteArray(GroupRoster.DIGEST)
     private var secretTag: ByteArray = ByteArray(16)
+    /** When the epoch held was taken: a rival key for it is believed only for [RIVAL_MS] after that (review G9-4). */
+    private var committedAt = 0L
+    /** The epoch in which this phone first stood on a list: recent messages count only from the admin of that epoch (review G9-9). */
+    private var joinedAt = 0L
+    /** Recent messages taken so far, at most [GroupPost.RECENT_MAX] (review G9-9). */
+    private var sharedTaken = 0
     private var writer: GroupWriter? = null
     private var hubWriter: GroupWriter? = null
     private val readers = LinkedHashMap<List<Byte>, GroupReader>()
@@ -435,7 +453,10 @@ class GroupMember(
         private set
 
     /** The key and list packets of the epoch this phone started, kept [KEEP_MS] to answer [GroupControl.Ask]. */
-    private class Issued(val key: GroupKey, val packets: List<ByteArray>, val at: Long)
+    private class Issued(val key: GroupKey, val packets: List<ByteArray>, val at: Long) {
+        /** Members already answered for this epoch: each is answered once (review G9-11). */
+        val asked = LinkedHashSet<List<Byte>>()
+    }
     private var issued: Issued? = null
 
     /** Whether [send] works now: an active member with no newer key waiting for its list. */
@@ -443,6 +464,16 @@ class GroupMember(
 
     /** Whether this phone is new in the epoch held (it was not on the list before): it may get recent messages. */
     val joinedThisEpoch: Boolean get() = roster != null && previous?.member(me) == null
+
+    /** The epoch in which this phone first stood on a list (0 when it does not know). */
+    val joinedEpoch: Long get() = joinedAt
+
+    /** Counts one recent message taken; false once [GroupPost.RECENT_MAX] were (the sender's limit, enforced on receiving too). */
+    fun takeShared(): Boolean {
+        if (sharedTaken >= GroupPost.RECENT_MAX) return false
+        sharedTaken++
+        return true
+    }
 
     /** People on the list held who were not on the one before: the members a [GroupBody.PROFILE] must reach again. */
     fun added(): List<ByteArray> = roster?.members.orEmpty().filter { previous?.member(it.identity) == null }.map { it.identity.copyOf() }
@@ -524,7 +555,9 @@ class GroupMember(
                 (key.parent.contentEquals(digest) || (state == State.CONFLICT && conflictDigests.any { it.contentEquals(key.parent) }))
             // A rival for the epoch held (another list, or this list with another secret), from an admin of the list
             // before: checked when its list completes.
-            val rival = key.epoch == epoch && key.parent.contentEquals(previousDigest) && previous?.isAdmin(from) == true
+            // Only soon after the epoch was taken: an admin the list removed cannot force a conflict later (review G9-4).
+            val rival = key.epoch == epoch && key.parent.contentEquals(previousDigest) && previous?.isAdmin(from) == true &&
+                now - committedAt in 0..RIVAL_MS
             if (!next && !rival) {
                 // A key from an admin of the list held for an epoch further on: kept until the epochs before it are taken.
                 if (key.epoch !in epoch + 2..epoch + MAX_AHEAD || !current.isAdmin(from)) return false
@@ -560,7 +593,14 @@ class GroupMember(
         if (!control.group.contentEquals(group)) return false to null
         expire(now)
         return when (control) {
-            is GroupControl.Signer -> { signers[from.toList()] = control.key.copyOf(); true to null }
+            is GroupControl.Signer -> {
+                // A signing key must be new to the group: not this phone's, a member's or another person's (review G9-1).
+                val key = control.key
+                val who = from.toList()
+                if (key.contentEquals(mySigner) || roster?.members?.any { it.signer.contentEquals(key) } == true ||
+                    signers.any { (id, k) -> id != who && k.contentEquals(key) }) return false to null
+                signers[who] = key.copyOf(); true to null
+            }
             is GroupControl.Removed -> {
                 val current = roster ?: return false to null
                 if (control.epoch != epoch + 1 || !current.isAdmin(from)) return false to null
@@ -570,12 +610,14 @@ class GroupMember(
                 val i = issued ?: return false to null
                 val list = roster ?: return false to null
                 if (control.epoch != i.key.epoch || i.key.epoch != epoch || list.member(from) == null) return false to null
+                if (!i.asked.add(from.toList())) return false to null
                 true to Outgoing(mapOf(from.toList() to i.key.encode()), i.packets, emptyMap())
             }
             is GroupControl.Leave -> {
                 val list = roster ?: return false to null
                 // The notice may name the epoch after the one held (its sender took it first).
-                if (from.contentEquals(me) || list.member(from) == null || control.epoch > epoch + MAX_AHEAD) return false to null
+                // A notice from long ago would mark a member who came back as leaving (review G9-14).
+                if (from.contentEquals(me) || list.member(from) == null || control.epoch > epoch + MAX_AHEAD || control.epoch + MAX_AHEAD < epoch) return false to null
                 leaving += from.toList(); true to null
             }
             is GroupControl.Invite -> false to null
@@ -636,10 +678,22 @@ class GroupMember(
         if (body.isEmpty()) return emptyList()
         val op = body[0].toInt() and 0xFF
         if (op == GroupBody.ROSTER || op !in GroupBody.MESSAGE..GroupBody.LAST) return emptyList()
+        // An op on a chain it does not belong to is a modified client's, never read (review G9-12).
+        if (!GroupBody.allowed(op, hub)) return emptyList()
         // Receipts are for what people say, never for receipts (no echo).
         if (!hub && !old && op != GroupBody.RECEIPT) unreceipted += id
         return listOf(Message(id.toByteArray(), body.copyOfRange(1, body.size), old, op, hub, ep, seq))
     }
+
+    /** Tests only: a packet on any chain with any op, to forge what a modified client could send. */
+    internal fun sealUnchecked(op: Int, body: ByteArray, hub: Boolean): Sealed {
+        val w = if (hub) hubWriter!! else writer!!
+        val seq = w.next
+        return Sealed(w.seal(byteArrayOf(op.toByte()) + body), epoch, seq, hub)
+    }
+
+    /** Tests only: a signing key kept as if [receiveControl] had taken it, to prove the engine survives one that should not be. */
+    internal fun putSignerUnchecked(identity: ByteArray, key: ByteArray) { signers[identity.toList()] = key.copyOf() }
 
     /** A packet carrying [body] (an app message) to everyone in the group. Store [encode] before it leaves. */
     fun send(body: ByteArray): ByteArray = seal(GroupBody.MESSAGE, body).packet
@@ -648,6 +702,7 @@ class GroupMember(
     fun seal(op: Int, body: ByteArray, hub: Boolean = false): Sealed {
         check(canSend) { if (state == State.CONFLICT) "the group has two lists: an admin must start the next epoch" else "not able to send now" }
         require(op in GroupBody.MESSAGE..GroupBody.LAST && op != GroupBody.ROSTER) { "not an op the app sends" }
+        require(GroupBody.allowed(op, hub)) { "op $op does not travel on that chain" }
         val w = if (hub) hubWriter!! else writer!!
         val seq = w.next
         return Sealed(w.seal(byteArrayOf(op.toByte()) + body), epoch, seq, hub)
@@ -747,6 +802,8 @@ class GroupMember(
         secretTag = GroupKey.tag(group, nextEpoch, secret)
         // The secret itself is not kept: only the chains derived from it and a tag of it.
         secret.fill(0)
+        if (roster?.member(me) == null) joinedAt = nextEpoch
+        committedAt = now
         previous = roster
         previousDigest = digest
         epoch = nextEpoch
@@ -808,6 +865,10 @@ class GroupMember(
         u8(early.size); for (e in early) { o.write(e.from); o.write(e.key.encode()); u64(e.at) }
         val i = issued
         if (i == null) u8(0) else { u8(1); o.write(i.key.encode()); u64(i.at); u8(i.packets.size); for (pk in i.packets) blob(pk) }
+        // Added in v0.1.2 (reviews G9-4, G9-9, G9-11); a save from before it ends here and still loads.
+        u8(EXT_VERSION); u64(committedAt); u32(joinedAt); u8(sharedTaken)
+        val asked = i?.asked.orEmpty()
+        u8(asked.size); for (id in asked) o.write(id.toByteArray())
         return o.toByteArray()
     }
 
@@ -818,7 +879,10 @@ class GroupMember(
         /** Keys kept for epochs past the next (a later key overtaking an earlier list), and how far ahead. */
         const val MAX_EARLY = 4
         const val MAX_AHEAD = 4L
+        /** How long after taking an epoch a rival key for it is still believed (review G9-4). */
+        const val RIVAL_MS = 6 * 3_600_000L
         private const val STATE_VERSION = 2
+        private const val EXT_VERSION = 1
 
         /** A member saved with [encode]; null when the bytes are not a saved member of [group]. */
         fun decode(me: ByteArray, mySigner: ByteArray, sign: (ByteArray) -> ByteArray, group: ByteArray, bytes: ByteArray): GroupMember? = try {
@@ -875,6 +939,13 @@ class GroupMember(
                 val at = b.long
                 m.issued = Issued(key, List(u8()) { blob() }, at)
             }
+            if (b.hasRemaining()) {
+                require(u8() == EXT_VERSION)
+                m.committedAt = b.long
+                m.joinedAt = u32()
+                m.sharedTaken = u8()
+                repeat(u8()) { m.issued!!.asked += raw(P256.POINT).toList() }
+            } else if (m.roster != null && m.previous?.member(me) == null) m.joinedAt = m.epoch
             require(!b.hasRemaining())
             m
         } catch (_: RuntimeException) { null }

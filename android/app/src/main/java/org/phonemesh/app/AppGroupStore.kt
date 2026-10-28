@@ -163,6 +163,8 @@ class AppGroupStore(
                 else -> Unit
             }
             is GroupPost.Event.InvitationArrived -> Unit
+            // Told in the chat from the storage commit on (review G9-7).
+            is GroupPost.Event.CannotReach -> Unit
         }
     }
 

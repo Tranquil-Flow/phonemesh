@@ -1,5 +1,6 @@
 package org.phonemesh.core.group
 
+import org.phonemesh.core.PictureWire
 import org.phonemesh.core.account.AccountId
 import org.phonemesh.core.account.Avatar
 import org.phonemesh.core.account.Profile
@@ -80,7 +81,9 @@ class GroupPost(
      * A group packet to send: by radio and to a hub, or ([hubOnly]) only to a hub (decisions 64, 69). [messageId] links
      * a chat message; [audience] is how many others were on the list when it was sealed ("of M").
      */
-    class Packet(val group: ByteArray, val sealed: GroupMember.Sealed, val hubOnly: Boolean, val messageId: Long? = null, val audience: Int = 0)
+    class Packet(val group: ByteArray, val sealed: GroupMember.Sealed, val hubOnly: Boolean, val messageId: Long? = null, val audience: Int = 0,
+                 /** The [GroupBody] op it carries (a list part for [GroupBody.ROSTER]). */
+                 val op: Int = GroupBody.MESSAGE)
 
     /** Something the app shows or records, in the same transaction as the state that read it. */
     sealed class Event {
@@ -99,6 +102,8 @@ class GroupPost(
         class ListChanged(override val group: ByteArray, val epoch: Long, val roster: GroupRoster, val joined: List<AccountId>, val left: List<AccountId>) : Event()
         class StateChanged(override val group: ByteArray, val state: GroupMember.State) : Event()
         class InvitationArrived(override val group: ByteArray, val from: AccountId) : Event()
+        /** An epoch did not start because keys go privately and these members are not contacts (review G9-7). */
+        class CannotReach(override val group: ByteArray, val people: List<AccountId>) : Event()
     }
 
     /**
@@ -137,7 +142,7 @@ class GroupPost(
         )
         fun send(op: Int, body: ByteArray, hubOnly: Boolean, messageId: Long? = null) {
             val sealed = member.seal(op, body, hub = hubOnly)
-            packets += Packet(group, sealed, hubOnly, messageId, (member.roster?.members?.size ?: 1) - 1)
+            packets += Packet(group, sealed, hubOnly, messageId, (member.roster?.members?.size ?: 1) - 1, op)
         }
     }
 
@@ -148,6 +153,33 @@ class GroupPost(
     }
 
     private fun account(identity: ByteArray) = AccountId.of(identity)
+
+    // ---- the codes this phone reads (review G9-6): kept in memory so a packet for no group of this phone costs no decode
+
+    /** On-air code (its first 8 bytes) -> the group that reads it. Never saved; rebuilt by [expectedCodes] and after each change a group makes. */
+    private val codeOwner = HashMap<Long, ByteArray>()
+    private val codesOf = HashMap<List<Byte>, List<Long>>()
+    private var indexed = false
+
+    private fun codeKey(code: ByteArray): Long = java.nio.ByteBuffer.wrap(code, 0, 8).long
+
+    private fun index(group: ByteArray, member: GroupMember, now: Long) {
+        unindex(group)
+        val keys = member.expectedCodes(now).map(::codeKey)
+        for (k in keys) codeOwner[k] = group.copyOf()
+        codesOf[group.toList()] = keys
+    }
+
+    private fun unindex(group: ByteArray) {
+        codesOf.remove(group.toList())?.forEach { k -> if (codeOwner[k]?.contentEquals(group) == true) codeOwner.remove(k) }
+    }
+
+    /** Saves [o]'s change; when the store keeps it, the codes this group reads are worked out again from the member in hand. */
+    private fun commit(o: Open, now: Long, change: Change = o.change()): Boolean {
+        if (!store.commit(change)) return false
+        if (change.deleted) unindex(o.group) else index(o.group, o.member, now)
+        return true
+    }
 
     /** The name, colour and picture a group shows now: its list's, else its draft's. */
     fun looks(group: ByteArray): GroupStore.Draft? {
@@ -176,7 +208,7 @@ class GroupPost(
         val o = Open(GroupStore.Saved(group, member.encode(), signer, identities, draft = draft), member)
         val invite = GroupControl.Invite(group, signer, people.size + 1, name, colour, avatar)
         for (a in people) o.private += a to Body.Group(GroupControl.INVITE, invite.encode())
-        return if (store.commit(o.change())) group else null
+        return if (commit(o, now)) group else null
     }
 
     /** As an admin: invite more [people] (contacts not on the list or invited yet). */
@@ -192,7 +224,7 @@ class GroupPost(
         val looks = list?.let { GroupStore.Draft(it.name, it.colour, it.avatar, it.recentForNew) } ?: o.draft ?: return false
         val invite = GroupControl.Invite(group, o.member.mySigner, total, looks.name, looks.colour, looks.avatar)
         for (a in fresh) o.private += a to Body.Group(GroupControl.INVITE, invite.encode())
-        return store.commit(o.change())
+        return commit(o, now)
     }
 
     /** Join: this phone makes its signing key for the group and sends it to the admin who invited it. */
@@ -205,7 +237,7 @@ class GroupPost(
         val i = invitation.invite
         val o = Open(GroupStore.Saved(group, member.encode(), signer, draft = GroupStore.Draft(i.name, i.colour, i.avatar, false)), member)
         o.private += invitation.from to Body.Group(GroupControl.SIGNER, member.introduce())
-        return store.commit(o.change(dropInvitation = true))
+        return commit(o, now, o.change(dropInvitation = true))
     }
 
     /** Ignore: the invitation goes; nothing is sent. */
@@ -230,8 +262,11 @@ class GroupPost(
         val control = GroupControl.decode(body.kind, body.bytes) ?: return false
         if (control is GroupControl.Invite) {
             if (store.saved(control.group) != null) return true
-            val known = store.invitations()
-            if (known.size >= MAX_INVITATIONS && known.none { it.invite.group.contentEquals(control.group) }) return true
+            // The first invitation for a group stays (a later one, from anyone, is dropped), one contact may leave only a few,
+            // and one that waited too long no longer counts (review G9-8).
+            val known = store.invitations().filter { now - it.at <= INVITATION_TTL_MS }
+            if (known.any { it.invite.group.contentEquals(control.group) }) return true
+            if (known.size >= MAX_INVITATIONS || known.count { it.from == from } >= MAX_INVITATIONS_PER_SENDER) return true
             return store.commit(Change(control.group, invitation = GroupStore.Invitation(from, fromIdentity, control, now),
                 events = listOf(Event.InvitationArrived(control.group, from))))
         }
@@ -239,7 +274,7 @@ class GroupPost(
         val (taken, resend) = o.member.receiveControl(fromIdentity, control, now)
         if (taken && resend != null) {
             for ((id, k) in resend.keys) o.private += account(id.toByteArray()) to Body.Group(GroupControl.KEY, k)
-            for (p in resend.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, o.member.epoch, -1, false), false)
+            for (p in resend.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, o.member.epoch, -1, false), false, op = GroupBody.ROSTER)
         }
         // Someone this phone invited said Join, or a member left: as an admin, the next epoch goes soon, with every
         // join and leaving that came meanwhile (one epoch for many: each costs a key per member and the list).
@@ -248,22 +283,53 @@ class GroupPost(
         return finish(o, now)
     }
 
-    /** As an admin able to send: one epoch adding every invited person whose Join (signing key) has arrived. */
+    /**
+     * As an admin able to send: one epoch adding every invited person whose Join (signing key) has arrived. A joiner whose
+     * key is already in use is dropped (review G9-1), and when a member's key cannot be sent the epoch waits and the admin
+     * is told (review G9-7).
+     */
     private fun addJoined(o: Open, now: Long): Boolean {
         if (!isAdmin(o) || o.member.waitingOn() != null) return false
         val list = o.member.roster
         if (list != null && !o.member.canSend) return false
-        val ready = o.invited.mapNotNull { (a, id) -> o.member.signerOf(id)?.let { Triple(a, id, it) } }
-            .filter { (_, id, _) -> list?.member(id) == null }
-        if (ready.isEmpty()) return false
+        val used = HashSet<List<Byte>>()
+        used += o.member.mySigner.toList()
+        list?.members?.forEach { used += it.signer.toList() }
+        val ready = ArrayList<Triple<AccountId, ByteArray, ByteArray>>()
+        val bad = HashSet<AccountId>()
+        for ((a, id) in o.invited) {
+            val key = o.member.signerOf(id) ?: continue
+            if (list?.member(id) != null) continue
+            if (used.add(key.toList())) ready += Triple(a, id, key) else bad += a
+        }
+        o.invited.removeAll { it.first in bad }
+        if (ready.isEmpty()) return bad.isNotEmpty()
         val room = GroupRoster.MAX_MEMBERS - (list?.members?.size ?: 1)
-        val taken = ready.take(room)
-        if (taken.isEmpty()) return false
-        val joiners = taken.map { (_, id, key) -> GroupRoster.Member(id, false, key) }
-        val next = if (list == null) {
+        val base: List<GroupRoster.Member>
+        val build: (List<GroupRoster.Member>) -> GroupRoster
+        if (list == null) {
             val d = o.draft ?: return false
-            GroupRoster(d.name, d.colour, listOf(GroupRoster.Member(me, true, o.member.mySigner)) + joiners, d.avatar, d.recentForNew)
-        } else GroupRoster(list.name, list.colour, list.members + joiners, list.avatar, list.recentForNew)
+            base = listOf(GroupRoster.Member(me, true, o.member.mySigner))
+            build = { GroupRoster(d.name, d.colour, it, d.avatar, d.recentForNew) }
+        } else {
+            base = list.members
+            build = { GroupRoster(list.name, list.colour, it, list.avatar, list.recentForNew) }
+        }
+        // Add joiners one by one: one that the list refuses is dropped, never an exception for the others.
+        val taken = ArrayList<Triple<AccountId, ByteArray, ByteArray>>()
+        var next: GroupRoster? = null
+        for (r in ready) {
+            if (taken.size >= room) break
+            val members = base + (taken + r).map { (_, id, key) -> GroupRoster.Member(id, false, key) }
+            val candidate = try { build(members) } catch (_: IllegalArgumentException) { o.invited.removeAll { it.first == r.first }; continue }
+            taken += r; next = candidate
+        }
+        if (next == null) return true
+        val unreachable = unreachable(next)
+        if (unreachable.isNotEmpty()) {
+            o.events += Event.CannotReach(o.group, unreachable)
+            return true
+        }
         o.invited.removeAll { inv -> taken.any { it.first == inv.first } }
         startEpoch(o, next, now)
         return true
@@ -280,8 +346,13 @@ class GroupPost(
      * Whether this phone can give every other member of [next] the new key: keys go privately, so each must be a
      * contact. An admin who is missing one cannot start the epoch (the screens ask to add them first).
      */
-    private fun canReach(next: GroupRoster): Boolean =
-        next.members.all { it.identity.contentEquals(me) || store.identityOf(account(it.identity)) != null }
+    private fun canReach(next: GroupRoster): Boolean = unreachable(next).isEmpty()
+
+    /** The members of [next] this phone has no private session for (it cannot give them a key). */
+    private fun unreachable(next: GroupRoster): List<AccountId> = unreachableIn(next.members.map { it.identity })
+
+    private fun unreachableIn(identities: List<ByteArray>): List<AccountId> =
+        identities.filter { !it.contentEquals(me) && store.identityOf(account(it)) == null }.map { account(it) }
 
     private fun startEpoch(o: Open, next: GroupRoster, now: Long) {
         val before = o.member.roster
@@ -289,7 +360,7 @@ class GroupPost(
         for ((id, k) in out.keys) o.private += account(id.toByteArray()) to Body.Group(GroupControl.KEY, k)
         // A removed person this phone does not know gets no notice: they find out when keys stop coming.
         for ((id, r) in out.removed) if (store.identityOf(account(id.toByteArray())) != null) o.private += account(id.toByteArray()) to Body.Group(GroupControl.REMOVED, r)
-        for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, o.member.epoch, -1, false), false)
+        for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, o.member.epoch, -1, false), false, op = GroupBody.ROSTER)
         val joined = next.members.filter { before?.member(it.identity) == null && !it.identity.contentEquals(me) }
         // Recent messages for the people who just joined (decision 74): hub only, from this admin.
         if (joined.isNotEmpty() && next.recentForNew && before != null) {
@@ -305,21 +376,29 @@ class GroupPost(
     // ---- group packets (radio or hub)
 
     /** Every on-air code this phone can read in its groups, its own included (review C6): for listening and hubs. */
-    fun expectedCodes(now: Long): Set<String> = store.groups().flatMapTo(LinkedHashSet()) { g ->
-        open(g)?.member?.expectedCodes(now)?.map { c -> c.joinToString("") { "%02x".format(it) } }.orEmpty()
+    fun expectedCodes(now: Long): Set<String> {
+        codeOwner.clear(); codesOf.clear()
+        val out = LinkedHashSet<String>()
+        for (g in store.groups()) {
+            val m = open(g)?.member ?: continue
+            index(g, m, now)
+            m.expectedCodes(now).mapTo(out) { c -> c.joinToString("") { "%02x".format(it) } }
+        }
+        indexed = true
+        return out
     }
 
     /** A packet from the radio or a hub. True when one of this phone's groups read it (and saved what it says). */
     fun receive(packet: ByteArray, now: Long): Boolean {
         val code = GroupCipher.codeOf(packet) ?: return false
-        for (g in store.groups()) {
-            val o = open(g) ?: continue
-            val read = o.member.receive(packet, now)
-            if (!o.member.took) continue
-            for (m in read) read(o, m, now, code)
-            return finish(o, now)
-        }
-        return false
+        if (!indexed) expectedCodes(now)
+        // Only the group that expects this code is opened (review G9-6): a stranger's packet costs a table look-up.
+        val g = codeOwner[codeKey(code)] ?: return false
+        val o = open(g) ?: return false
+        val read = o.member.receive(packet, now)
+        if (!o.member.took) return false
+        for (m in read) read(o, m, now, code)
+        return finish(o, now)
     }
 
     private fun read(o: Open, m: GroupMember.Message, now: Long, code: ByteArray) {
@@ -334,13 +413,18 @@ class GroupPost(
             GroupBody.PROFILE -> Profile.decode(m.body)?.let { o.events += Event.ProfileOf(o.group, sender, it) }
             GroupBody.RECEIPT -> o.member.receiptForMe(m)?.let { o.events += Event.Delivered(o.group, sender, m.epoch, it) }
             GroupBody.SHARED -> {
-                // Only for a phone new on this list, only from an admin, only through a hub (decision 74).
-                if (!m.hub || m.oldEpoch || !o.member.joinedThisEpoch || list?.isAdmin(m.sender) != true) return
+                // Only for a phone new in the epoch it was sent in (also read while the epoch after it is new: its old hub
+                // readers are kept), only from an admin, only through a hub, at most RECENT_MAX of them, never dated later
+                // than now (decision 74, review G9-9). Admins are never demoted, and a removed one has no old reader.
+                if (!m.hub || m.epoch != o.member.joinedEpoch || list?.isAdmin(m.sender) != true) return
                 val s = GroupShared.decode(m.body) ?: return
-                o.events += Event.Message(o.group, sender, s.body, m.epoch, m.seq, false, true, s)
+                if (!o.member.takeShared()) return
+                val clamped = GroupShared(s.author, minOf(s.atSeconds, maxOf(0L, now / 1000)), s.body)
+                o.events += Event.Message(o.group, sender, s.body, m.epoch, m.seq, false, true, clamped)
             }
-            GroupBody.MEMBER_PHOTO -> if (m.hub) o.events += Event.Photo(o.group, sender, false, m.body)
-            GroupBody.GROUP_PHOTO -> if (list?.isAdmin(m.sender) == true) o.events += Event.Photo(o.group, sender, true, m.body)
+            // A piece that is not a whole group-cut piece never reaches the photo table (review G9-3).
+            GroupBody.MEMBER_PHOTO -> if (m.hub && PictureWire.decodeGroup(m.body) != null) o.events += Event.Photo(o.group, sender, false, m.body)
+            GroupBody.GROUP_PHOTO -> if (list?.isAdmin(m.sender) == true && PictureWire.decodeGroup(m.body) != null) o.events += Event.Photo(o.group, sender, true, m.body)
         }
     }
 
@@ -366,7 +450,7 @@ class GroupPost(
             o.events += Event.StateChanged(o.group, m.state)
             if (m.state == GroupMember.State.REMOVED || m.state == GroupMember.State.LEFT) { o.receiptDue = null; o.profileDue = null; o.invited.clear() }
         }
-        return store.commit(o.change())
+        return commit(o, now)
     }
 
     // ---- sending
@@ -382,7 +466,7 @@ class GroupPost(
         if (!o.member.canSend || bodies.isEmpty()) return null
         if (bodies.any { it.first.isEmpty() || it.first.size >= GroupCipher.MAX_BODY }) return null
         for ((b, hub) in bodies) o.send(GroupBody.MESSAGE, b, hub, messageId)
-        return if (store.commit(o.change())) o.packets.toList() else null
+        return if (commit(o, now)) o.packets.toList() else null
     }
 
     /**
@@ -391,22 +475,37 @@ class GroupPost(
      */
     fun tick(now: Long): Boolean {
         var ok = true
+        // An invitation nobody answered in a month goes (review G9-8).
+        for (i in store.invitations()) if (now - i.at > INVITATION_TTL_MS) ok = store.commit(Change(i.invite.group, dropInvitation = true)) && ok
         for (g in store.groups()) {
             val o = open(g) ?: continue
             val m = o.member
             var work = false
             val due = o.adminDue
             if (due != null && due <= now && isAdmin(o) && m.waitingOn() == null && (m.roster == null || m.canSend)) {
-                if (m.leaving().isNotEmpty()) {
-                    val list = m.roster!!
-                    val gone = m.leaving()
-                    val stay = list.members.filter { mem -> gone.none { it.contentEquals(mem.identity) } }
-                    val next = GroupRoster(list.name, list.colour, stay, list.avatar, list.recentForNew)
-                    if (stay.size >= 2 && canReach(next)) startEpoch(o, next, now)
+                // Whatever an admin's epoch runs into, the batch is done afterwards: a bad joiner must not make this repeat
+                // at every tick (review G9-1).
+                try {
+                    if (m.leaving().isNotEmpty()) {
+                        val list = m.roster!!
+                        val gone = m.leaving()
+                        val stay = list.members.filter { mem -> gone.none { it.contentEquals(mem.identity) } }
+                        val next = GroupRoster(list.name, list.colour, stay, list.avatar, list.recentForNew)
+                        if (stay.size >= 2) {
+                            val unreachable = unreachable(next)
+                            if (unreachable.isEmpty()) startEpoch(o, next, now) else o.events += Event.CannotReach(o.group, unreachable)
+                        }
+                    }
+                    addJoined(o, now)
+                } catch (_: IllegalArgumentException) {
+                    // Nothing of it was kept; the batch below is still marked done.
                 }
-                addJoined(o, now)
                 o.adminDue = null; work = true
             } else if (due != null && !isAdmin(o)) { o.adminDue = null; work = true }
+            else if (due == null && isAdmin(o) && m.waitingOn() == null && (m.roster == null || m.canSend) && joinersReachable(o)) {
+                // Joiners that waited for a contact to be added: their epoch goes again now that every key has a way.
+                o.adminDue = now + ADMIN_BATCH_MS; work = true
+            }
             // A list that has not come after a while: ask its admin once to send it again (review C4).
             val waiting = m.waiting()
             if (waiting != null && now - waiting.first >= ASK_AFTER_MS && o.askedEpoch != waiting.second) {
@@ -432,6 +531,14 @@ class GroupPost(
         return ok
     }
 
+    /** Whether someone invited has sent a signing key and every key the next list needs has a way (a contact for each member). */
+    private fun joinersReachable(o: Open): Boolean {
+        val list = o.member.roster
+        val joiners = o.invited.filter { (_, id) -> o.member.signerOf(id) != null && list?.member(id) == null }
+        if (joiners.isEmpty()) return false
+        return unreachableIn(list?.members.orEmpty().map { it.identity } + joiners.map { it.second }).isEmpty()
+    }
+
     /** When [tick] has work next; null when nothing waits. */
     fun nextDue(): Long? = store.groups().mapNotNull { g ->
         val s = store.saved(g) ?: return@mapNotNull null
@@ -443,7 +550,7 @@ class GroupPost(
         val o = open(g) ?: return@all true
         if (o.member.roster == null || o.member.state == GroupMember.State.REMOVED || o.member.state == GroupMember.State.LEFT) return@all true
         o.profileDue = now + profileDelay()
-        store.commit(o.change())
+        commit(o, now)
     }
 
     // ---- admin actions (decision 72): each is a new epoch
@@ -454,11 +561,12 @@ class GroupPost(
         if (!isAdmin(o) || o.member.waitingOn() != null) return false
         val n = try { next(list) } catch (_: IllegalArgumentException) { null } ?: return false
         if (!canReach(n)) return false
-        startEpoch(o, n, now)
+        // A list the engine itself refuses (review G9-13) is a refusal, never an exception out of the admin's call.
+        try { startEpoch(o, n, now) } catch (_: IllegalArgumentException) { return false }
         return finish(o, now)
     }
 
-    fun remove(group: ByteArray, person: AccountId, now: Long) = edit(group, now) { l ->
+    fun remove(group: ByteArray, person: AccountId, now: Long) = person != account(me) && edit(group, now) { l ->
         l.members.filterNot { account(it.identity) == person }.takeIf { it.size < l.members.size && it.size >= 2 }
             ?.let { GroupRoster(l.name, l.colour, it, l.avatar, l.recentForNew) }
     }
@@ -485,7 +593,7 @@ class GroupPost(
         val o = open(group) ?: return false
         val (to, body) = o.member.ask() ?: return false
         o.private += account(to) to Body.Group(GroupControl.ASK, body)
-        return store.commit(o.change())
+        return commit(o, now)
     }
 
     /**
@@ -496,7 +604,7 @@ class GroupPost(
         val o = open(group) ?: return false
         val list = o.member.roster
         if (list == null) {
-            if (o.member.inviter == null) return store.commit(Change(group, deleted = true))
+            if (o.member.inviter == null) return commit(o, now, Change(group, deleted = true))
             o.member.leave()
             return finish(o, now)
         }
@@ -508,9 +616,11 @@ class GroupPost(
             if (!o.member.canSend) return false
             val next = GroupRoster(list.name, list.colour, rest.map { if (it === chosen) GroupRoster.Member(it.identity, true, it.signer) else it },
                 list.avatar, list.recentForNew)
-            val out = o.member.newEpoch(next, now, random, leaving = true)
+            // The keys go privately: a member this phone has no way to reach would never get one (review G9-7).
+            if (!canReach(next)) return false
+            val out = try { o.member.newEpoch(next, now, random, leaving = true) } catch (_: IllegalArgumentException) { return false }
             for ((id, k) in out.keys) o.private += account(id.toByteArray()) to Body.Group(GroupControl.KEY, k)
-            for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, list.let { o.epochBefore + 1 }, -1, false), false)
+            for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, list.let { o.epochBefore + 1 }, -1, false), false, op = GroupBody.ROSTER)
             return finish(o, now)
         }
         // The notice goes privately, so to an admin this phone has a contact for (an admin it does not know cannot be told).
@@ -522,12 +632,15 @@ class GroupPost(
     fun forget(group: ByteArray): Boolean {
         val o = open(group) ?: return false
         if (o.member.state != GroupMember.State.LEFT && o.member.state != GroupMember.State.REMOVED) return false
-        return store.commit(Change(group, deleted = true))
+        return commit(o, 0L, Change(group, deleted = true))
     }
 
     companion object {
         const val MAX_GROUPS = 32
         const val MAX_INVITATIONS = 16
+        /** Invitations kept from one contact, and how long any invitation waits (review G9-8). */
+        const val MAX_INVITATIONS_PER_SENDER = 4
+        const val INVITATION_TTL_MS = 30 * 86_400_000L
         const val MIN_QUIET_MS = 15_000L
         const val MAX_QUIET_MS = 60_000L
         const val MAX_PROFILE_DELAY_MS = 60_000L

@@ -29,7 +29,12 @@ class ChatBackupShotsTest {
     private val monitors = ArrayList<Instrumentation.ActivityMonitor>()
     private val copy = File(inst.targetContext.cacheDir, "chat-shots.pmbk")
     private val work get() = File(inst.targetContext.noBackupFilesDir, "backup-shots-test")
-    private val dir get() = File(checkNotNull(inst.targetContext.getExternalFilesDir(null)), "chat-backup-shots")
+    private val captureTheme get() = when (InstrumentationRegistry.getArguments().getString("backupTheme")) {
+        null, "light" -> ThemeMode.LIGHT
+        "dark" -> ThemeMode.DARK
+        else -> throw IllegalArgumentException("unknown backup capture theme")
+    }
+    private val dir get() = File(checkNotNull(inst.targetContext.getExternalFilesDir(null)), "chat-backup-shots-${captureTheme.name.lowercase()}")
 
     @After fun tearDown() {
         monitors.forEach { inst.removeMonitor(it) }
@@ -65,7 +70,7 @@ class ChatBackupShotsTest {
     @Test fun captureChatCopyScreens() {
         assumeFalse("only in the screenshot build", BuildConfig.SECURE_SCREENS)
         check(dir.deleteRecursively() || !dir.exists()); check(dir.mkdirs())
-        TestCore.nextTheme = ThemeMode.LIGHT
+        TestCore.nextTheme = captureTheme
         TestCore.install(language = "en-US", voices = listOf("en-US"))
         val f = ChatFixture.build(core)
         val start = Views.start(RecoveryActivity::class.java)
@@ -91,7 +96,7 @@ class ChatBackupShotsTest {
         val key = RecoveryKey.fromWords(words.joinToString(" "), RecoveryKey.WordList.load("english"))!!
         val bytes = copy.readBytes()
         TestCore.uninstall()
-        TestCore.nextTheme = ThemeMode.LIGHT
+        TestCore.nextTheme = captureTheme
         TestCore.install(language = "en-US", voices = listOf("en-US"))
         copy.writeBytes(bytes)
         val r = Views.start(RecoveryActivity::class.java)

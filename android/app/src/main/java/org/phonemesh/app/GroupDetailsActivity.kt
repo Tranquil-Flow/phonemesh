@@ -48,6 +48,7 @@ class GroupDetailsActivity : ScreenActivity() {
         recent = Switch(this).apply {
             tag = "group_recent"
             text = getString(R.string.group_history)
+            contentDescription = text
             textSize = Ui.BODY_SP
             setTextColor(palette.text)
             minHeight = Ui.dp(this@GroupDetailsActivity, 48)
@@ -116,6 +117,7 @@ class GroupDetailsActivity : ScreenActivity() {
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = Ui.dp(this@GroupDetailsActivity, 64)
         tag = "person:${person.account}"
+        contentDescription = person.name
         addView(Looks.avatar(this@GroupDetailsActivity, palette, ChatKind.PERSON, 48, person.face))
         val words = LinearLayout(this@GroupDetailsActivity).apply { orientation = LinearLayout.VERTICAL }
         words.addView(Ui.text(this@GroupDetailsActivity, if (person.me) getString(R.string.group_you, person.name) else person.name, palette.text, bold = true))

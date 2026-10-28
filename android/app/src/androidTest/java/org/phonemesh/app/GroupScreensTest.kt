@@ -34,6 +34,8 @@ import java.security.interfaces.ECPublicKey
  */
 @RunWith(AndroidJUnit4::class)
 class GroupScreensTest {
+    /** Optional release capture at already-asserted, real fixture states. Never part of the app. */
+    var captureForRelease: ((String) -> Unit)? = null
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val core get() = TestCore.core
 
@@ -137,12 +139,14 @@ class GroupScreensTest {
     @Test fun newPrivateGroupStartsFromAddSomeoneAndWaitsForPeopleToJoin() {
         prepare()
         val add = Views.start(AddSomeoneActivity::class.java)
+        captureForRelease?.invoke("01-add-someone")
         Views.tap(add, "add_new_group")
         until { resumed("GroupPeopleActivity") != null }
         val people = resumed("GroupPeopleActivity")!!
         assertNotNull(Views.withText(people, "Only people you added can join."))
         assertEquals("1 of 20 people, with you", Views.textOf(Views.tagged(people, "group_count")!!))
         assertFalse("Next waits for someone", Views.tagged(people, "group_next")!!.let { v -> TestCore.onMain { v.isEnabled } })
+        captureForRelease?.invoke("02-choose-people")
         Views.tap(people, "candidate:${bea.account}")
         assertEquals("2 of 20 people, with you", Views.textOf(Views.tagged(people, "group_count")!!))
         Views.tap(people, "group_next")
@@ -152,11 +156,13 @@ class GroupScreensTest {
         assertNotNull(Views.withText(name, "A photo goes only through a local hub."))
         (Views.tagged(name, "name_field") as android.widget.EditText).let { f -> TestCore.onMain { f.setText("Market") } }
         Views.tap(name, "colour_0")
+        captureForRelease?.invoke("03-name-group")
         Views.tap(name, "name_save")
         until { resumed("ConversationActivity") != null }
         val chat = resumed("ConversationActivity")!!
         assertEquals("Market", Views.textOf(Views.tagged(chat, "title")!!))
         until { Views.withText(chat, "Waiting for 1 people to join.") != null }
+        captureForRelease?.invoke("04-waiting-for-join")
         // The invitation went to Bea privately, through the Postman's radio path; her phone shows Join and Ignore.
         toBea(2_000_000)
         assertEquals(1, beaGroups.invites.size)
@@ -356,6 +362,7 @@ class GroupScreensTest {
         until { Views.tagged(chats, "invitation") != null }
         assertEquals("Bea vous a ajouté à Couture.", Views.textOf(Views.tagged(chats, "invitation_title")!!))
         assertTrue("no chat before Join", TestCore.onMain { core.history.chats().none { it.kind == ChatKind.PRIVATE_GROUP } })
+        captureForRelease?.invoke("10-invitation")
         Views.tap(chats, "invitation_join")
         until { resumed("ConversationActivity") != null }
         assertEquals(1, TestCore.onMain { core.history.chats().count { it.kind == ChatKind.PRIVATE_GROUP } })

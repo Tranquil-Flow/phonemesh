@@ -76,6 +76,7 @@ class GroupPeopleActivity : ScreenActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 minimumHeight = Ui.dp(this@GroupPeopleActivity, 64)
                 tag = "candidate:${contact.accountId}"
+                contentDescription = contact.name
                 isClickable = !fixed
             }
             row.addView(Looks.avatar(this, palette, ChatKind.PERSON, 48, core.faceOf(contact)))

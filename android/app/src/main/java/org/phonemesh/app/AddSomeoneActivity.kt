@@ -56,6 +56,11 @@ class AddSomeoneActivity : ScreenActivity() {
                     .putExtra(Intent.EXTRA_TEXT, core.accountsFlow.link()), null))
             }
         }, full())
+        // Decision 72 a: a private group starts here, from the people already added.
+        column.addView(Ui.button(this, palette, getString(R.string.group_new), R.drawable.ic_group).apply {
+            tag = "add_new_group"
+            setOnClickListener { GroupPeopleActivity.open(this@AddSomeoneActivity, null) }
+        }, full().apply { topMargin = pad() * 2 })
         show(ScrollView(this).apply { addView(column) })
         render()
     }

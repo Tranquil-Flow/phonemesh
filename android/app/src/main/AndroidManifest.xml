@@ -47,6 +47,8 @@
         <activity android:name=".ScanActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".SafetyActivity" android:exported="false" />
         <activity android:name=".ContactActivity" android:exported="false" />
+        <activity android:name=".GroupPeopleActivity" android:exported="false" />
+        <activity android:name=".GroupDetailsActivity" android:exported="false" />
         <!-- Add-me links (accounts step 11). The card after # never reaches the website; assetlinks.json verifies. -->
         <activity android:name=".LinkActivity" android:exported="true" android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">

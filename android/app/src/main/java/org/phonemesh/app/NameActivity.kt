@@ -57,24 +57,38 @@ class NameActivity : ScreenActivity() {
         }
     }
 
+    /** Group mode (decision 72): the people of a new group, or the chat of a group being renamed; both null for your own name. */
+    private var people: List<String>? = null
+    private var groupChat: Long? = null
+    private val forGroup get() = people != null || groupChat != null
+    private var groupPhoto: android.graphics.Bitmap? = null
+    private var recentForNew = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val saved = core.account()
+        people = intent.getStringArrayExtra(EXTRA_PEOPLE)?.toList()
+        groupChat = intent.getLongExtra(EXTRA_GROUP_CHAT, -1).takeIf { it >= 0 }
+        val group = groupChat?.let { core.groupView(it) }
+        if (groupChat != null && group == null) { finish(); return }
+        recentForNew = group?.recentForNew ?: false
+        groupPhoto = group?.face?.photo
+        val saved = if (group != null) group.name to group.face.colour else if (forGroup) null else core.account()
         colour = savedInstanceState?.getInt(STATE_COLOUR, -1)?.takeIf { it >= 0 } ?: saved?.second ?: -1
         photo = savedInstanceState?.getByteArray(STATE_PHOTO)?.let { webp ->
             android.graphics.BitmapFactory.decodeByteArray(webp, 0, webp.size)?.let { core.draftOf(it) }
         }
         avatar = savedInstanceState?.getString(STATE_EMOJI)?.let { e -> runCatching { Avatar.Emoji(e) }.getOrNull() }
             ?: photo?.avatar
-            ?: if (savedInstanceState?.getBoolean(STATE_LETTER) == true) Avatar.Letter else core.ownAvatar()
+            ?: if (savedInstanceState?.getBoolean(STATE_LETTER) == true) Avatar.Letter
+            else if (group != null) group.face.avatar else if (forGroup) Avatar.Letter else core.ownAvatar()
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad(), 0, pad(), pad())
         }
-        column.addView(backBar(getString(R.string.name_title)))
+        column.addView(backBar(getString(if (forGroup) R.string.group_name_title else R.string.name_title)))
         column.addView(noteLine())
 
-        micHint = Ui.text(this, getString(R.string.name_say), palette.text, 20f, bold = true).apply {
+        micHint = Ui.text(this, getString(sayId()), palette.text, 20f, bold = true).apply {
             tag = "name_say"
             gravity = Gravity.CENTER
         }
@@ -84,7 +98,7 @@ class NameActivity : ScreenActivity() {
             tag = "name_mic"
             isClickable = true
             background = Ui.circle(palette.text)
-            contentDescription = getString(R.string.name_say)
+            contentDescription = getString(sayId())
         }
         ring = RecordRing(this, palette.bad)
         mic.addView(ring, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
@@ -104,8 +118,8 @@ class NameActivity : ScreenActivity() {
             tag = "name_field"
             textSize = 26f
             setTextColor(palette.text)
-            hint = getString(R.string.name_title)
-            contentDescription = getString(R.string.name_title)
+            hint = getString(if (forGroup) R.string.group_name_title else R.string.name_title)
+            contentDescription = getString(if (forGroup) R.string.group_name_title else R.string.name_title)
             // No suggestions: keyboards otherwise "correct" names that are not dictionary words (Esi became ESO).
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS or
                 InputType.TYPE_TEXT_VARIATION_PERSON_NAME or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -215,8 +229,9 @@ class NameActivity : ScreenActivity() {
             })
         }
         column.addView(choices, full())
+        if (forGroup) column.addView(Ui.text(this, getString(R.string.group_photo_hub), palette.muted).apply { tag = "group_photo_hub" })
 
-        save = Ui.button(this, palette, getString(R.string.name_save), R.drawable.ic_check, filled = true).apply {
+        save = Ui.button(this, palette, getString(if (people != null) R.string.group_create else R.string.name_save), R.drawable.ic_check, filled = true).apply {
             tag = "name_save"
             setOnClickListener { onSave() }
         }
@@ -340,10 +355,22 @@ class NameActivity : ScreenActivity() {
     /** What the person said or typed, made valid; null when nothing usable is there. */
     private fun cleaned(): String? = Names.clean(field.text.toString()).takeIf { it.isNotEmpty() }
 
+    private fun sayId() = if (forGroup) R.string.group_say_name else R.string.name_say
+
     private fun onSave() {
         val name = cleaned() ?: return
         if (!Names.valid(name) || name.toByteArray(Charsets.UTF_8).size > Names.MAX_BYTES || colour !in 0..0xFFFFFF) return
         val chosen = photo?.takeIf { avatar == it.avatar }
+        people?.let { list ->
+            val chat = core.createGroup(name, colour, avatar, chosen, list) ?: return core.note(UiText(R.string.group_cannot_send))
+            startActivity(ConversationActivity.intent(this, chat))
+            finish()
+            return
+        }
+        groupChat?.let { chat ->
+            if (core.restyleGroup(chat, name, colour, avatar, chosen, recentForNew)) finish()
+            return
+        }
         if (chosen != null) { if (!core.saveProfilePhoto(name, colour, chosen)) return } else core.saveProfile(name, colour, avatar)
         finish()
     }
@@ -365,7 +392,7 @@ class NameActivity : ScreenActivity() {
         val recording = core.recordingChatId == AppCore.NAME_DRAFT && core.recordState == AppCore.RecordState.RECORDING
         val writing = core.recordingChatId == AppCore.NAME_DRAFT && core.recordState == AppCore.RecordState.TRANSCRIBING
         Ui.enable(mic, voice && !writing)
-        micHint.text = getString(if (voice) R.string.name_say else R.string.name_no_voice)
+        micHint.text = getString(if (voice) sayId() else R.string.name_no_voice)
         ring.startedAt = if (recording) core.recordingStartedAt else 0L
         ring.removeCallbacks(tick)
         if (recording) ring.post(tick)
@@ -385,7 +412,7 @@ class NameActivity : ScreenActivity() {
         }
         val shown = colour.takeIf { it >= 0 } ?: AccountStore.UNKNOWN_COLOUR
         val label = name?.takeIf { !tooLong && !invalid } ?: "?"
-        val picture = if (avatar is Avatar.Photo) photo?.preview ?: core.ownPhoto() else null
+        val picture = if (avatar is Avatar.Photo) photo?.preview ?: if (forGroup) groupPhoto else core.ownPhoto() else null
         Looks.show(preview, palette, ChatKind.PERSON, PREVIEW_DP, Face(label, shown, avatar, picture))
         renderPicture(PICTURE_LETTER, Face(label, shown, Avatar.Letter), getString(R.string.name_picture_letter), avatar == Avatar.Letter)
         // Before one is chosen, a smile shows what the choice is about.
@@ -413,7 +440,18 @@ class NameActivity : ScreenActivity() {
         private const val HINT_EMOJI = "🙂"
         private const val REQUEST_MIC = 41
 
+        private const val EXTRA_PEOPLE = "people"
+        private const val EXTRA_GROUP_CHAT = "group_chat"
+
         fun open(context: Context) = context.startActivity(Intent(context, NameActivity::class.java))
+
+        /** "Name the group" for a new group with [people] (account ids), then Create group. */
+        fun openForGroup(context: Context, people: List<String>) =
+            context.startActivity(Intent(context, NameActivity::class.java).putExtra(EXTRA_PEOPLE, people.toTypedArray()))
+
+        /** The group's name and picture, from Group details. */
+        fun openForGroupChat(context: Context, chatId: Long) =
+            context.startActivity(Intent(context, NameActivity::class.java).putExtra(EXTRA_GROUP_CHAT, chatId))
     }
 }
 

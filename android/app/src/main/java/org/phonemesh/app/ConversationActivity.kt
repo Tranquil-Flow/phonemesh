@@ -75,6 +75,9 @@ class ConversationActivity : ScreenActivity() {
     private val bubbles = BubbleAdapter()
     private lateinit var title: TextView
     private lateinit var people: TextView
+    private lateinit var titleAvatar: FrameLayout
+    /** A private group's state above its messages (decision 72): paused, clashed, left, or waiting for people. */
+    private lateinit var groupBox: LinearLayout
     private lateinit var radioStatus: ImageView
     private lateinit var draftBox: LinearLayout
     private lateinit var replyBar: LinearLayout
@@ -149,6 +152,13 @@ class ConversationActivity : ScreenActivity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(topBar(chat))
         root.addView(noteLine())
+        groupBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            tag = "group_state"
+            visibility = View.GONE
+            setPadding(pad(), pad() / 2, pad(), pad() / 2)
+        }
+        root.addView(groupBox)
         val list = ListView(this).apply {
             tag = "bubbles"
             adapter = bubbles
@@ -184,7 +194,8 @@ class ConversationActivity : ScreenActivity() {
             setPadding(pad() / 4, 0, pad() / 2, 0)
         }
         bar.addView(backButton())
-        bar.addView(Looks.avatar(this, palette, chat.kind, 40, core.chatFace(chat)).apply {
+        titleAvatar = Looks.avatar(this, palette, chat.kind, 40, core.chatFace(chat)) as FrameLayout
+        bar.addView(titleAvatar.apply {
             tag = "title_avatar"
             (layoutParams as LinearLayout.LayoutParams).marginStart = pad() / 4
         })
@@ -198,6 +209,10 @@ class ConversationActivity : ScreenActivity() {
             if (chat.kind == ChatKind.PERSON) {
                 contentDescription = getString(R.string.contact_details)
                 setOnClickListener { startActivity(ContactActivity.intent(this@ConversationActivity, chat.id)) }
+            }
+            if (chat.kind == ChatKind.PRIVATE_GROUP) {
+                contentDescription = getString(R.string.group_details)
+                setOnClickListener { GroupDetailsActivity.open(this@ConversationActivity, chat.id) }
             }
         })
         bar.addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = pad() })
@@ -607,7 +622,10 @@ class ConversationActivity : ScreenActivity() {
         val chat = core.history.chat(chatId) ?: run { finish(); return }
         title.text = core.chatTitle(chat)
         if (chat.kind == ChatKind.PERSON) title.contentDescription = "${core.chatTitle(chat)}: ${getString(R.string.contact_details)}"
-        Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) core.peopleHeard(chatId) else null)
+        val group = if (chat.kind == ChatKind.PRIVATE_GROUP) core.groupView(chatId) else null
+        Looks.showPeople(people, if (chat.kind == ChatKind.GROUP) core.peopleHeard(chatId) else group?.people)
+        if (group != null) Looks.show(titleAvatar, palette, chat.kind, 40, group.face)
+        renderGroup(group)
         Looks.radio(radioStatus, palette, core.connected)
         val messages = core.history.messages(chatId)
         bubbles.update(chat, messages, core.history.reactions(chatId).groupBy { it.target })
@@ -623,13 +641,14 @@ class ConversationActivity : ScreenActivity() {
         if (recordingHere && !pressing) core.recordLocked = true
         val draft = core.draft(chatId)
         // An old radio chat is read only: no microphone, no keyboard, no draft, no Send.
-        val drafting = (draft != null || editing) && chat.kind != ChatKind.DIRECT
+        val closed = chat.kind == ChatKind.DIRECT || group?.gone == true
+        val drafting = (draft != null || editing) && !closed
         draftBox.visibility = if (drafting) View.VISIBLE else View.GONE
         draftText.visibility = if (draft != null && !editing) View.VISIBLE else View.GONE
         draftEdit.visibility = if (editing) View.VISIBLE else View.GONE
         draftText.text = draft.orEmpty()
         draftText.contentDescription = draft
-        micBar.visibility = if (drafting || chat.kind == ChatKind.DIRECT) View.GONE else View.VISIBLE
+        micBar.visibility = if (drafting || closed) View.GONE else View.VISIBLE
         draftBar.visibility = if (drafting) View.VISIBLE else View.GONE
         // A draft that cannot go out yet is explained: the radio has no region, or its region is being set.
         regionSlot.removeAllViews()
@@ -649,6 +668,41 @@ class ConversationActivity : ScreenActivity() {
             drafting -> if (regionCard != null || core.draftFit(chatId) == DraftFit.EMPTY || cutNotice.visibility == View.VISIBLE) null else TipPlace.DRAFT
             else -> TipPlace.CHAT
         }, messages)
+    }
+
+    /**
+     * What a private group needs said above its messages (decision 72): you are out of it, two admins clashed, a
+     * change is on its way and sending waits, or nobody has joined yet. Hidden when the group can simply send.
+     */
+    private fun renderGroup(group: AppCore.GroupView?) {
+        groupBox.removeAllViews()
+        if (group == null) { groupBox.visibility = View.GONE; return }
+        fun line(id: Int, vararg args: Any, bad: Boolean = false) = groupBox.addView(Ui.text(this, getString(id, *args), if (bad) palette.bad else palette.text, bold = true))
+        fun action(id: Int, arg: String?, icon: Int, tag: String, run: () -> Unit) = groupBox.addView(
+            Ui.button(this, palette, if (arg != null) getString(id, arg) else getString(id), icon).apply { this.tag = tag; setOnClickListener { run(); render() } },
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 4 })
+        when {
+            group.gone -> {
+                line(if (group.state == org.phonemesh.core.group.GroupMember.State.LEFT) R.string.group_you_left else R.string.group_removed)
+                action(R.string.group_delete_chat, null, R.drawable.ic_delete, "group_delete") { if (core.forgetGroup(chatId)) finish() }
+            }
+            group.conflict && group.admin -> {
+                line(R.string.group_conflict, bad = true)
+                action(R.string.group_fix, null, R.drawable.ic_retry, "group_fix") { core.fixGroup(chatId) }
+            }
+            group.conflict -> line(R.string.group_conflict_member, bad = true)
+            !group.listed && group.waitingOn != null -> line(R.string.group_waiting_admin, group.waitingOn)
+            group.waitingOn != null -> {
+                line(R.string.group_change_wait)
+                action(R.string.group_ask_again, group.waitingOn, R.drawable.ic_retry, "group_ask") { core.askGroupAgain(chatId) }
+            }
+            group.invited > 0 && group.people <= 1 -> {
+                line(R.string.group_wait_join, group.invited)
+                groupBox.addView(Ui.text(this, getString(R.string.group_can_send), palette.muted))
+            }
+            else -> { groupBox.visibility = View.GONE; return }
+        }
+        groupBox.visibility = View.VISIBLE
     }
 
     /** Keep the same picture through renders; leaving its moment only hides it. */
@@ -781,11 +835,27 @@ class ConversationActivity : ScreenActivity() {
         override fun getItemId(position: Int) = items.getOrNull(position)?.id ?: android.widget.AdapterView.INVALID_ROW_ID
         override fun hasStableIds() = true
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-            bubble(items[position], chat?.kind == ChatKind.GROUP, items.getOrNull(position - 1)?.time)
+            if (items[position].kind == MessageKind.NOTE) groupNote(items[position])
+            else bubble(items[position], chat?.kind == ChatKind.GROUP || chat?.kind == ChatKind.PRIVATE_GROUP, items.getOrNull(position - 1)?.time)
+    }
+
+    /** "Ama joined.": a private group's own line, centred and quiet, in the current language. */
+    private fun groupNote(message: Message): View = Ui.text(this, core.groupNote(chatId, message.text), palette.muted, bold = true).apply {
+        tag = "note:${message.id}"
+        gravity = Gravity.CENTER
+        setPadding(pad(), pad() / 2, pad(), pad() / 2)
+        layoutParams = android.widget.AbsListView.LayoutParams(android.widget.AbsListView.LayoutParams.MATCH_PARENT, android.widget.AbsListView.LayoutParams.WRAP_CONTENT)
+    }
+
+    /** A sender's name: a private group's member (their own name or a contact's), or a radio group's sender. */
+    private fun senderName(senderId: String): String {
+        val chat = core.history.chat(chatId)
+        return if (chat?.kind == ChatKind.PRIVATE_GROUP) core.personName(chat.address, senderId) else core.senderName(senderId)
     }
 
     private fun bubble(message: Message, group: Boolean, previousTime: Long?): View {
         val mine = message.direction == Direction.OUT
+        val privateGroup = core.history.chat(chatId)?.kind == ChatKind.PRIVATE_GROUP
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = if (mine) Gravity.END else Gravity.START
@@ -809,16 +879,24 @@ class ConversationActivity : ScreenActivity() {
             accessibilityDelegate = deleteLabel
         }
         if (group && !mine && message.senderId != null) {
-            box.addView(Ui.content(Ui.text(this, core.senderName(message.senderId), palette.text, bold = true).apply {
+            box.addView(Ui.content(Ui.text(this, senderName(message.senderId), palette.text, bold = true).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
             }))
+            // Decision 72 b: a member who is not a contact is named by themselves, and the screen says so.
+            if (privateGroup && !core.isContact(message.senderId)) box.addView(Ui.text(this, getString(R.string.group_not_contact), palette.muted).apply {
+                tag = "not_contact:${message.id}"
+            })
+        }
+        // Decision 74: a recent message an admin passed on to a new member says who shared it.
+        message.sharedBy?.let { by ->
+            box.addView(Ui.text(this, getString(R.string.group_shared_by, senderName(by)), palette.muted).apply { tag = "shared_by:${message.id}" })
         }
         val picture = if (message.kind == MessageKind.PICTURE) core.history.picture(message.id) else null
         val words = if (picture != null) pictureCaption(message, picture).ifEmpty { getString(R.string.picture_label) } else message.text
         // A long press deletes, so the bubble is a target and is named: who wrote it, then the words.
         box.contentDescription = listOfNotNull(
-            message.senderId?.takeIf { group && !mine }?.let { core.senderName(it) }, words,
+            message.senderId?.takeIf { group && !mine }?.let { senderName(it) }, words,
         ).joinToString(", ")
         if (message.replyTo != null) {
             val quoted = core.quoted(message)
@@ -890,6 +968,10 @@ class ConversationActivity : ScreenActivity() {
         }
         box.addView(line)
         labelBelow?.let { box.addView(it) }
+        // Decision 72 e: per-member receipts, counted, never named.
+        if (privateGroup) core.groupDelivered(message)?.takeIf { it.second > 0 }?.let { (n, m) ->
+            box.addView(Ui.text(this, getString(R.string.group_delivered, n, m), if (n == m) palette.good else palette.muted).apply { tag = "delivered:${message.id}" })
+        }
         message.plannedAt?.let { planned ->
             box.addView(Ui.text(this, getString(R.string.planned_for, DateFormat.getTimeFormat(this).format(Date(planned))), palette.muted).apply {
                 tag = "planned_for:${message.id}"

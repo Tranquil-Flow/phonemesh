@@ -297,7 +297,39 @@ class ChatsActivity : ScreenActivity() {
             cards.addView(doneCard())
             cards.postDelayed(rerender, doneUntil - now)
         }
+        // A group invitation waits at the top until it is joined or ignored (decision 72 c), during setup too: someone
+        // who was just invited should not have to finish the guide to see it.
+        core.groupInvitations().forEachIndexed { i, (invitation, from) -> cards.addView(invitationCard(invitation, from), i) }
         return view is SetupView.Guide
+    }
+
+    /** "Ama added you to Marché.", the group's picture and size, then Join and Ignore. */
+    private fun invitationCard(invitation: org.phonemesh.core.group.GroupStore.Invitation, from: String): View = LinearLayout(this).apply {
+        val i = invitation.invite
+        orientation = LinearLayout.VERTICAL
+        tag = "invitation"
+        val p = pad()
+        setPadding(p, p, p, p)
+        background = Ui.outline(this@ChatsActivity, palette.surface, palette.outline)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = p / 2 }
+        val head = LinearLayout(this@ChatsActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        head.addView(Looks.avatar(this@ChatsActivity, palette, ChatKind.PRIVATE_GROUP, 48, Face(i.name, i.colour, i.avatar)))
+        val words = LinearLayout(this@ChatsActivity).apply { orientation = LinearLayout.VERTICAL }
+        words.addView(Ui.text(this@ChatsActivity, getString(R.string.group_invite_title, from, i.name), palette.text, 20f, bold = true).apply { tag = "invitation_title" })
+        words.addView(Ui.text(this@ChatsActivity, getString(R.string.group_people, i.people), palette.muted))
+        words.addView(Ui.text(this@ChatsActivity, getString(R.string.group_invite_names), palette.muted))
+        head.addView(words, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = p })
+        addView(head)
+        val buttons = LinearLayout(this@ChatsActivity).apply { orientation = LinearLayout.HORIZONTAL }
+        buttons.addView(Ui.button(this@ChatsActivity, palette, getString(R.string.group_join), R.drawable.ic_check, filled = true).apply {
+            tag = "invitation_join"
+            setOnClickListener { core.joinGroup(invitation)?.let { openChat(it) }; render() }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        buttons.addView(Ui.button(this@ChatsActivity, palette, getString(R.string.add_ignore), R.drawable.ic_close).apply {
+            tag = "invitation_ignore"
+            setOnClickListener { core.ignoreGroup(invitation); render() }
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = p / 2 })
+        addView(buttons, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = p / 2 })
     }
 
     /** Reuse each panel and refresh its speaker when a voice arrives. */
@@ -506,6 +538,12 @@ class ChatsActivity : ScreenActivity() {
                 Looks.showPeople(this, heard)
             })
         }
+        if (chat.kind == ChatKind.PRIVATE_GROUP) {
+            titleLine.addView(Ui.text(this, getString(R.string.group_tag), palette.muted, bold = true).apply {
+                tag = "group_tag:${chat.id}"
+                setPadding(pad() / 2, 0, 0, 0)
+            })
+        }
         middle.addView(titleLine)
         if (item.met == false) middle.addView(Ui.text(this, getString(R.string.not_met), palette.muted).apply { tag = "not_met:${chat.id}" })
         item.last?.let { last ->
@@ -516,11 +554,18 @@ class ChatsActivity : ScreenActivity() {
                 lastLine.addView(Looks.statusIcon(this, look, 20).apply { tag = "last_status:${chat.id}" })
             }
             val prefix = when {
+                last.kind == MessageKind.NOTE -> null
+                chat.kind == ChatKind.PRIVATE_GROUP && last.direction == Direction.OUT -> getString(R.string.you)
+                chat.kind == ChatKind.PRIVATE_GROUP -> core.personName(chat.address, last.senderId.orEmpty())
                 chat.kind != ChatKind.GROUP -> null
                 last.direction == Direction.OUT -> getString(R.string.you)
                 else -> core.senderName(last.senderId.orEmpty())
             }
-            val said = if (last.kind == MessageKind.PICTURE) getString(R.string.picture_label) else last.text
+            val said = when (last.kind) {
+                MessageKind.PICTURE -> getString(R.string.picture_label)
+                MessageKind.NOTE -> core.groupNote(chat.id, last.text)
+                else -> last.text
+            }
             val text = if (prefix != null) getString(R.string.sender_prefix, prefix, said) else said
             lastLine.addView(Ui.content(Ui.text(this, text, palette.muted).apply {
                 maxLines = 1

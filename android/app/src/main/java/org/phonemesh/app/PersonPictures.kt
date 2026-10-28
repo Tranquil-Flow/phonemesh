@@ -200,9 +200,12 @@ internal class PersonPictures(private val history: History) {
      */
     fun freshId(chatId: Long, pick: () -> Int): Int = history.transaction {
         val chat = history.chat(chatId) ?: throw org.phonemesh.core.mail.MailStore.Refused()
-        require(chat.kind == ChatKind.PERSON)
+        require(chat.kind == ChatKind.PERSON || chat.kind == ChatKind.PRIVATE_GROUP)
+        // A private group's ids live under the first 8 bytes of its id (the column holds 16 hex characters): only its
+        // own members name pictures by them, so this phone just must not reuse one there.
+        val key = chat.address.take(16)
         val db = history.writableDatabase
-        val saved = db.rawQuery("SELECT used FROM picture_ids WHERE account_id = ?", arrayOf(chat.address)).use {
+        val saved = db.rawQuery("SELECT used FROM picture_ids WHERE account_id = ?", arrayOf(key)).use {
             if (it.moveToFirst()) it.getBlob(0) else null
         }
         val used = saved ?: ByteArray(8192)
@@ -217,9 +220,9 @@ internal class PersonPictures(private val history: History) {
         }
         if (chosen < 0) chosen = (0..65535).firstOrNull { !taken(it) } ?: throw IdLimit()
         reserve(chosen)
-        val values = ContentValues().apply { put("account_id", chat.address); put("used", used) }
+        val values = ContentValues().apply { put("account_id", key); put("used", used) }
         if (saved == null) db.insertOrThrow("picture_ids", null, values)
-        else if (db.update("picture_ids", values, "account_id = ?", arrayOf(chat.address)) != 1)
+        else if (db.update("picture_ids", values, "account_id = ?", arrayOf(key)) != 1)
             throw org.phonemesh.core.mail.MailStore.Refused()
         chosen
     }

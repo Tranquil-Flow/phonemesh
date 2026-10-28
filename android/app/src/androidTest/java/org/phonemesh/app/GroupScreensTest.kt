@@ -6,9 +6,11 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -183,6 +185,74 @@ class GroupScreensTest {
         beaGroups.post.tick(2_400_000)
         toAwa(2_400_000)
         until { Views.tagged(conversation, "delivered:${mine.id}")?.let { Views.textOf(it) } == "Delivered to 1 of 1" }
+    }
+
+    /** Awa's group with Bea in it, both on the first list, Bea active. Returns Awa's chat and the group id. */
+    private fun activeGroup(): Pair<Long, ByteArray> {
+        val chatId = checkNotNull(TestCore.onMain { core.createGroup("Market", 0x2E7D32, Avatar.Letter, null, listOf(bea.account)) })
+        toBea(2_000_000)
+        assertTrue(beaGroups.post.join(beaGroups.invites.values.single(), 2_000_000))
+        toAwa(2_000_000)
+        TestCore.onMain { core.groups.tick(System.currentTimeMillis() + GroupPost.ADMIN_BATCH_MS + 1); core.runPostman() }
+        until(10_000) {
+            toBea(2_100_000); toAwa(2_100_000)
+            beaGroups.post.member(beaGroups.saved.keys.single().toByteArray())?.state == GroupMember.State.ACTIVE
+        }
+        return chatId to beaGroups.saved.keys.single().toByteArray()
+    }
+
+    private fun picture(bytes: Int): PreparedPicture = PreparedPicture(org.phonemesh.core.PictureCodec.WEBP, 2, 2,
+        ByteArray(bytes) { (it * 7).toByte() }, byteArrayOf(1, 2, 3), android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888), 70)
+
+    @Test fun aGroupPictureSendsItsSketchByRadioAndItsPartsOnlyThroughAHub() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        toBea(2_150_000); beaGroups.events.clear()
+        val before = TestCore.onMain { TestCore.radio.broadcasts.size }
+        assertTrue(TestCore.onMain { core.canSendPictures(chatId) })
+        assertTrue(TestCore.onMain { core.sendPicture(chatId, picture(400)) })
+        val mine = TestCore.onMain { core.history.messages(chatId).last { it.direction == Direction.OUT && it.kind == MessageKind.PICTURE } }
+        val rows = TestCore.onMain { core.groupStore.rows.outFor(mine.id) }
+        // 400 bytes in parts of 133: four parts, all hub-only; the head (with the sketch) by radio.
+        assertEquals(listOf(false, true, true, true, true), rows.map { it.hubOnly })
+        TestCore.onMain { core.runPostman() }
+        until { TestCore.onMain { TestCore.radio.broadcasts.drop(before).any { b -> b.payload.contentEquals(rows[0].packet) } } }
+        val aired = TestCore.onMain { TestCore.radio.broadcasts.drop(before).map { it.payload } }
+        assertTrue("no part goes by radio", rows.drop(1).none { r -> aired.any { it.contentEquals(r.packet) } })
+        // Bea's radio-only phone gets the sketch; the parts reach her only through a hub.
+        toBea(2_200_000)
+        val heads = beaGroups.events.filterIsInstance<GroupPost.Event.Message>().filter { Body.decode(it.body) is Body.PictureHead }
+        assertEquals(1, heads.size)
+        assertFalse(heads.single().hub)
+        for (r in rows.drop(1)) assertTrue(beaGroups.post.receive(r.packet, 2_200_000))
+        val parts = beaGroups.events.filterIsInstance<GroupPost.Event.Message>().filter { Body.decode(it.body) is Body.PicturePart }
+        assertEquals(4, parts.size)
+        assertTrue(parts.all { it.hub })
+        assertNotNull(group)
+    }
+
+    @Test fun beasGroupPictureShowsItsSketchThenTheWholePictureFromTheHub() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        val bytes = ByteArray(300) { (it * 3).toByte() }
+        val packets = org.phonemesh.core.PictureWire.splitGroup(77, org.phonemesh.core.PictureCodec.WEBP, 2, 2, bytes, byteArrayOf(9, 9))
+        val bodies = packets.map { pk ->
+            val b = org.phonemesh.core.PictureWire.encode(pk)
+            Body.encode(if (pk is org.phonemesh.core.PictureWire.Head) Body.PictureHead(b) else Body.PicturePart(b)) to (pk !is org.phonemesh.core.PictureWire.Head)
+        }
+        val sent = checkNotNull(beaGroups.post.send(group, bodies, null, 2_300_000))
+        assertEquals(1, sent.count { !it.hubOnly })
+        PersonFixture.deliver(sent.first { !it.hubOnly }.sealed.packet)
+        until { TestCore.onMain { core.history.messages(chatId).any { it.kind == MessageKind.PICTURE && it.direction == Direction.IN } } }
+        val bubble = TestCore.onMain { core.history.messages(chatId).last { it.kind == MessageKind.PICTURE } }
+        val sketchOnly = TestCore.onMain { core.history.picture(bubble.id)!! }
+        assertNull("only the sketch so far", sketchOnly.file)
+        assertArrayEquals(byteArrayOf(9, 9), sketchOnly.sketch)
+        // The parts come in through the hub (the app reads group packets the same way from either path).
+        for (p in sent.filter { it.hubOnly }) PersonFixture.deliver(p.sealed.packet)
+        until { TestCore.onMain { core.history.picture(bubble.id)?.file } != null }
+        val file = java.io.File(context.filesDir, "pictures/" + TestCore.onMain { core.history.picture(bubble.id)!!.file })
+        assertArrayEquals(bytes, file.readBytes())
     }
 
     @Test fun anInvitationWaitsWithJoinAndIgnoreUntilChosen() {

@@ -2181,6 +2181,7 @@ class AppCore private constructor(
     fun canSendPictures(chatId: Long): Boolean {
         if (!BuildConfig.PICTURES) return false
         val chat = history.chat(chatId) ?: return false
+        if (chat.kind == ChatKind.PRIVATE_GROUP) return groupView(chatId)?.canSend == true
         return chat.kind == ChatKind.PERSON && history.sessionRow(chat.address) != null
     }
 
@@ -2247,13 +2248,17 @@ class AppCore private constructor(
             // The id reservation, bubble, file row and sealed packets commit together, or none does.
             val out = history.transaction {
                 val pictureId = personPictures.freshId(chatId) { random.nextInt(0x10000) }
-                val packets = PictureWire.splitV2(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+                val group = chat.kind == ChatKind.PRIVATE_GROUP
+                val packets = if (group) PictureWire.splitGroup(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+                    else PictureWire.splitV2(pictureId, picture.codec, picture.width, picture.height, picture.bytes, picture.sketch)
+                if (group && packets.size - 1 > PictureWire.MAX_PARTS_GROUP) error("too large for a group")
                 file.writeBytes(picture.bytes)
                 val row = PictureRow(0, pictureId, picture.codec.wire, picture.width, picture.height, picture.sketch, name, 0, packets.size, false)
                 sealPicture(chat, history.addOutgoingPicture(chatId, row, now).id, packets, now)
             }
             settings.firstMessageSent = true
             out.forEach { push(it) }
+            if (chat.kind == ChatKind.PRIVATE_GROUP) flushGroups()
             schedulePostman()
         }
         if (!kept) { file.delete(); return false }
@@ -2261,9 +2266,19 @@ class AppCore private constructor(
         return true
     }
 
-    private fun sealPicture(chat: Chat, messageId: Long, packets: List<PictureWire.Packet>, now: Long): List<Postman.Out> =
-        postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull() +
+    private fun sealPicture(chat: Chat, messageId: Long, packets: List<PictureWire.Packet>, now: Long): List<Postman.Out> {
+        if (chat.kind == ChatKind.PRIVATE_GROUP) {
+            // The head and its sketch by radio, so radio-only members see the sketch; every part only through a hub.
+            val bodies = packets.map { packet ->
+                val bytes = PictureWire.encode(packet)
+                Body.encode(if (packet is PictureWire.Head) Body.PictureHead(bytes) else Body.PicturePart(bytes)) to (packet !is PictureWire.Head)
+            }
+            checkNotNull(groups.send(AppGroupStore.hexBytes(chat.address), bodies, messageId, now)) { "the group cannot send now" }
+            return emptyList()
+        }
+        return postman.sendPicture(AppMailStore.idOf(chat.address), messageId, packets, now).filterNotNull() +
             listOfNotNull(profileAfterMessage(AppMailStore.idOf(chat.address), now)) + photoAfterMessage(AppMailStore.idOf(chat.address), now)
+    }
 
     /** Picture retry is for people only: the stored packets go again, byte for byte. Old radio chats never resend. */
     private fun resendPicture(message: Message): Boolean {
@@ -2338,6 +2353,28 @@ class AppCore private constructor(
             } catch (e: SQLiteException) {
                 Log.w(TAG, "picture file waits", e)
                 retry = true
+            }
+        }
+        // A group picture whose last part came through a hub gets its file the same way (G5).
+        val groupReady = if (account() == null) emptyList() else try { groupStore.pictures.ready() } catch (e: SQLiteException) {
+            Log.w(TAG, "group pictures wait", e)
+            retry = true
+            emptyList()
+        }
+        for (picture in groupReady) {
+            val name = "in-${picture.messageId}.pic"
+            try {
+                val tmp = File(picturesDir, "$name.tmp")
+                tmp.writeBytes(picture.bytes)
+                check(tmp.renameTo(File(picturesDir, name))) { "picture file not moved" }
+                groupStore.pictures.finished(picture, name)
+                changedSome = true
+            } catch (e: java.io.IOException) {
+                Log.w(TAG, "group picture file waits", e); retry = true
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "group picture file waits", e); retry = true
+            } catch (e: SQLiteException) {
+                Log.w(TAG, "group picture file waits", e); retry = true
             }
         }
         try {

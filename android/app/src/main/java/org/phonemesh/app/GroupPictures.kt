@@ -54,7 +54,7 @@ internal class GroupPictures(private val history: History, private val rows: Gro
         val all = pieces(groupId, accountId, pictureId)
         val head = (all[HEAD]?.let { PictureWire.decodeGroup(it) } as? PictureWire.Head) ?: return
         history.setPictureProgress(messageId, (0 until head.parts).count { it in all })
-        if (head.parts > 0 && (0 until head.parts).all { it in all } && PictureJoin.join(head, all) == null) {
+        if (head.parts > 0 && (0 until head.parts).all { it in all } && PictureJoin.join(head, all, PictureWire.PART_BYTES_GROUP) == null) {
             history.setPictureLost(messageId)
             drop(groupId, accountId, pictureId)
         }
@@ -93,7 +93,7 @@ internal class GroupPictures(private val history: History, private val rows: Gro
         return found.mapNotNull { (m, g, a, p) ->
             val all = pieces(g as String, a as String, p as Int)
             val head = (all[HEAD]?.let { PictureWire.decodeGroup(it) } as? PictureWire.Head) ?: return@mapNotNull null
-            PictureJoin.join(head, all)?.let { Ready(m as Long, g, a, p, head.parts, it) }
+            PictureJoin.join(head, all, PictureWire.PART_BYTES_GROUP)?.let { Ready(m as Long, g, a, p, head.parts, it) }
         }
     }
 

@@ -82,11 +82,11 @@ sealed class Body {
                 byteArrayOf(REACTION.toByte()) + ref(body.ref) + emoji
             }
             is PictureHead -> {
-                require(PictureWire.decodeV2(body.bytes) is PictureWire.Head) { "not a picture head" }
+                require(pictureHead(body.bytes)) { "not a picture head" }
                 byteArrayOf(PICTURE_HEAD.toByte()) + body.bytes
             }
             is PicturePart -> {
-                require(PictureWire.decodeV2(body.bytes) is PictureWire.Part) { "not a picture part" }
+                require(picturePart(body.bytes)) { "not a picture part" }
                 byteArrayOf(PICTURE_PART.toByte()) + body.bytes
             }
             is Receipt -> byteArrayOf(RECEIPT.toByte()) + body.ack.encode()
@@ -102,6 +102,13 @@ sealed class Body {
             }
         }
 
+        /**
+         * A picture piece as a person chat (parts of 198) or a private group (parts of 133) cuts it. Its reader decodes it
+         * again with its own geometry, so a piece cut for the other kind of chat goes no further than here.
+         */
+        private fun pictureHead(b: ByteArray) = PictureWire.decodeV2(b) is PictureWire.Head || PictureWire.decodeGroup(b) is PictureWire.Head
+        private fun picturePart(b: ByteArray) = PictureWire.decodeV2(b) is PictureWire.Part || PictureWire.decodeGroup(b) is PictureWire.Part
+
         fun decode(bytes: ByteArray): Body? = try {
             if (bytes.isEmpty()) null else when (bytes[0].toInt()) {
                 TEXT -> Reader(bytes).run { Text(language(), rest()).takeIf { done() } }
@@ -111,8 +118,8 @@ sealed class Body {
                     val emoji = take(bytes.size - 1 - REF)
                     if (emoji.size !in 1..MAX_EMOJI) null else Reaction(r, ContactCard.strictUtf8(emoji) ?: return@run null)
                 }
-                PICTURE_HEAD -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Head }?.let { PictureHead(it) }
-                PICTURE_PART -> bytes.copyOfRange(1, bytes.size).takeIf { PictureWire.decodeV2(it) is PictureWire.Part }?.let { PicturePart(it) }
+                PICTURE_HEAD -> bytes.copyOfRange(1, bytes.size).takeIf { pictureHead(it) }?.let { PictureHead(it) }
+                PICTURE_PART -> bytes.copyOfRange(1, bytes.size).takeIf { picturePart(it) }?.let { PicturePart(it) }
                 RECEIPT -> if (bytes.size != 1 + Ack.SIZE) null else Ack.decode(bytes.copyOfRange(1, bytes.size))?.let { Receipt(it) }
                 HELLO -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { Hello(it) }
                 PROFILE -> Profile.decode(bytes.copyOfRange(1, bytes.size))?.let { ProfileUpdate(it) }

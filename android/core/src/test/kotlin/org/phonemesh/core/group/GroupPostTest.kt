@@ -156,6 +156,31 @@ class GroupPostTest {
         assertArrayEquals(sent.sealed.packet.copyOfRange(1, 9), got.code)
     }
 
+    @Test fun aGroupPictureIsItsHeadByRadioAndItsPartsOnlyThroughAHub() {
+        val (ps, g) = group("Ama", "Kofi")
+        val (ama, kofi) = ps
+        val picture = ByteArray(300) { (it * 5).toByte() }
+        val packets = org.phonemesh.core.PictureWire.splitGroup(5, org.phonemesh.core.PictureCodec.WEBP, 4, 3, picture, byteArrayOf(7, 7))
+        assertEquals("300 bytes in parts of 133", 4, packets.size)
+        // Cut for a group, the head counts its parts by 133; a person chat's reader refuses it.
+        assertNull(org.phonemesh.core.PictureWire.decodeV2(org.phonemesh.core.PictureWire.encode(packets[0])))
+        val bodies = packets.map { pk ->
+            val b = org.phonemesh.core.PictureWire.encode(pk)
+            Body.encode(if (pk is org.phonemesh.core.PictureWire.Head) Body.PictureHead(b) else Body.PicturePart(b)) to (pk !is org.phonemesh.core.PictureWire.Head)
+        }
+        val sent = ama.post.send(g, bodies, 9L, now)!!
+        assertEquals(listOf(false, true, true, true), sent.map { it.hubOnly })
+        settle()
+        val byRadio = kofi.messages(g).map { Body.decode(it.body) }
+        assertEquals("only the head (with its sketch) by radio", 1, byRadio.count { it is Body.PictureHead })
+        assertEquals(0, byRadio.count { it is Body.PicturePart })
+        fetch(listOf(kofi))
+        val pieces = kofi.messages(g).mapNotNull { Body.decode(it.body) }
+        val parts = pieces.filterIsInstance<Body.PicturePart>().map { org.phonemesh.core.PictureWire.decodeGroup(it.bytes) as org.phonemesh.core.PictureWire.Part }
+        assertEquals(listOf(0, 1, 2), parts.map { it.index })
+        assertArrayEquals(picture, parts.sortedBy { it.index }.fold(ByteArray(0)) { a, part -> a + part.data })
+    }
+
     @Test fun aGroupNobodyJoinedYetHasNoListAndCannotSend() {
         val ps = phones("Ama", "Kofi")
         val g = ps[0].post.create("Puits", 0x2E7D32, Avatar.Emoji("\uD83C\uDF3D"), false, listOf(ps[1].account), now)!!

@@ -14,6 +14,16 @@ class SerialPortsTest {
         assertEquals(SerialPorts.Driver.PORTABLE, SerialPorts.driverFor("FreeBSD"))
     }
 
+    @Test fun theStorePasswordNeverLooksLikeAKeytoolOption() {
+        // keytool hands any argument starting with -J to its JVM, so a random password like "-JWS..." broke a first start.
+        val dashJ = byteArrayOf(0xF8.toByte(), 0x95.toByte()) + ByteArray(22)
+        assertTrue(java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(dashJ).startsWith("-J"))
+        for (bytes in listOf(dashJ, ByteArray(24) { 0xFF.toByte() }, ByteArray(24))) {
+            val pass = Tls.storePassword(bytes)
+            assertTrue(pass, pass.matches(Regex("[0-9a-f]{48}")))
+        }
+    }
+
     @Test fun keytoolHasItsWindowsName() {
         assertEquals("keytool.exe", Tls.keytoolName("Windows 10"))
         assertEquals("keytool", Tls.keytoolName("Linux"))

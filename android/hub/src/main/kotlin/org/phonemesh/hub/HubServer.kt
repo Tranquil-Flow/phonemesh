@@ -127,7 +127,7 @@ class Tls(dir: File) {
         val store = File(dir, "hub-tls.p12")
         val passFile = File(dir, "hub-tls.pass")
         if (!store.exists()) {
-            val pass = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(24).also { SecureRandom().nextBytes(it) })
+            val pass = storePassword(ByteArray(24).also { SecureRandom().nextBytes(it) })
             passFile.writeText(pass)
             passFile.setReadable(false, false); passFile.setReadable(true, true)
             val keytool = File(File(System.getProperty("java.home"), "bin"), keytoolName(System.getProperty("os.name"))).path
@@ -146,6 +146,9 @@ class Tls(dir: File) {
 
     companion object {
         fun keytoolName(os: String): String = if (os.startsWith("Windows")) "keytool.exe" else "keytool"
+
+        /** Hex, so it never starts with "-": keytool hands any argument starting with -J to its JVM. */
+        fun storePassword(random: ByteArray): String = java.util.HexFormat.of().formatHex(random)
 
         fun pinOf(publicKey: ByteArray): String =
             Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(publicKey))

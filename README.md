@@ -103,10 +103,13 @@ both phones, nobody is in the middle pretending to be the other person. Compare 
 by side, or over a phone call for a contact added by link. No reading is needed.
 
 **Settings → Recovery kit** makes a recovery card (a QR code and twelve words) and a sealed
-copy of your contacts. On a new phone the kit lists your people again, and you add each
-one again: a new phone has a new account, so your safety pictures change. Without a kit,
-a lost phone means a new account that your contacts add again. The
-[explainer](docs/how-it-works.md#accounts-and-contacts) covers keys and encryption.
+copy of your contacts, or of your contacts and chosen chats. On a new phone the kit lists
+your people again, and you add each one again: a new phone has a new account, so your
+safety pictures change. Saved chats, private groups included, come back as read-only
+history marked "from this saved copy", apart from your live chats: they never send,
+speak or notify, and they hold no keys. Without a kit, a lost phone means a new account
+that your contacts add again. The [explainer](docs/how-it-works.md#accounts-and-contacts)
+covers keys and encryption.
 
 ## The local hub
 
@@ -270,7 +273,9 @@ See [Run a local hub](#run-a-local-hub).
   sent, and **Keep hub when app is closed**.
 - **Read new messages aloud:** off by default.
 - **Share the app:** send the app and speech packs to another phone.
-- **Recovery kit:** make a recovery card and a sealed copy of your contacts, or restore one.
+- **Recovery kit:** make a recovery card and a sealed copy of your contacts, or of your
+  contacts and chats (the last 90 days or all history, counted and sized before saving,
+  checked after saving), restore one, or check one. **Saved chats** lists restored copies.
 - **Show the guide again:** replay the welcome story and the tips.
 
 The **?** button on the chats screen opens Help, which explains each feature with
@@ -283,8 +288,9 @@ pictures.
   are the supported voice path.
 - **Hub Wi-Fi must be WPA2-Personal** (or open). Android 10 phones cannot join a
   WPA2/WPA3 mixed-mode network through the app.
-- **Recovery keeps your contacts, not your account.** A new phone has a new account; the
-  recovery kit lists your people so you can add each one again. Messages are not saved.
+- **Recovery keeps your contacts and saved chats, not your account.** A new phone has a new
+  account; the recovery kit lists your people so you can add each one again. Restored chats
+  are read-only history: you cannot reply in them, and a copy is a picture of one moment.
 - **Photos need a local hub.** Your photo goes only through a local hub, never by radio.
   Contacts who never use that hub see your emoji or letter.
 - History is stored in the app's private storage under Android's file encryption, not in

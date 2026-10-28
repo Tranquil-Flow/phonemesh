@@ -13,7 +13,11 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import org.phonemesh.core.backup.BackupFile
+import org.phonemesh.core.backup.BackupStream
 import org.phonemesh.core.backup.RecoveryKey
+import java.io.IOException
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -25,13 +29,17 @@ import java.util.concurrent.Executors
  * thread with a progress bar, never on the screen's thread (review A-01).
  */
 class RecoveryActivity : ScreenActivity() {
-    private enum class Step { START, CARD, SAVED, CHECK, RESTORE, FOUND }
+    private enum class Step { START, CARD, SAVED, CHECK, RESTORE, FOUND, RESTORED }
 
     private lateinit var body: LinearLayout
     private var step = Step.START
     private var key: RecoveryKey? = null
     private var file: ByteArray? = null
     private var found: Recovery.Opened.Ok? = null
+    /** Set when the picked file is a full chat copy: it is read from here, one chunk at a time, never held whole. */
+    private var chatUri: Uri? = null
+    private var restored: ArchiveImport.Result.Saved? = null
+    @Volatile private var cancelRequested = false
     private val worker: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, "recovery").apply { isDaemon = true } }
     private var busyViews: List<View> = emptyList()
 
@@ -50,9 +58,11 @@ class RecoveryActivity : ScreenActivity() {
     }
 
     override fun onDestroy() {
+        cancelRequested = true
         worker.shutdownNow()
         key = null
         file = null
+        chatUri = null
         super.onDestroy()
     }
 
@@ -73,18 +83,49 @@ class RecoveryActivity : ScreenActivity() {
         }
     }
 
-    private fun busy(on: Boolean) {
+    private fun busy(on: Boolean, cancellable: Boolean = false) {
         if (on) {
-            val bar = ProgressBar(this).apply { isIndeterminate = true; tag = "recovery_busy" }
+            val bar = if (cancellable) ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; isIndeterminate = false; tag = "recovery_busy" }
+                else ProgressBar(this).apply { isIndeterminate = true; tag = "recovery_busy" }
             val text = Ui.text(this, getString(R.string.recovery_working), palette.text)
-            body.addView(bar, 0)
-            body.addView(text, 0)
-            busyViews = listOf(text, bar)
+            progressBar = bar
+            val views = mutableListOf<View>(text, bar)
+            if (cancellable) views += Ui.button(this, palette, getString(R.string.cancel), null).apply {
+                tag = "recovery_cancel"
+                setOnClickListener { cancelRequested = true }
+            }
+            // In reverse, so they sit in order at the top.
+            views.asReversed().forEach { body.addView(it, 0) }
+            busyViews = views
+            enable(body, false)
+            // Cancel stays pressable while everything else waits.
+            if (cancellable) views.last().isEnabled = true
         } else {
             busyViews.forEach(body::removeView)
             busyViews = emptyList()
+            progressBar = null
+            enable(body, true)
         }
-        enable(body, !on)
+    }
+
+    private var progressBar: ProgressBar? = null
+
+    /**
+     * [work] for a job that takes long (a full chat copy): a progress bar, a Cancel button, and the job told how to
+     * ask whether to stop and where it has got to. A cancelled job is [CancellationException]: its [cancelled] sentence.
+     */
+    private fun <T> longWork(failed: Int, job: (() -> Boolean, (Long, Long) -> Unit) -> T, done: (T) -> Unit) {
+        if (busyViews.isNotEmpty()) return
+        cancelRequested = false
+        busy(true, cancellable = true)
+        worker.execute {
+            val result = runCatching { job({ cancelRequested }) { at, total -> runOnUiThread { progressBar?.progress = (100 * at / maxOf(1L, total)).toInt() } } }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                busy(false)
+                result.fold(done) { e -> core.note(UiText(if (e is CancellationException) R.string.recovery_cancelled else failed)) }
+            }
+        }
     }
 
     private fun enable(view: View, on: Boolean) {
@@ -95,8 +136,8 @@ class RecoveryActivity : ScreenActivity() {
     private fun line(id: Int, vararg args: Any, bold: Boolean = false) =
         body.addView(Ui.text(this, getString(id, *args), palette.text, bold = bold).apply { setPadding(0, pad() / 2, 0, pad() / 2) })
 
-    private fun action(tag: String, id: Int, icon: Int?, filled: Boolean = false, onClick: () -> Unit) =
-        body.addView(Ui.button(this, palette, getString(id), icon, filled = filled).apply {
+    private fun action(tag: String, id: Int, icon: Int?, filled: Boolean = false, text: String? = null, onClick: () -> Unit) =
+        body.addView(Ui.button(this, palette, text ?: getString(id), icon, filled = filled).apply {
             this.tag = tag
             setOnClickListener { onClick() }
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 2 })
@@ -115,6 +156,7 @@ class RecoveryActivity : ScreenActivity() {
             }
             Step.CHECK, Step.RESTORE -> words()
             Step.FOUND -> foundPeople()
+            Step.RESTORED -> restoredChats()
         }
     }
 
@@ -123,13 +165,21 @@ class RecoveryActivity : ScreenActivity() {
         line(R.string.recovery_pictures)
         val checked = core.settings.recoveryChecked
         if (checked > 0) line(R.string.recovery_checked, Ui.date(this, checked, "dMMMMyyyy"))
-        action("recovery_make", R.string.recovery_make, R.drawable.ic_person, filled = true) {
+        line(R.string.recovery_make, bold = true)
+        action("recovery_make", R.string.recovery_kind_contacts, R.drawable.ic_person, filled = true) {
             if (core.account() == null) { NameActivity.open(this); return@action }
             key = RecoveryKey.generate()
             step = Step.CARD
             build()
         }
+        action("recovery_make_chats", R.string.recovery_kind_chats, R.drawable.ic_person, filled = true) {
+            if (core.account() == null) { NameActivity.open(this); return@action }
+            ChatBackupActivity.open(this)
+        }
         action("recovery_restore", R.string.recovery_restore, R.drawable.ic_person) { pick(REQUEST_RESTORE) }
+        action("recovery_check", R.string.recovery_check_button, R.drawable.ic_check) { key = null; pick(REQUEST_CHECK) }
+        val archives = ArchiveRows(core.history).archives().size
+        if (archives > 0) action("recovery_archives", R.string.recovery_saved_chats, R.drawable.ic_person, text = getString(R.string.recovery_saved_chats, archives)) { ArchivesActivity.open(this) }
         val saved = core.history.recoveredRows()
         if (saved.isNotEmpty()) {
             line(R.string.recovery_saved_people, bold = true)
@@ -212,9 +262,60 @@ class RecoveryActivity : ScreenActivity() {
     }
 
     private fun open(typed: String) {
-        val bytes = file ?: return
         val entered = keyFrom(typed) ?: run { core.note(UiText(R.string.recovery_bad_words)); return }
+        chatUri?.let { chatCopy(it, entered); return }
+        val bytes = file ?: return
         work(R.string.recovery_read_failed, { Recovery.open(bytes, entered) }) { o -> opened(o) }
+    }
+
+    /** A full chat copy: tried with its card (a check) or kept apart as read-only chats (a restore), chunk by chunk. */
+    private fun chatCopy(uri: Uri, entered: RecoveryKey) {
+        val resolver = contentResolver
+        val history = core.history
+        val archives = core.archivesDir
+        val scratch = core.backupDir
+        val checking = step == Step.CHECK
+        val now = System.currentTimeMillis()
+        longWork(R.string.recovery_read_failed, { cancelled, progress ->
+            if (checking) ArchiveReader.read(checkNotNull(resolver.openInputStream(uri)), entered, scratch, cancelled, progress)
+            else ArchiveImport(history, archives, scratch).import({ resolver.openInputStream(uri) }, entered, now, cancelled, progress)
+        }) { result ->
+            when (result) {
+                is ArchiveReader.Read.Ok -> {
+                    core.settings.recoveryChecked = now
+                    chatUri = null
+                    step = Step.START
+                    build()
+                    core.note(UiText(R.string.recovery_check_chats, listOf(result.manifest.chats, result.manifest.messages)))
+                }
+                is ArchiveReader.Read.Failed -> core.note(UiText(chatProblem(result.problem)))
+                is ArchiveImport.Result.Saved -> { chatUri = null; restored = result; step = Step.RESTORED; build() }
+                is ArchiveImport.Result.Already -> core.note(UiText(R.string.recovery_already))
+                is ArchiveImport.Result.Refused -> core.note(UiText(if (result.why == ArchiveImport.Refused.TOO_MANY_COPIES) R.string.recovery_too_many else R.string.recovery_same_number))
+                is ArchiveImport.Result.Failed -> core.note(UiText(chatProblem(result.problem)))
+                ArchiveImport.Result.NoSpace -> core.note(UiText(R.string.recovery_no_space))
+                ArchiveImport.Result.Unreadable -> core.note(UiText(R.string.recovery_unreadable))
+                else -> core.note(UiText(R.string.recovery_read_failed))
+            }
+        }
+    }
+
+    private fun chatProblem(problem: ArchiveReader.Problem) = when (problem) {
+        ArchiveReader.Problem.NOT_A_COPY, ArchiveReader.Problem.NOT_CHAT_COPY -> R.string.recovery_not_copy
+        ArchiveReader.Problem.KEY_OR_FILE_DOES_NOT_MATCH -> R.string.recovery_no_match
+        ArchiveReader.Problem.TOO_NEW, ArchiveReader.Problem.TOO_BIG -> R.string.recovery_too_new
+    }
+
+    /** After a restore of chats: kept apart, read only, marked as from this saved copy; people are to add again. */
+    private fun restoredChats() {
+        val ok = restored ?: run { step = Step.START; build(); return }
+        line(R.string.recovery_restored_chats, ok.chats, ok.messages, bold = true)
+        line(R.string.recovery_from_copy)
+        line(R.string.recovery_read_only)
+        line(R.string.recovery_new_identity)
+        line(R.string.recovery_compare)
+        action("recovery_see_chats", R.string.recovery_see_chats, R.drawable.ic_person, filled = true) { ArchivesActivity.open(this) }
+        action("recovery_restored_done", R.string.backup_done, R.drawable.ic_check) { restored = null; step = Step.START; build() }
     }
 
     private fun opened(o: Recovery.Opened) {
@@ -268,10 +369,13 @@ class RecoveryActivity : ScreenActivity() {
         if (resultCode != Activity.RESULT_OK || uri == null) return
         when (requestCode) {
             REQUEST_CREATE -> save(uri)
-            REQUEST_CHECK, REQUEST_RESTORE -> work(R.string.recovery_read_failed, { read(uri) }) {
-                file = it
-                step = if (requestCode == REQUEST_CHECK) Step.CHECK else Step.RESTORE
-                build()
+            REQUEST_CHECK, REQUEST_RESTORE -> work(R.string.recovery_read_failed, { head(uri) }) { info ->
+                val next = if (requestCode == REQUEST_CHECK) Step.CHECK else Step.RESTORE
+                when {
+                    info == null -> core.note(UiText(R.string.recovery_not_copy))
+                    info.purpose == BackupFile.Purpose.HISTORY -> { chatUri = uri; file = null; step = next; build() }
+                    else -> work(R.string.recovery_read_failed, { read(uri) }) { bytes -> chatUri = null; file = bytes; step = next; build() }
+                }
             }
         }
     }
@@ -291,6 +395,17 @@ class RecoveryActivity : ScreenActivity() {
             step = Step.SAVED
             build()
         }
+    }
+
+    /** On the worker: the public start of the file, to tell a contacts copy from a chat copy before any key work; null when it is neither. */
+    private fun head(uri: Uri): BackupStream.Head? {
+        val bytes = ByteArray(HEAD_BYTES)
+        val got = checkNotNull(contentResolver.openInputStream(uri)).use { input ->
+            var at = 0
+            while (at < bytes.size) { val n = input.read(bytes, at, bytes.size - at); if (n < 0) break; at += n }
+            at
+        }
+        return BackupStream.head(bytes.copyOf(got))
     }
 
     /** On the worker: the whole file, at most [MAX_FILE] bytes; throws when it cannot be read. */
@@ -313,6 +428,7 @@ class RecoveryActivity : ScreenActivity() {
         private const val REQUEST_CHECK = 42
         private const val REQUEST_RESTORE = 43
         private const val MAX_FILE = 16 * 1024 * 1024 + 4096
+        private const val HEAD_BYTES = 28
         /** Names listed on screen at most; the rest are counted (review A-01). */
         private const val SHOWN = 50
 

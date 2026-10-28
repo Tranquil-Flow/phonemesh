@@ -20,7 +20,7 @@ import java.util.Base64
  * stand in for the hub's Wi-Fi and its Mac Bluetooth bridge: they answer only to this hub's own [card], and stop answering
  * when the hub is off or that way is down. What the demo leaves out is the transport itself (no Wi-Fi join, no TLS).
  */
-class DemoHub(private val dir: File, private val mesh: DemoMesh, private val clock: DemoClock) : AutoCloseable {
+class DemoHub(val dir: File, private val mesh: DemoMesh, private val clock: DemoClock) : AutoCloseable {
     val card: HubCard = loadCard()
     private val mailbox = Mailbox(File(dir, "mail").apply { mkdirs() }, DAYS)
     private val hub = Hub(mailbox, MeshRadioOut(), outbox = Outbox(File(dir, "outbox.bin"))).also { it.clock = clock::now }

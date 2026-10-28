@@ -33,6 +33,8 @@ class DemoApp : Application() {
         val core = AppCore.create(this, radioFactory = world::radioFor, access = DemoAccess(PhoneAccess(this), world))
         core.hub = world.hub.wifiLink
         core.bluetoothHub = world.hub.bluetoothLink
+        // Hub pack updates: the real screens and verifier, trusting only the demo-only keys (DemoUpdateKeys).
+        DemoUpdates.attach(this, core, world.hub.dir)?.let { core.updates = it }
         AppCore.replaceForTest(core)
         world.attach(core)
         ScanActivity.startCamera = { DemoScan.show(it, world, core) }

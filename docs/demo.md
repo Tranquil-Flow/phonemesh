@@ -26,6 +26,8 @@ Each release from v0.1.1 has demo files next to the normal app, for example
   **Ignore**.
 - **Sena**: she uses the plain Meshtastic app, not Phonemesh. She writes in the shared chat.
 - **The local hub**: in Settings, **Local hub**, **Scan hub code**, pick "The local hub's code".
+  Then **Updates** offers a newer "Demo voice" pack, signed with demo-only keys that the real app
+  does not trust. Tap **Download** to watch the real copy, check and install.
 
 Kofi and Yaw answer your private messages. Everyone nearby sometimes writes in the shared chat. Each person has
 their own picture: Kofi an emoji, Ama her letter, Yaw his letter on a colour from the colour wheel.

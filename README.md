@@ -271,6 +271,8 @@ See [Run a local hub](#run-a-local-hub).
 - **Show my code:** your QR code and link for adding someone.
 - **Local hub** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
   sent, and **Keep hub when app is closed**.
+  - **Updates:** copies newer speech packs from the hub over its Wi-Fi, only after you tap
+    **Download**. It uses no mobile data.
 - **Read new messages aloud:** off by default.
 - **Share the app:** send the app and speech packs to another phone.
 - **Recovery kit:** make a recovery card and a sealed copy of your contacts, or of your

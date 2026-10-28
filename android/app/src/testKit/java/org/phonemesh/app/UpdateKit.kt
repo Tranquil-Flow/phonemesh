@@ -36,7 +36,7 @@ object UpdateKit {
     fun voice(id: String, version: Int, label: String = "Fran\u00e7ais", modelBytes: Int = 4_000): Pack {
         val files = linkedMapOf<String, ByteArray>()
         files["pack.properties"] = "format=2\nkind=voice\nid=$id\nversion=$version\nlabel=$label\nlanguageTag=fr\nwhisperLanguage=fr\n".toByteArray()
-        files["tts/model.onnx"] = ByteArray(modelBytes) { (it * 7 + version).toByte() }
+        files["tts/model.onnx"] = ByteArray(modelBytes).also { java.util.Random(version * 31L + modelBytes).nextBytes(it) }
         files["tts/tokens.txt"] = "a 1\nb 2\n".toByteArray()
         for (n in listOf("phontab", "phondata", "phonindex", "intonations")) files["tts/espeak-ng-data/$n"] = "$n$version".toByteArray()
         files["tts/espeak-ng-data/lang/fr"] = "name French\n".toByteArray()
@@ -53,7 +53,15 @@ object UpdateKit {
         val out = ByteArrayOutputStream()
         out.write(1)
         out.write(ByteBuffer.allocate(42).putLong(epoch).putLong(sequence).putLong(1_793_145_600L).putLong(1_808_697_600L).putLong(1).putShort(entries.size.toShort()).array())
-        for (e in entries.sortedWith(compareBy({ it.kind }, { it.id }, { it.version }, { it.abi }))) {
+        // No compareBy here: the minified test build keeps only the Kotlin classes its test sources name.
+        val order = Comparator<UpdateMetadata.Entry> { a, b ->
+            var c = a.kind.compareTo(b.kind)
+            if (c == 0) c = a.id.compareTo(b.id)
+            if (c == 0) c = a.version.compareTo(b.version)
+            if (c == 0) c = a.abi.compareTo(b.abi)
+            c
+        }
+        for (e in entries.sortedWith(order)) {
             val id = e.id.toByteArray(); val label = e.label.toByteArray(); val abi = e.abi.toByteArray()
             out.write(byteArrayOf(e.kind.toByte(), id.size.toByte(), label.size.toByte(), abi.size.toByte()))
             out.write(ByteBuffer.allocate(38).putLong(e.version).putLong(e.minApp).putLong(e.maxApp).putInt(e.minApi).putShort(e.packFormat.toShort()).putLong(e.bytes).array())

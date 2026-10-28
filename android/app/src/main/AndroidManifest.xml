@@ -68,6 +68,7 @@
         <activity android:name=".RadioActivity" android:exported="false" />
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".HubActivity" android:exported="false" />
+        <activity android:name=".UpdatesActivity" android:exported="false" />
         <activity android:name=".HelpActivity" android:exported="false" />
         <activity android:name=".RegionActivity" android:exported="false" />
         <activity android:name=".PictureActivity" android:exported="false" />

@@ -31,6 +31,8 @@ class HubActivity : ScreenActivity() {
     private lateinit var failure: TextView
     private lateinit var allow: View
     private lateinit var forget: View
+    private lateinit var updates: View
+    private lateinit var updatesReady: View
     private lateinit var roaming: Switch
     private lateinit var roamingState: TextView
     private var forgetDialog: AlertDialog? = null
@@ -70,6 +72,13 @@ class HubActivity : ScreenActivity() {
             tag = "hub_scan"
             setOnClickListener { startActivity(Intent(this@HubActivity, ScanActivity::class.java)) }
         }, spaced())
+        updates = Ui.button(this, palette, getString(R.string.updates_title), R.drawable.ic_download).apply {
+            tag = "hub_updates"
+            setOnClickListener { startActivity(Intent(this@HubActivity, UpdatesActivity::class.java)) }
+        }
+        column.addView(updates, spaced())
+        updatesReady = Ui.text(this, getString(R.string.updates_ready), palette.good, bold = true).apply { tag = "hub_updates_ready" }
+        column.addView(updatesReady)
         allow = Ui.button(this, palette, getString(R.string.hub_allow), R.drawable.ic_radio_on).apply {
             tag = "hub_allow"
             setOnClickListener { askBluetooth(forRoaming = false) }
@@ -137,6 +146,9 @@ class HubActivity : ScreenActivity() {
         val missing = status.saved && core.access.radioPermissionsMissing().isNotEmpty()
         allow.visibility = if (missing) View.VISIBLE else View.GONE
         forget.visibility = if (status.saved) View.VISIBLE else View.GONE
+        updates.visibility = forget.visibility
+        // A verified offer already held (no network needed to know); the screen itself says what to do.
+        updatesReady.visibility = if (status.saved && (core.updates?.ready() ?: 0) > 0) View.VISIBLE else View.GONE
         // The switch shows the person's choice; the line under it says whether the service really runs.
         rendering = true
         roaming.isChecked = core.settings.hubRoaming

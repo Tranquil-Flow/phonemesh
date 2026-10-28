@@ -315,6 +315,15 @@ By default the app talks to the hub only while it is open. **Keep hub when app i
 turns on a background service with a silent notification, which uses more battery.
 **Forget this hub** removes it; using it again needs a new scan.
 
+### Updates from the hub
+
+**Settings → Local hub → Updates** lists newer versions of speech packs the phone already has, when the hub's
+operator has brought a signed release to the hub. The phone first copies the hub's signed list over the hub's
+own Wi-Fi (never mobile data, Bluetooth or the radio) and checks it against the keys built into the app. Nothing
+is copied until you tap **Download** on that pack. You can **Pause** and **Resume**; what was copied is kept, and
+leaving the screen pauses. The finished file is checked against its signed hash before it replaces the old pack,
+and the old pack stays in use if anything fails. Each failure is written next to the pack it belongs to.
+
 ## Speech packs
 
 The app ships without speech models; they come as separate ZIP packs. Today:

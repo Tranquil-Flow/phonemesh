@@ -40,7 +40,7 @@ class ScreenChecksTest {
             "05-picture-choose", "05-picture-ready", "05-picture-bubbles",
             "06-draft-too-long", "06-draft-cut", "06-draft-planned", "06-plan-window", "06-plan-window-day", "06-plan-clock", "06-plan-calendar",
             "07-recording", "07-recording-tip", "07-writing", "08-radio", "09-settings", "09-name", "09-name-filled", "09-add-someone", "09-add-request", "09-safety",
-            "09-safety-mismatch", "09-contact", "09-contact-missing", "09-person-chat", "09-hub-none", "09-hub-searching", "09-hub-roaming", "10-help", "10-help-more", "10-help-accounts", "11-note-picture",
+            "09-safety-mismatch", "09-contact", "09-contact-missing", "09-person-chat", "09-hub-none", "09-hub-searching", "09-hub-roaming", "09-updates-ready", "09-updates-copying", "09-updates-error", "10-help", "10-help-more", "10-help-accounts", "11-note-picture",
         )
         assertEquals(names, ScreenStates.all.map { it.first })
         assertEquals(names.map { "$it-dark" }, ScreenStates.dark.map { it.first })
@@ -60,6 +60,9 @@ class ScreenChecksTest {
     @Test fun hubWithoutSavedCode() = check(minTargets = 3) { ScreenStates.hub(saved = false) }
     @Test fun hubSearching() = check(minTargets = 4) { ScreenStates.hub() }
     @Test fun hubRoaming() = check(minTargets = 4) { ScreenStates.hub(roaming = true) }
+    @Test fun updatesReady() = check(minTargets = 4) { ScreenStates.updates("ready") }
+    @Test fun updatesCopying() = check(minTargets = 3) { ScreenStates.updates("copying") }
+    @Test fun updatesError() = check(minTargets = 3) { ScreenStates.updates("error") }
     @Test fun personChatHeader() = check(minTargets = 4) { ScreenStates.contactDetails(conversation = true) }
     @Test fun chatsWithRows() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows() }
     @Test fun chatsInEnglish() = check(minTargets = 4, minRows = 2) { ScreenStates.chatsRows("en-US") }

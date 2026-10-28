@@ -159,6 +159,49 @@ object ScreenStates {
         return screen
     }
 
+    /**
+     * Settings, Local hub, Updates with the real state files and downloader against an in-memory hub: [mode] is "ready" (an offer,
+     * nothing copied), "copying" (held half way) or "error" (the file is not the signed one).
+     */
+    fun updates(mode: String): Activity {
+        TestCore.install(language = "fr", voices = listOf("fr"))
+        val core = TestCore.core
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val id = "voice-fr-siwis"
+        val have = core.store.list().single { it.id == id }
+        val keys = UpdateKit.keys()
+        val next = UpdateKit.voice(id, have.version + 1, "Fran\u00e7ais", 700_000)
+        val hub = UpdateKit.Hub().also { it.add(next.zip); it.catalog = UpdateKit.catalog(keys, 1, 2, listOf(next.entry)) }
+        if (mode == "copying") hub.gate = { range -> if (range.first > 0) java.util.concurrent.CountDownLatch(1).await(30, java.util.concurrent.TimeUnit.SECONDS) }
+        if (mode == "error") hub.objects[UpdateKit.hex(next.entry.digest)] = next.zip.copyOf().also { it[300] = (it[300] + 1).toByte() }
+        val dir = java.io.File(context.filesDir, "updates-states").also { it.deleteRecursively() }
+        val baseline = UpdateKit.catalog(keys, 1, 1, listOf(UpdateKit.voice(id, have.version).entry))
+        TestCore.onMain {
+            core.updates = HubUpdates.open(dir, Fixtures.packDir(context), core.store, { hub }, keys.roots, baseline, org.phonemesh.core.GeneratedPackCatalog.entries)
+        }
+        val screen = Views.start(UpdatesActivity::class.java)
+        fun wait(tag: String): android.view.View {
+            val end = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < end) { Views.tagged(screen, tag)?.let { return it }; Thread.sleep(100) }
+            error("No view tagged $tag")
+        }
+        wait("update_download:$id")
+        if (mode != "ready") { Views.tap(screen, "update_download:$id") }
+        if (mode == "copying") { wait("update_pause:$id"); wait("update_bar:$id") }
+        if (mode == "error") {
+            // The row is rebuilt on every change, so look the sentence up again each time (an old view never updates).
+            val shown = screen.getString(R.string.updates_fail_untrusted)
+            val end = System.currentTimeMillis() + 20_000
+            var seen = false
+            while (!seen && System.currentTimeMillis() < end) {
+                seen = Views.tagged(screen, "update_state:$id")?.let { Views.textOf(it) } == shown
+                if (!seen) Thread.sleep(100)
+            }
+            check(seen) { "the refusal is not shown" }
+        }
+        return screen
+    }
+
     /** Real person-chat header and local voice controls, using silent fixture speech. */
     fun contactDetails(missing: Boolean = false, conversation: Boolean = false): Activity {
         TestCore.install(language = if (missing) "en-US" else "fr", voices = listOf("fr", "en-US"))
@@ -840,6 +883,9 @@ object ScreenStates {
         "09-hub-none" to { hub(saved = false) },
         "09-hub-searching" to { hub() },
         "09-hub-roaming" to { hub(roaming = true) },
+        "09-updates-ready" to { updates("ready") },
+        "09-updates-copying" to { updates("copying") },
+        "09-updates-error" to { updates("error") },
         "10-help" to { help() },
         "10-help-more" to { help(group = 2) },
         "10-help-accounts" to { help(group = 5) },

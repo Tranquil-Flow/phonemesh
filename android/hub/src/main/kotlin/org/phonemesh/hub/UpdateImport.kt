@@ -21,6 +21,7 @@ class UpdateImport(
     private val dir: File, private val recoveryKey: ByteArray, initialCatalogKey: ByteArray, initialKeyId: Int = 1,
     /** At most this much for update objects (spec 5.4: about 2 GB) and never less free space than [mailReserve]. */
     private val objectQuota: Long = OBJECT_QUOTA, private val mailReserve: Long = MAIL_RESERVE,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val updates = File(dir, "updates")
     private val objects = File(updates, "objects")
@@ -42,7 +43,8 @@ class UpdateImport(
 
     sealed class Result {
         class Imported(val sequence: Long, val objects: Int, val missing: Int) : Result()
-        object AlreadyHave : Result()
+        /** The same catalog as held; [objects] files that were missing are now copied, [missing] still are. */
+        class AlreadyHave(val objects: Int, val missing: Int) : Result()
         class Refused(val why: String) : Result()
     }
 
@@ -55,8 +57,22 @@ class UpdateImport(
         return State.decode(stateFile.readBytes()) ?: throw IOException("updates/trust-state.bin is damaged")
     }
 
-    /** One import at a time (review D9). */
+    /** When and what the last successful import was; null before the first. */
+    class LastImport(val seconds: Long, val sequence: Long, val copied: Int, val missing: Int)
+
+    fun lastImport(): LastImport? = lastImport(dir)
+
+    /** One import at a time in this process (review D9) and, by a lock file, across processes. */
     @Synchronized fun import(stick: File): Result {
+        updates.mkdirs()
+        val channel = java.nio.channels.FileChannel.open(File(updates, ".import.lock").toPath(),
+            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)
+        val lock = try { channel.tryLock() } catch (_: java.nio.channels.OverlappingFileLockException) { null }
+        if (lock == null) { channel.close(); return Result.Refused("another import is running; wait for it to finish") }
+        try { return importLocked(stick) } finally { lock.release(); channel.close() }
+    }
+
+    private fun importLocked(stick: File): Result {
         val root = stick.toPath()
         if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)) return Result.Refused("not a folder")
         // Each file is read once, bounded, and those same bytes are checked and kept (review D3, D4).
@@ -86,10 +102,9 @@ class UpdateImport(
         if (catalog.epoch != (if (next.epoch == 0L) 1L else next.epoch)) return Result.Refused("the catalog is for another trust epoch")
         val digest = sha256(env.payload)
         if (catalog.sequence < next.sequence) return Result.Refused("an older catalog than the one this hub has")
-        if (catalog.sequence == next.sequence) {
-            return if (digest.contentEquals(next.catalogDigest)) Result.AlreadyHave
-            else Result.Refused("a different catalog with the same number")
-        }
+        // The same catalog again still fills objects that an earlier stick did not carry; nothing else changes.
+        val same = catalog.sequence == next.sequence
+        if (same && !digest.contentEquals(next.catalogDigest)) return Result.Refused("a different catalog with the same number")
         // Objects: only signed digests, hashed while copied into partial/, then moved into objects/.
         objects.mkdirs(); partial.mkdirs()
         // Room first (review D2): the objects still to copy must fit the quota and leave mail its reserve.
@@ -127,6 +142,10 @@ class UpdateImport(
             Files.move(part.toPath(), File(objects, name).toPath(), StandardCopyOption.ATOMIC_MOVE)
             copied++
         }
+        if (same) {
+            record(catalog.sequence, copied, missing)
+            return Result.AlreadyHave(copied, missing)
+        }
         // Publish: the catalog by its digest, then the trust state (new sequence) last, each by atomic rename.
         val catalogs = File(updates, "catalogs").apply { mkdirs() }
         write(File(catalogs, "${hex(digest)}.pmup"), bytes)
@@ -137,8 +156,12 @@ class UpdateImport(
         state = accepted
         // Revoked objects are not served any more (review D8).
         for (d in catalog.revoked) File(objects, hex(d)).delete()
+        record(catalog.sequence, copied, missing)
         return Result.Imported(catalog.sequence, copied, missing)
     }
+
+    private fun record(sequence: Long, copied: Int, missing: Int) =
+        write(File(updates, "last-import.txt"), "time=${now() / 1000}\nsequence=$sequence\ncopied=$copied\nmissing=$missing\n".toByteArray())
 
     /** A plain file directly in [dir] named [name]; never a link, a folder or anything outside. */
     private fun regular(dir: File, name: String): File? =
@@ -157,6 +180,13 @@ class UpdateImport(
     private fun sha256(b: ByteArray) = MessageDigest.getInstance("SHA-256").digest(b)
 
     companion object {
+        fun lastImport(dir: File): LastImport? {
+            val f = File(File(dir, "updates"), "last-import.txt")
+            if (!f.isFile || f.length() > 1024) return null
+            val v = f.readLines().filter { '=' in it }.associate { it.substringBefore('=') to it.substringAfter('=') }
+            return runCatching { LastImport(v.getValue("time").toLong(), v.getValue("sequence").toLong(), v.getValue("copied").toInt(), v.getValue("missing").toInt()) }.getOrNull()
+        }
+
         const val OBJECT_QUOTA = 2_000_000_000L
         const val MAIL_RESERVE = 100_000_000L
     }

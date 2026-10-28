@@ -11,10 +11,14 @@ import java.io.PrintStream
  *   (owner, offline machine). The passphrase is asked for at the terminal, or read from the first line of standard input
  *   when there is no terminal; it is never taken from an argument, never printed, never stored.
  *
+ * - `phonemesh-hub import-updates <stick folder> [hub.conf]` (operator): checks a stick's `catalog.pmup`, optional
+ *   `recovery.pmup` and `objects/` and puts what verifies into the hub's data folder. A running hub serves it at once.
+ * - `phonemesh-hub update-status [hub.conf]` (operator): the release held, files here or missing, room used, last import.
+ *
  * Exit codes: 0 done, 2 refused or misused (nothing written).
  */
 object UpdateCli {
-    val COMMANDS = setOf("sign-catalog")
+    val COMMANDS = setOf("sign-catalog", "import-updates", "update-status")
 
     class Io(
         val out: PrintStream, val err: PrintStream,
@@ -22,6 +26,9 @@ object UpdateCli {
         val passphrase: () -> CharArray?,
         /** The public keys a catalog is signed under (the ones compiled into the app unless `--public-keys` names a file). */
         val roots: UpdateRoots = UpdateRoots.compiled,
+        val now: () -> Long = System::currentTimeMillis,
+        /** The hub config used when a command is not given one. */
+        val defaultConfig: File = File("hub.conf"),
     )
 
     private class Usage(message: String) : Exception(message)
@@ -29,6 +36,8 @@ object UpdateCli {
     fun run(args: List<String>, io: Io): Int = try {
         when (args.firstOrNull()) {
             "sign-catalog" -> signCatalog(args.drop(1), io)
+            "import-updates" -> importUpdates(args.drop(1), io)
+            "update-status" -> updateStatus(args.drop(1), io)
             else -> throw Usage("commands: ${COMMANDS.joinToString(", ")}")
         }
     } catch (e: Usage) {
@@ -78,5 +87,38 @@ object UpdateCli {
         io.out.println("Signed ${signed.catalog.path}: sequence ${signed.sequence}, ${list.items.size} entries, ${signed.objects} file${if (signed.objects == 1) "" else "s"} in objects/.")
         io.out.println("Check it on another computer with the public keys before it goes on a stick.")
         return 0
+    }
+
+    /** The hub's data folder from its config file (the same file the running hub reads). */
+    private fun hubDir(config: String?, io: Io): File {
+        val file = config?.let { File(it) } ?: io.defaultConfig
+        if (!file.isFile) throw CatalogSigner.Refused("${file.path} is not a file; name the hub's config file")
+        return HubConfig.read(file).dir
+    }
+
+    private fun importUpdates(args: List<String>, io: Io): Int {
+        if (args.isEmpty() || args.size > 2) throw Usage("import-updates <stick folder> [hub.conf]")
+        val stick = File(args[0])
+        val dir = hubDir(args.getOrNull(1), io)
+        val importer = UpdateImport(dir, io.roots.recoveryKey, io.roots.catalogKey, io.roots.catalogKeyId, now = io.now)
+        fun files(n: Int) = "$n file${if (n == 1) "" else "s"}"
+        return when (val r = importer.import(stick)) {
+            is UpdateImport.Result.Imported -> {
+                io.out.println("Imported catalog number ${r.sequence}: ${files(r.objects)} copied, ${r.missing} missing.")
+                if (r.missing > 0) io.out.println("${r.missing} listed file${if (r.missing == 1) " is" else "s are"} not on this stick. Import a stick that carries them later; phones get what is here.")
+                io.out.println("A running hub serves this at once; no restart is needed."); 0
+            }
+            is UpdateImport.Result.AlreadyHave -> {
+                io.out.println("Already have this catalog (number ${importer.state.sequence}): ${files(r.objects)} copied, ${r.missing} missing."); 0
+            }
+            is UpdateImport.Result.Refused -> { io.err.println("refused: ${r.why}"); 2 }
+        }
+    }
+
+    private fun updateStatus(args: List<String>, io: Io): Int {
+        if (args.size > 1) throw Usage("update-status [hub.conf]")
+        val report = UpdateStatus.read(hubDir(args.firstOrNull(), io), io.roots, now = io.now)
+        report.render().forEach(io.out::println)
+        return if (report.kind == UpdateStatus.Kind.DAMAGED) 2 else 0
     }
 }

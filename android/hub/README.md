@@ -242,14 +242,16 @@ All phone calls use TLS pinned to the hub public key from the card (over Wi-Fi o
 The update routes only serve what was imported and checked from a USB folder (`UpdateImport`); phones check every byte
 against the signed catalog themselves. The hub vouches for nothing.
 
-## Signed updates: signing a release
+## Signed updates: commands
 
-This command does not start the hub. It is run as `bin/phonemesh-hub sign-catalog ...` (`./gradlew :hub:run --args="sign-catalog ..."`
+These three commands do not start the hub. They are run as `bin/phonemesh-hub <command>` (`./gradlew :hub:run --args="<command> ..."`
 while developing). Exit code 0 means done; 2 means refused or misused, and nothing was changed.
 
 | Command | Who | What it does |
 |---|---|---|
 | `sign-catalog --key catalog-key.pem --list packs.list --out release-1 [--public-keys public-keys.txt]` | Owner, on the offline machine | Reads the encrypted catalog key (asks for the passphrase at the terminal, or reads one line from standard input; never from an argument, never printed) and a pack list. Writes `release-1/catalog.pmup` and `release-1/objects/<sha256>`. Needs a new or empty `--out` folder. |
+| `import-updates <stick folder> [hub.conf]` | Hub operator | Checks the stick's `catalog.pmup`, optional `recovery.pmup` and `objects/` and puts what verifies into the hub's data folder (`dir` in the config). A running hub serves it at once. The same catalog can be imported again from another stick to fill files that were missing. |
+| `update-status [hub.conf]` | Hub operator | Shows the release held (trust epoch, catalog number, dates), each file as `here` or `MISSING`, files that are not in the release, room used of the 2 GB update room, free disk space with the 100 MB kept for mail, and when files were last brought. |
 
 **Pack list** for `sign-catalog` (paths are relative to the list's folder, never outside it, never links; `#` starts a comment):
 

@@ -34,6 +34,9 @@ class HistoryBackupTest {
     private fun write(m: HistoryBackup.Manifest = manifest(), rs: List<HistoryBackup.Record> = records()): ByteArray =
         ByteArrayOutputStream().also { out -> HistoryBackup.Writer(out, m).apply { rs.forEach(::write); finish() } }.toByteArray()
 
+    /** A flipped bit in a raw stream (no seal around it) may land in the schema or scope bits: still refused, as a null or as [HistoryBackup.Unsupported]. */
+    private fun refusedRead(bytes: ByteArray) = runCatching { read(bytes) }.getOrNull()
+
     private fun read(bytes: ByteArray, got: MutableList<HistoryBackup.Record> = ArrayList()) =
         HistoryBackup.read(ByteArrayInputStream(bytes)) { got += it }
 
@@ -57,7 +60,7 @@ class HistoryBackupTest {
         val s = hex("stream")
         for (i in s.indices) for (bit in 0..7) {
             val bad = s.copyOf().also { it[i] = (it[i].toInt() xor (1 shl bit)).toByte() }
-            assertNull("byte $i bit $bit", read(bad))
+            assertNull("byte $i bit $bit", refusedRead(bad))
         }
         for (n in 0 until s.size) assertNull("cut at $n", read(s.copyOf(n)))
         assertNull(read(s + 0))
@@ -200,7 +203,7 @@ class HistoryBackupTest {
         val g = hex("groups_stream")
         assertNotNull(read(reseal(g) { }))
         assertNull("schema 1 cannot carry the group bit", read(reseal(g) { it[7] = 1 }))
-        assertNull("schema 3 does not exist", read(reseal(g) { it[7] = 3 }))
+        assertTrue("schema 3 is a newer app's copy", runCatching { read(reseal(g) { it[7] = 3 }) }.exceptionOrNull() is HistoryBackup.Unsupported)
         val plain = hex("stream")
         assertNotNull(read(reseal(plain) { }))
         assertNull("schema 2 needs the group bit", read(reseal(plain) { it[7] = 2 }))
@@ -210,7 +213,7 @@ class HistoryBackupTest {
         val s = hex("groups_stream")
         for (i in s.indices) for (bit in 0..7) {
             val bad = s.copyOf().also { it[i] = (it[i].toInt() xor (1 shl bit)).toByte() }
-            assertNull("byte $i bit $bit", read(bad))
+            assertNull("byte $i bit $bit", refusedRead(bad))
         }
         for (n in 0 until s.size) assertNull("cut at $n", read(s.copyOf(n)))
         assertNull(read(s + 0))

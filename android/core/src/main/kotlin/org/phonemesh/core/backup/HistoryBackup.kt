@@ -93,6 +93,8 @@ object HistoryBackup {
         fun addMessage(id: Long, chatId: Long, pictureId: Long): Boolean
         fun messageChat(id: Long): Long?
         fun messagePicture(id: Long): Long?
+        /** False when the same author already reacted to [target] with [emoji] (author: contact id and label, if any). */
+        fun addReaction(target: Long, authorContactId: Long, authorLabel: String?, emoji: String): Boolean
     }
 
     /** [Index] in memory, for tests and small copies. */
@@ -113,6 +115,9 @@ object HistoryBackup {
         }
         override fun messageChat(id: Long) = messages[id]?.first
         override fun messagePicture(id: Long) = messages[id]?.second
+        private val reactions = HashSet<List<Any?>>()
+        override fun addReaction(target: Long, authorContactId: Long, authorLabel: String?, emoji: String) =
+            reactions.add(listOf(target, authorContactId, authorLabel, emoji))
     }
 
     /** The format's rules, record by record; [RecordBad] for anything outside them. */
@@ -122,6 +127,8 @@ object HistoryBackup {
         private val seen = IntArray(7)
         private var pictureMessages = 0
         private var missing = 0
+        private var sharedChats = 0
+        private var groupChats = 0
 
         init {
             need(m.scopeFlags and SCOPE_BITS.inv() == 0)
@@ -130,6 +137,9 @@ object HistoryBackup {
             need(m.reactions in 0..MAX_REACTIONS && m.pictures in 0..MAX_PICTURES && m.missingPictures in 0..m.pictures)
             need(m.ownName.toByteArray(Charsets.UTF_8).size in 1..ContactsBackup.MAX_NAME_BYTES && m.ownColour in 0..0xFFFFFF)
         }
+
+        /** Times are inside the manifest's range when it names one (both zero: all history). */
+        private fun inScope(time: Long) = (m.scopeStart == 0L && m.scopeEnd == 0L) || time in m.scopeStart..m.scopeEnd
 
         private fun declared(type: Int): Int = when (type) {
             CONTACT -> m.contacts; CHAT -> m.chats; MESSAGE -> m.messages; REACTION -> m.reactions; PICTURE -> m.pictures
@@ -159,11 +169,12 @@ object HistoryBackup {
                 }
                 is Chat -> {
                     next(CHAT, r.id)
+                    need(plain(r.title))
                     when (r.kind) {
                         PERSON -> need(r.contactId != 0L && index.hasContact(r.contactId))
-                        SHARED_CHAT -> need(r.contactId == 0L && m.scopeFlags and SHARED != 0)
+                        SHARED_CHAT -> { need(r.contactId == 0L && m.scopeFlags and SHARED != 0); need(++sharedChats <= 1) }
                         LEGACY_CHAT -> need(r.contactId == 0L && m.scopeFlags and LEGACY != 0)
-                        GROUP_CHAT -> need(r.contactId == 0L && m.scopeFlags and GROUPS != 0 && r.title.isNotEmpty())
+                        GROUP_CHAT -> { need(r.contactId == 0L && m.scopeFlags and GROUPS != 0 && r.title.isNotEmpty()); groupChats++ }
                         else -> throw RecordBad()
                     }
                     need(index.addChat(r.id, r.contactId))
@@ -174,6 +185,9 @@ object HistoryBackup {
                     need(r.authorContactId == 0L || index.hasContact(r.authorContactId))
                     need(r.status in 0..6 && (if (r.outgoing) r.status != 0 else r.status == 0))
                     need(r.status < 5 || m.scopeFlags and UNSENT != 0)
+                    need(r.plannedAt == 0L || r.status == 5)
+                    need(inScope(r.time))
+                    need(r.authorLabel == null || plain(r.authorLabel))
                     need(!r.replyMissing || r.replyId == 0L)
                     need(r.replyId == 0L || (r.replyId < r.id && index.messageChat(r.replyId) == r.chatId))
                     if (r.pictureId == 0L) need(r.text.isNotEmpty()) else pictureMessages++
@@ -184,6 +198,10 @@ object HistoryBackup {
                     need(index.messageChat(r.targetId) != null)
                     need(r.authorContactId == 0L || index.hasContact(r.authorContactId))
                     need(Reactions.single(r.emoji) == r.emoji)
+                    need(!r.wasUnsent || m.scopeFlags and UNSENT != 0)
+                    need(inScope(r.time))
+                    need(r.authorLabel == null || plain(r.authorLabel))
+                    need(index.addReaction(r.targetId, r.authorContactId, r.authorLabel, r.emoji))
                 }
                 is Picture -> {
                     next(PICTURE, r.id)
@@ -192,7 +210,7 @@ object HistoryBackup {
                     need(codec != null && r.width in 1..512 && r.height in 1..512 && r.sketch.size in 1..32)
                     need(r.data.size <= MAX_PICTURE_BYTES)
                     if (!r.complete || codec == PictureCodec.SKETCH) need(r.data.isEmpty())
-                    else need(m.scopeFlags and PICTURE_DATA != 0 && isWebp(r.data))
+                    else need(m.scopeFlags and PICTURE_DATA != 0 && WebpCheck.dimensions(r.data) == (r.width to r.height))
                     if (!r.complete) missing++
                 }
             }
@@ -202,11 +220,8 @@ object HistoryBackup {
             need(seen[CONTACT - 1] == m.contacts && seen[CHAT - 1] == m.chats && seen[MESSAGE - 1] == m.messages)
             need(seen[REACTION - 1] == m.reactions && seen[PICTURE - 1] == m.pictures && missing == m.missingPictures)
             need(pictureMessages == m.pictures)
+            need(m.scopeFlags and GROUPS == 0 || groupChats > 0)
         }
-
-        private fun isWebp(d: ByteArray) = d.size >= 12 && String(d, 0, 4, Charsets.US_ASCII) == "RIFF" &&
-            String(d, 8, 4, Charsets.US_ASCII) == "WEBP" &&
-            ByteBuffer.wrap(d, 4, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int.toLong() == d.size - 8L
     }
 
     /** Writes a copy record by record to [out]; [finish] adds END. Breaking a rule throws before anything is written. */
@@ -271,8 +286,34 @@ object HistoryBackup {
      * counts included, is right; null otherwise, and the caller drops what [sink] got (spec 5.7: one commit at the end).
      */
     fun read(input: InputStream, index: Index = MemoryIndex(), sink: (Record) -> Unit = {}): Manifest? = try {
-        readOrThrow(input, index, sink)
-    } catch (_: RecordBad) { null } catch (_: EOFException) { null } catch (_: RuntimeException) { null }
+        readOrThrow(input, Guarded(index), { r -> try { sink(r) } catch (e: RuntimeException) { throw Outside(e) } })
+    } catch (e: Outside) {
+        throw e.inner
+    } catch (e: Unsupported) {
+        throw e
+    } catch (_: RecordBad) { null } catch (_: EOFException) { null } catch (_: BackupStream.Broken) { null } catch (_: RuntimeException) { null }
+
+    /**
+     * An authenticated copy that this reader cannot know: a schema or scope bit from a newer app (B4-14). Thrown by
+     * [read], not answered with null, so a screen can say "use a newer version" instead of "key does not match".
+     */
+    class Unsupported : RuntimeException("a newer saved copy")
+
+    /** A failure of the caller's own [Index] or sink (a full disk, a database error): never a verdict on the file (B4-1). */
+    private class Outside(val inner: RuntimeException) : RuntimeException(inner)
+
+    private class Guarded(private val inner: Index) : Index {
+        private inline fun <T> guard(f: () -> T): T = try { f() } catch (e: RuntimeException) { throw Outside(e) }
+        override fun addContact(id: Long, identity: ByteArray) = guard { inner.addContact(id, identity) }
+        override fun hasContact(id: Long) = guard { inner.hasContact(id) }
+        override fun addChat(id: Long, contactId: Long) = guard { inner.addChat(id, contactId) }
+        override fun hasChat(id: Long) = guard { inner.hasChat(id) }
+        override fun addMessage(id: Long, chatId: Long, pictureId: Long) = guard { inner.addMessage(id, chatId, pictureId) }
+        override fun messageChat(id: Long) = guard { inner.messageChat(id) }
+        override fun messagePicture(id: Long) = guard { inner.messagePicture(id) }
+        override fun addReaction(target: Long, authorContactId: Long, authorLabel: String?, emoji: String) =
+            guard { inner.addReaction(target, authorContactId, authorLabel, emoji) }
+    }
 
     private fun readOrThrow(input: InputStream, index: Index, sink: (Record) -> Unit): Manifest {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -293,9 +334,11 @@ object HistoryBackup {
         need(firstType == MANIFEST)
         val m = RecordReader(mp).run {
             val schema = u16()
-            need(schema == SCHEMA || schema == SCHEMA_GROUPS)
+            need(schema >= SCHEMA)
+            if (schema > SCHEMA_GROUPS) throw Unsupported()
             val manifest = Manifest(identity(), u64(), u64(), name(ContactsBackup.MAX_NAME_BYTES), rgb(), u64(), u64(), u16(),
                 u32(), u32(), u32(), u32(), u32(), u32())
+            if (manifest.scopeFlags and SCOPE_BITS.inv() != 0) throw Unsupported()
             need(schema == schemaFor(manifest.scopeFlags))
             end(); manifest
         }

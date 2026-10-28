@@ -158,4 +158,20 @@ class BackupStreamTest {
         assertEquals(null, BackupStream.head("hello, this is not a saved copy at all".toByteArray()))
         assertEquals(null, BackupStream.head(file.copyOf(27)))
     }
+
+    /** B4-15: once a plain stream has thrown, a caller that catches and reads on must not see a clean end. */
+    @Test fun aBrokenPlainStreamKeepsThrowingTheSameProblem() {
+        val plain = ByteArray(200_000) { (it % 251).toByte() }
+        val file = sealStream(BackupFile.Purpose.HISTORY, plain)
+        for (bad in listOf(file.copyOf(file.size - 100), file + 0, file.copyOf().also { it[file.size - 30] = (it[file.size - 30].toInt() xor 1).toByte() })) {
+            val stream = (BackupStream.openStream(root, ByteArrayInputStream(bad)) as BackupStream.Streamed.Ok).stream
+            val buffer = ByteArray(300_000)
+            val first = runCatching { while (stream.read(buffer, 0, buffer.size) >= 0) Unit }.exceptionOrNull() as BackupStream.Broken
+            repeat(3) {
+                val again = runCatching { stream.read(buffer, 0, buffer.size) }.exceptionOrNull() as? BackupStream.Broken
+                assertEquals(first.problem, again?.problem)
+                assertTrue(runCatching { stream.read() }.exceptionOrNull() is BackupStream.Broken)
+            }
+        }
+    }
 }

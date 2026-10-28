@@ -10,12 +10,22 @@ import java.util.Base64
  * made with them. Never derived from a name, PIN or safety pictures; it signs nothing and is not an identity key.
  * People keep it as a paper card (QR, `pmrk1:` text) or twelve words, both the same 16 bytes.
  */
-class RecoveryKey private constructor(private val root: ByteArray) {
+class RecoveryKey private constructor(private val root: ByteArray) : AutoCloseable {
+    @Volatile private var wiped = false
+
     /** A copy of the 16 bytes. Callers wipe what they no longer need (best effort on the JVM). */
-    fun bytes(): ByteArray = root.copyOf()
+    fun bytes(): ByteArray { check(!wiped) { "this key was wiped" }; return root.copyOf() }
+
+    /** Overwrites the key in memory (best effort on the JVM, spec 5.7 step 8); the key cannot be used afterwards. */
+    fun wipe() { wiped = true; root.fill(0) }
+
+    override fun close() = wipe()
+
+    val isWiped: Boolean get() = wiped
 
     /** The 28-byte card: `PMRK0001 | key | first 4 bytes of SHA-256 of the first 24`. Detects damage, not forgery. */
     fun card(): ByteArray {
+        check(!wiped) { "this key was wiped" }
         val head = MAGIC + root
         return head + sha256(head).copyOf(CHECK)
     }
@@ -28,6 +38,7 @@ class RecoveryKey private constructor(private val root: ByteArray) {
      * (BIP39's entropy-to-words step only; never its wallet seed derivation).
      */
     fun words(list: WordList): List<String> {
+        check(!wiped) { "this key was wiped" }
         val bits = BooleanArray(BITS)
         for (i in 0 until 128) bits[i] = (root[i / 8].toInt() shr (7 - i % 8)) and 1 == 1
         val check = sha256(root)[0].toInt()

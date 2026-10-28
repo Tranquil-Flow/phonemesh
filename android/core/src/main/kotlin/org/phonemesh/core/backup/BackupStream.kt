@@ -141,7 +141,10 @@ object BackupStream {
         return Opened.Ok(u.purpose, u.archiveId, u.plainSize)
     }
 
-    /** What went wrong inside a [Plain] stream, thrown from its reads (a RuntimeException: [HistoryBackup.read] answers null). */
+    /**
+     * What went wrong inside a [Plain] stream, thrown from its reads (a RuntimeException: [HistoryBackup.read] answers
+     * null). Once thrown, every later read throws the same one: a broken stream never looks like a clean end (B4-15).
+     */
     class Broken(val problem: BackupFile.Problem) : RuntimeException(problem.name)
 
     /**
@@ -157,6 +160,7 @@ object BackupStream {
         private var chunk: ByteArray = ByteArray(0)
         private var at = 0
         private var finished = false
+        private var broken: Broken? = null
 
         override fun read(): Int {
             val one = ByteArray(1)
@@ -166,15 +170,16 @@ object BackupStream {
         override fun read(into: ByteArray, off: Int, len: Int): Int {
             if (len == 0) return 0
             while (at >= chunk.size) {
+                broken?.let { throw it }
                 if (finished) return -1
                 if (next == u.chunks) {
                     finished = true
                     u.close()
-                    if (input.read() != -1) throw Broken(BackupFile.Problem.NOT_A_BACKUP)
+                    if (input.read() != -1) throw Broken(BackupFile.Problem.NOT_A_BACKUP).also { broken = it }
                     return -1
                 }
                 val (part, problem) = u.chunk(next, input)
-                if (part == null) { finished = true; u.close(); throw Broken(problem!!) }
+                if (part == null) { finished = true; u.close(); throw Broken(problem!!).also { broken = it } }
                 chunk = part; at = 0; next++
             }
             val n = minOf(len, chunk.size - at)

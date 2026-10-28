@@ -20,10 +20,14 @@ object ChatFixture {
         val groupHex: String, val now: Long, val picture: ByteArray,
     )
 
-    /** A valid WEBP container of [size] bytes. */
-    fun webp(size: Int = 300): ByteArray {
-        val body = ByteArray(size - 12) { ((it * 7 + 3) and 0xFF).toByte() }
-        return "RIFF".toByteArray() + java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(body.size + 4).array() + "WEBP".toByteArray() + body
+    /** A still lossless WebP of [size] bytes whose header says [width] x [height]: the structure the copy's rules check (B4-10). */
+    fun webp(size: Int = 300, width: Int = 64, height: Int = 48): ByteArray {
+        val le = java.nio.ByteOrder.LITTLE_ENDIAN
+        val data = ByteArray(size - 20) { ((it * 7 + 3) and 0xFF).toByte() }
+        data[0] = 0x2F
+        java.nio.ByteBuffer.wrap(data, 1, 4).order(le).putInt((width - 1) or ((height - 1) shl 14))
+        val chunk = "VP8L".toByteArray() + java.nio.ByteBuffer.allocate(4).order(le).putInt(data.size).array() + data
+        return "RIFF".toByteArray() + java.nio.ByteBuffer.allocate(4).order(le).putInt(chunk.size + 4).array() + "WEBP".toByteArray() + chunk
     }
 
     fun build(core: AppCore, now: Long = System.currentTimeMillis()): Built {

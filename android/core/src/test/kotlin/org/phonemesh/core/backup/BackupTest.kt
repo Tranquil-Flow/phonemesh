@@ -243,4 +243,20 @@ class BackupTest {
         assertEquals(BackupFile.Purpose.CONTACTS, opened.purpose)
         assertEquals(2, ContactsBackup.decode(opened.plain)!!.contacts.size)
     }
+
+    /** B4-15 / spec 5.7 step 8: a key can be wiped from memory, and then does nothing. */
+    @Test fun aWipedKeyIsGoneFromMemoryAndCannotBeUsed() {
+        val key = RecoveryKey.of(ByteArray(16) { (it + 1).toByte() })
+        val card = key.card()
+        assertEquals(28, card.size)
+        key.wipe()
+        assertTrue(key.isWiped)
+        assertEquals("the bytes in memory are overwritten with zeros", RecoveryKey.of(ByteArray(16)), key)
+        for (use in listOf<() -> Any>({ key.bytes() }, { key.card() }, { key.text() }, { key.words(RecoveryKey.WordList.load("english")) })) {
+            assertTrue(runCatching { use() }.exceptionOrNull() is IllegalStateException)
+        }
+        assertEquals("a copy taken earlier is the caller's to wipe", 28, card.size)
+        key.wipe()
+        RecoveryKey.generate().use { assertFalse(it.isWiped) }
+    }
 }

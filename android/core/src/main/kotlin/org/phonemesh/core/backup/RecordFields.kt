@@ -16,7 +16,15 @@ internal fun need(ok: Boolean) { if (!ok) throw RecordBad() }
 internal fun sha256(bytes: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(bytes)
 
 /** Display text: strict UTF-8, no NUL or other control characters ([lines]: line breaks allowed, for message text). */
-internal fun displayable(s: String, lines: Boolean = false) = s.none { (it.code < 0x20 && !(lines && it == '\n')) || it.code == 0x7F }
+internal fun displayable(s: String, lines: Boolean = false) =
+    s.none { (it.code < 0x20 && !(lines && it == '\n')) || it.code == 0x7F || it.code in 0x80..0x9F }
+
+/**
+ * A chat title or a sender label: NFC, and no control (C0 or C1), format (bidi overrides, zero-width), separator,
+ * private-use, unassigned or lone surrogate character, so it cannot hide characters or reorder what a viewer shows
+ * (B4-10). [Names.valid] without its non-empty rule: a title or label may be empty.
+ */
+internal fun plain(s: String): Boolean = s.isEmpty() || s.isBlank() && s.all { it == ' ' } || Names.valid(s)
 
 internal const val ABSENT = 0xFFFF
 internal const val POINT = 33

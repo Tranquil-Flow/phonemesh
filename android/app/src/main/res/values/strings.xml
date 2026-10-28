@@ -566,6 +566,9 @@
     <string name="group_next">Next</string>
     <string name="group_name_title">Name the group</string>
     <string name="group_say_name">Say or type a short name.</string>
+    <string name="group_colour">Pick the group’s colour</string>
+    <string name="group_picture_pick">Pick the group’s picture</string>
+    <string name="group_preview">Everyone in the group sees this.</string>
     <string name="group_photo_hub">A photo goes only through a local hub.</string>
     <string name="group_create">Create group</string>
     <string name="group_tag">Group</string>

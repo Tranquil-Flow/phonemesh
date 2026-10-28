@@ -148,11 +148,11 @@ class NameActivity : ScreenActivity() {
         preview = Looks.avatar(this, palette, ChatKind.PERSON, PREVIEW_DP, null) as FrameLayout
         preview.tag = "name_preview"
         previewRow.addView(preview)
-        previewRow.addView(Ui.text(this, getString(R.string.name_preview), palette.text, bold = true),
+        previewRow.addView(Ui.text(this, getString(if (forGroup) R.string.group_preview else R.string.name_preview), palette.text, bold = true),
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = pad() })
         column.addView(previewRow, full().apply { topMargin = pad() })
 
-        column.addView(Ui.text(this, getString(R.string.name_colour), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
+        column.addView(Ui.text(this, getString(if (forGroup) R.string.group_colour else R.string.name_colour), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
         val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         AccountColours.all.chunked(4).forEachIndexed { rowIndex, colours ->
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -204,7 +204,7 @@ class NameActivity : ScreenActivity() {
         wheelBox.addView(lightness, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 48)))
         column.addView(wheelBox, full())
 
-        column.addView(Ui.text(this, getString(R.string.name_picture), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
+        column.addView(Ui.text(this, getString(if (forGroup) R.string.group_picture_pick else R.string.name_picture), palette.text, 20f, bold = true), full().apply { topMargin = pad() * 2 })
         val choices = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         for (key in listOf(PICTURE_LETTER, PICTURE_EMOJI, PICTURE_PHOTO)) {
             val tile = LinearLayout(this).apply {

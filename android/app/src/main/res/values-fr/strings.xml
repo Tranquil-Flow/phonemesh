@@ -562,6 +562,9 @@
     <string name="group_next">Suivant</string>
     <string name="group_name_title">Nommer le groupe</string>
     <string name="group_say_name">Dites ou écrivez un nom court.</string>
+    <string name="group_colour">Choisissez la couleur du groupe</string>
+    <string name="group_picture_pick">Choisissez l’image du groupe</string>
+    <string name="group_preview">Tout le groupe voit ceci.</string>
     <string name="group_photo_hub">Une photo passe seulement par un relais local.</string>
     <string name="group_create">Créer le groupe</string>
     <string name="group_tag">Groupe</string>

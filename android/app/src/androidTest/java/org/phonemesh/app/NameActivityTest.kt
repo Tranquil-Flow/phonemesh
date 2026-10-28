@@ -206,4 +206,24 @@ class NameActivityTest {
         Views.waitUntil { screen.isFinishing }
         assertEquals("the tapped emoji is the picture", org.phonemesh.core.account.Avatar.Emoji("😁"), TestCore.onMain { core.ownAvatar() })
     }
+
+    /** The group naming screen has its own words: nothing there says "you" or "your" about the person's own look. */
+    @Test fun theGroupNamingScreenTalksAboutTheGroupNotAboutYou() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        val screen = Views.launch<NameActivity>(android.content.Intent(inst.targetContext, NameActivity::class.java).putExtra("people", arrayOf("0011223344556677")))
+        assertTrue(Views.withText(screen, "Pick the group\u2019s colour") != null)
+        assertTrue(Views.withText(screen, "Pick the group\u2019s picture") != null)
+        assertTrue(Views.withText(screen, "Everyone in the group sees this.") != null)
+        for (personal in listOf("Pick your colour", "Pick your picture", "This is what others see.")) {
+            assertTrue("\"$personal\" is for your own name", Views.withText(screen, personal) == null)
+        }
+    }
+
+    @Test fun theNameScreenForYourOwnNameKeepsItsWords() {
+        TestCore.install(language = "en-US", voices = listOf("en-US"))
+        val screen = Views.start(NameActivity::class.java)
+        assertTrue(Views.withText(screen, "Pick your colour") != null)
+        assertTrue(Views.withText(screen, "This is what others see.") != null)
+        assertTrue(Views.withText(screen, "Pick the group\u2019s colour") == null)
+    }
 }

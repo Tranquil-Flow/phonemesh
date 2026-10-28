@@ -52,14 +52,38 @@ class DemoUpdatesTest {
         assertFalse("demo recovery key is not the build's", real.recoveryKey.contentEquals(DemoUpdateKeys.roots.recoveryKey))
         val v1 = DemoUpdatePack.build(1).entry; val v2 = DemoUpdatePack.build(2).entry
         // A real-app phone: its packaged baseline stands, a demo-signed catalog or baseline is not believed.
-        val trust = (UpdateTrust.open(Slots(), real, 3) as UpdateTrust.Opened.Ready).trust
+        val trust = (UpdateTrust.open(Slots(), real, 3, allowTestRoots = true) as UpdateTrust.Opened.Ready).trust
         val before = trust.state.encode()
         val result = trust.acceptCatalog(DemoUpdateKeys.sign(trust.state.sequence + 1, listOf(v2)))
         assertTrue("$result", result is UpdateTrust.CatalogResult.Refused && result.reason == UpdateTrust.Reason.NOT_SIGNED)
         assertArrayEquals(before, trust.state.encode())
-        assertTrue(UpdateTrust.open(Slots(), real, 3, DemoUpdateKeys.sign(1, listOf(v1))) is UpdateTrust.Opened.BadBaseline)
+        assertTrue(UpdateTrust.open(Slots(), real, 3, DemoUpdateKeys.sign(1, listOf(v1)), allowTestRoots = true) is UpdateTrust.Opened.BadBaseline)
         // And the other way round: the demo app does not believe the real app's packaged baseline.
-        assertTrue(UpdateTrust.open(Slots(), DemoUpdateKeys.roots, 3) is UpdateTrust.Opened.BadBaseline)
+        assertTrue(UpdateTrust.open(Slots(), DemoUpdateKeys.roots, 3, allowTestRoots = true) is UpdateTrust.Opened.BadBaseline)
+    }
+
+    /** U7-1: no private key of the demo is derivable from a public label; they are made fresh and differ from the old, published ones. */
+    @Test fun theDemoKeysAreNotTheOldLabelDerivedOnes() {
+        assertFalse(DemoUpdateKeys.roots.catalogKey.contentEquals(UpdateRoots.parse("catalog key_id=1 public_key=03303734e66bc4afcedd79b1d2ff8eaf05bacfa8cd240e588b48c672be6a7bfa7e\nrecovery key_id=100 public_key=03798dfd7f91a723695b8930bc40b4eccd8339efc6069759b191b3fe0b4ae9ec70\n").catalogKey))
+        assertFalse(DemoUpdateKeys.roots.recoveryKey.contentEquals(UpdateRoots.parse("catalog key_id=1 public_key=03303734e66bc4afcedd79b1d2ff8eaf05bacfa8cd240e588b48c672be6a7bfa7e\nrecovery key_id=100 public_key=03798dfd7f91a723695b8930bc40b4eccd8339efc6069759b191b3fe0b4ae9ec70\n").recoveryKey))
+    }
+
+    /** The keys change with every start of the demo: a hub left by an earlier start is replaced, not stuck on keys that are gone. */
+    @Test fun aDemoHubLeftByAnEarlierStartUnderOtherKeysIsPreparedAgain() {
+        val dir = folder.newFolder("hub")
+        val earlier = org.phonemesh.core.crypto.P256.generate(); val earlierR = org.phonemesh.core.crypto.P256.generate()
+        val v2 = DemoUpdatePack.build(2)
+        val stick = folder.newFolder("old-stick"); File(stick, "objects").mkdirs()
+        val payload = org.phonemesh.hub.CatalogSigner.encode(1, 2, 1_793_145_600L, 1_808_697_600L, 1, listOf(v2.entry), emptyList())
+        File(stick, "catalog.pmup").writeBytes(UpdateMetadata.sign(UpdateMetadata.CATALOG, 1, payload, earlier.private))
+        File(stick, "objects/${hex(v2.entry.digest)}").writeBytes(v2.zip)
+        fun pub(k: java.security.KeyPair) = (k.public as java.security.interfaces.ECPublicKey).w.let { byteArrayOf(4) + org.phonemesh.core.crypto.Bytes.fixed(it.affineX, 32) + org.phonemesh.core.crypto.Bytes.fixed(it.affineY, 32) }
+        assertTrue(org.phonemesh.hub.UpdateImport(dir, pub(earlierR), pub(earlier), mailReserve = 1_000_000L).import(stick) is org.phonemesh.hub.UpdateImport.Result.Imported)
+        val hub = DemoUpdateHub(dir, 0)
+        assertTrue("records of other keys are replaced", hub.prepare())
+        assertFalse(hub.prepare())
+        val state = org.phonemesh.hub.UpdateImport.State.decode(File(dir, "updates/trust-state.bin").readBytes())!!
+        assertArrayEquals(DemoUpdateKeys.roots.id, state.rootsId)
     }
 
     @Test fun theRealHubImportTakesTheDemoReleaseOnceAndLeavesItAlone() {

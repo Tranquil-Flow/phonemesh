@@ -22,10 +22,10 @@ object UpdateKit {
 
     fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 
-    /** A fresh pair of keys and the roots that trust exactly them. */
-    fun keys(): Keys {
+    /** A fresh pair of keys and the roots that trust exactly them; [test] marks the file `# status: TEST`, as a build holding TEST keys would. */
+    fun keys(test: Boolean = false): Keys {
         val c = P256.generate(); val r = P256.generate()
-        val roots = UpdateRoots.parse("catalog key_id=1 public_key=${hex(P256.compress(c.public as ECPublicKey))}\n" +
+        val roots = UpdateRoots.parse((if (test) "# status: TEST\n" else "") + "catalog key_id=1 public_key=${hex(P256.compress(c.public as ECPublicKey))}\n" +
             "recovery key_id=100 public_key=${hex(P256.compress(r.public as ECPublicKey))}\n")
         return Keys(roots, c, r)
     }
@@ -46,6 +46,22 @@ object UpdateKit {
         ZipOutputStream(out).use { z -> for ((n, d) in all) { z.putNextEntry(ZipEntry(n)); z.write(d); z.closeEntry() } }
         val zip = out.toByteArray()
         return Pack(zip, UpdateMetadata.Entry(UpdateMetadata.VOICE, id, label, "", version.toLong(), 1, 0, 26, 2, zip.size.toLong(), Bytes.sha256(zip),
+            all.values.sumOf { it.size.toLong() }, all.size, Bytes.sha256(sums), ByteArray(32)))
+    }
+
+    /** A whole format-2 engine pack (the fixture Tiny engine at [version]) and the catalog entry describing it. */
+    fun engine(version: Int): Pack {
+        val files = linkedMapOf<String, ByteArray>()
+        files["pack.properties"] = "format=2\nkind=engine\nid=engine-whisper-tiny\nversion=$version\nlabel=Fixture tiny\nrecognizerModel=whisper-tiny\n".toByteArray()
+        files["whisper/encoder.int8.onnx"] = ByteArray(3_000).also { java.util.Random(version.toLong()).nextBytes(it) }
+        files["whisper/decoder.int8.onnx"] = ByteArray(2_000).also { java.util.Random(version + 7L).nextBytes(it) }
+        files["whisper/tokens.txt"] = "<|en|> 1\n<|fr|> 2\n".toByteArray()
+        val sums = files.entries.joinToString("") { "${hex(Bytes.sha256(it.value))}  ${it.key}\n" }.toByteArray()
+        val all = LinkedHashMap(files).also { it["SHA256SUMS"] = sums }
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { z -> for ((n, d) in all) { z.putNextEntry(ZipEntry(n)); z.write(d); z.closeEntry() } }
+        val zip = out.toByteArray()
+        return Pack(zip, UpdateMetadata.Entry(UpdateMetadata.ENGINE, "engine-whisper-tiny", "Fixture tiny", "", version.toLong(), 1, 0, 26, 2, zip.size.toLong(), Bytes.sha256(zip),
             all.values.sumOf { it.size.toLong() }, all.size, Bytes.sha256(sums), ByteArray(32)))
     }
 

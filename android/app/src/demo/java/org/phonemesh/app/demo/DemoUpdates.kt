@@ -28,23 +28,23 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * Demo-only update keys. Their private scalars come from public labels on purpose, so anyone can read them: nothing signed with
- * them is trusted by the real app, whose roots (`update/public-keys.txt`) are other keys. The demo app alone is built to trust
- * these, through the same verifier, the same trust state and the same downloader as the real app.
+ * Demo-only update keys, made fresh on the phone each time the demo app starts (a random pair kept in memory; nothing about them is
+ * written down or derivable from a public label, U7-1). Nothing signed with them is trusted by the real app, whose roots are other
+ * keys; the demo app alone is built to trust these, through the same verifier, trust state and downloader as the real app. A trust
+ * state or hub record that an earlier start made under other demo keys is replaced the way a key swap is: fresh under the new roots.
  */
 object DemoUpdateKeys {
-    private const val CATALOG_LABEL = "phonemesh DEMO catalog key"
-    const val CATALOG_PUBLIC = "03303734e66bc4afcedd79b1d2ff8eaf05bacfa8cd240e588b48c672be6a7bfa7e"
-    const val RECOVERY_PUBLIC = "03798dfd7f91a723695b8930bc40b4eccd8339efc6069759b191b3fe0b4ae9ec70"
+    private val catalogPair by lazy { P256.generate() }
+    private val recoveryPair by lazy { P256.generate() }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 
     val roots: UpdateRoots by lazy {
-        UpdateRoots.parse("# status: TEST (demo-only keys)\ncatalog key_id=1 public_key=$CATALOG_PUBLIC\nrecovery key_id=100 public_key=$RECOVERY_PUBLIC\n")
+        UpdateRoots.parse("# status: TEST (demo-only keys)\ncatalog key_id=1 public_key=${hex(P256.compress(catalogPair.public as java.security.interfaces.ECPublicKey))}\n" +
+            "recovery key_id=100 public_key=${hex(P256.compress(recoveryPair.public as java.security.interfaces.ECPublicKey))}\n")
     }
 
-    val catalogPrivate: PrivateKey by lazy {
-        val d = BigInteger(1, Bytes.sha256(CATALOG_LABEL.toByteArray())).mod(P256.n - BigInteger.ONE) + BigInteger.ONE
-        P256.privateKey(Bytes.fixed(d, 32))
-    }
+    val catalogPrivate: PrivateKey get() = catalogPair.private
 
     fun sign(sequence: Long, entries: List<UpdateMetadata.Entry>): ByteArray =
         UpdateMetadata.sign(UpdateMetadata.CATALOG, 1, CatalogSigner.encode(1, sequence, ISSUED, ISSUED + 365 * 86_400L, 1, entries, emptyList()), catalogPrivate)
@@ -88,7 +88,10 @@ object DemoUpdatePack {
 class DemoUpdateHub(private val hubDir: File, private val rangeMillis: Long = 1_000) {
     /** Imports the signed catalog 2 (and the version 2 pack) once; later starts find it already there. */
     fun prepare(): Boolean {
-        if (File(hubDir, "updates/trust-state.bin").isFile) return false
+        val roots = DemoUpdateKeys.roots
+        // Records from an earlier start were made under other (random) demo keys: they are replaced, as in a key swap.
+        if (File(hubDir, "updates/trust-state.bin").isFile &&
+            !UpdateImport(hubDir, roots.recoveryKey, roots.catalogKey, mailReserve = 1_000_000L).recordsAreFromOtherKeys) return false
         val v2 = DemoUpdatePack.build(2)
         val stick = File(hubDir, "update-stick").apply { deleteRecursively(); File(this, "objects").mkdirs() }
         try {

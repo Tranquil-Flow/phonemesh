@@ -43,16 +43,16 @@ class UpdatesScreenTest {
     private class Rig(val keys: UpdateKit.Keys, val hub: UpdateKit.Hub, val next: UpdateKit.Pack, var wifi: Boolean = true)
 
     /** Installs the test core and gives it update state whose hub offers the fixture voice pack one version up. */
-    private fun rig(modelBytes: Int = 700_000, wifi: Boolean = true, offer: Boolean = true, direct: Boolean = false): Rig {
+    private fun rig(modelBytes: Int = 700_000, wifi: Boolean = true, offer: Boolean = true, direct: Boolean = false, testKeys: Boolean = false, engine: Boolean = false): Rig {
         TestCore.install(language = "en-US", voices = listOf("fr"))
-        val have = core.store.list().single { it.id == id }
-        val keys = UpdateKit.keys()
-        val next = UpdateKit.voice(id, have.version + 1, "Fran\u00e7ais", modelBytes)
+        val have = core.store.list().single { it.id == (if (engine) "engine-whisper-tiny" else id) }
+        val keys = UpdateKit.keys(test = testKeys)
+        val next = if (engine) UpdateKit.engine(have.version + 1) else UpdateKit.voice(id, have.version + 1, "Fran\u00e7ais", modelBytes)
         val hub = UpdateKit.Hub()
         if (offer) { hub.add(next.zip); hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(next.entry)) }
         val rig = Rig(keys, hub, next, wifi)
         val dir = File(context.filesDir, "updates-test-${System.nanoTime()}").also { dirs += it }
-        val baseline = UpdateKit.catalog(keys, 1, 1, listOf(UpdateKit.voice(id, have.version).entry))
+        val baseline = UpdateKit.catalog(keys, 1, 1, listOf(if (engine) UpdateKit.engine(have.version).entry else UpdateKit.voice(id, have.version).entry))
         val pool = java.util.concurrent.Executors.newCachedThreadPool { Thread(it, "test-updates").apply { isDaemon = true } }
         val transport: () -> HubTransport? = { if (rig.wifi) hub else null }
         TestCore.onMain {
@@ -246,5 +246,80 @@ class UpdatesScreenTest {
         val hubScreen = Views.start(HubActivity::class.java).also { screen = it }
         assertNull(Views.tagged(hubScreen, "hub_updates"))
         assertNull(Views.tagged(hubScreen, "hub_updates_ready"))
+    }
+
+    // ---- U7: honest words on the screen
+
+    @Test fun testKeysAreSaidOnTheScreenWhileTheyAreInUseAndNeverOtherwise() {
+        rig(testKeys = true)
+        val a = open()
+        awaitText(a, "updates_test", a.getString(R.string.updates_test_banner))
+        noA11yProblems(a)
+        Views.finish(a); screen = null
+        TestCore.uninstall()
+        rig()
+        val b = open()
+        awaitTag(b, "update_download:$id")
+        assertNull("real keys: no banner", Views.tagged(b, "updates_test"))
+    }
+
+    @Test fun aBuildThatIsNotSetUpForUpdatesSaysSoPlainlyAndOffersNothing() {
+        rig()
+        TestCore.onMain { core.updates = HubUpdates(null, R.string.updates_not_set_up) }
+        val a = open()
+        awaitText(a, "updates_notice", a.getString(R.string.updates_not_set_up))
+        assertNull("nothing to press", Views.tagged(a, "updates_check"))
+        assertNull(Views.tagged(a, "update_download:$id"))
+        assertNull(Views.tagged(a, "updates_test"))
+        noA11yProblems(a)
+    }
+
+    @Test fun anUnreadyBuildIsNotCalledDamagedData() {
+        rig()
+        TestCore.onMain { core.updates = HubUpdates(null, R.string.updates_off_build) }
+        val a = open()
+        awaitText(a, "updates_notice", a.getString(R.string.updates_off_build))
+    }
+
+    @Test fun theDateOfTheHeldListIsShownBesideTheOffer() {
+        rig()
+        val a = open()
+        awaitTag(a, "update_download:$id")
+        val line = Views.textOf(awaitTag(a, "updates_list_date"))
+        assertTrue(line, line.contains("2026"))
+    }
+
+    @Test fun aListFromAnOlderHubIsNotCalledUpToDate() {
+        val r = rig(offer = false)
+        r.hub.catalog = UpdateKit.catalog(r.keys, 1, 1, listOf(UpdateKit.voice(id, core.store.list().single { it.id == id }.version).entry))
+        val a = open()
+        // The same list as the one held: up to date. An older one would say the hub is behind; here the numbers are equal.
+        awaitText(a, "updates_notice", a.getString(R.string.updates_notice_current))
+        noA11yProblems(a)
+    }
+
+    @Test fun anEngineUpdateTellsThePersonToRestartTheApp() {
+        rig(engine = true)
+        val a = open()
+        val tag = "engine-whisper-tiny"
+        awaitTag(a, "update_download:$tag")
+        Views.tap(a, "update_download:$tag")
+        awaitText(a, "update_state:$tag", a.getString(R.string.updates_done_restart))
+        noA11yProblems(a)
+    }
+
+    @Test fun aPackTheListWithdrawsIsNamedAndNoLongerCounted() {
+        val r = rig(offer = false)
+        val have = core.store.list().single { it.id == id }
+        val entry = UpdateKit.voice(id, have.version).entry
+        core.updates!!.trust!!.recordInstalled(entry)
+        r.hub.catalog = UpdateKit.catalog(r.keys, 1, 2, listOf(entry), revoked = listOf(entry.digest))
+        val a = open()
+        val line = Views.textOf(awaitTag(a, "update_withdrawn:$id"))
+        assertTrue(line, line.contains(have.label))
+        assertNotNull(Views.tagged(a, "update_withdrawn_fix:$id"))
+        assertTrue("the pack is not loaded any more", core.store.blockedIds.contains(id))
+        assertTrue(core.readiness() !is org.phonemesh.core.Readiness.Ready)
+        noA11yProblems(a)
     }
 }

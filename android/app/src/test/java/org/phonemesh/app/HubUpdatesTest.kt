@@ -88,12 +88,147 @@ class HubUpdatesTest {
         assertEquals(1L, opened.trust!!.state.sequence)
     }
 
-    @Test fun theKeysFileInTheBuildIsWhatDecidesAndOpensWithTheRealBaseline() {
-        // The default roots are update/public-keys.txt and the baseline is baseline-catalog.pmup: one file pair to swap.
+    /**
+     * The default roots are update/public-keys.txt and the baseline is baseline-catalog.pmup: one file pair to swap. While they are
+     * TEST keys, only a build that allows it (debug, minifiedDebug, demo) runs updates under them; a release build is "not set up" (U7-1).
+     */
+    @Test fun theKeysFileInTheBuildIsWhatDecidesAndOpensWithTheRealBaselineOnlyWhereTestKeysAreAllowed() {
         val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { null })
-        assertNotNull(opened.controller)
         assertEquals(UpdateRoots.compiled.catalogKeyId, 1)
-        assertFalse(opened.trust!!.state.sequence < 1)
+        if (BuildConfig.ALLOW_TEST_ROOTS) {
+            assertNotNull(opened.controller)
+            assertFalse(opened.trust!!.state.sequence < 1)
+            assertEquals("the screen must say these are TEST keys", UpdateRoots.compiled.isTest, opened.testKeys)
+        } else if (UpdateRoots.compiled.isTest) {
+            assertNull("a release build with TEST keys runs no updates", opened.controller)
+            assertEquals(R.string.updates_not_set_up, opened.problem)
+            assertFalse("and writes nothing", File(dir, "trust").exists())
+        }
+    }
+
+    /** U7-1: a catalog signed with the key anyone can compute from the public label is not even looked at by a build that refuses TEST roots. */
+    @Test fun aCatalogForgedWithTheLabelDerivedKeyNeverReachesATestRootRefusingBuild() {
+        fun scalar(label: String) = java.math.BigInteger(1, org.phonemesh.core.crypto.Bytes.sha256(label.toByteArray()))
+            .mod(org.phonemesh.core.crypto.P256.n - java.math.BigInteger.ONE) + java.math.BigInteger.ONE
+        val forger = org.phonemesh.core.crypto.P256.privateKey(org.phonemesh.core.crypto.Bytes.fixed(scalar("phonemesh TEST catalog key"), 32))
+        val evil = UpdateKit.voice("voice-fr-siwis", 9, modelBytes = 7_000)
+        hub.add(evil.zip)
+        hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(evil.entry), signer = java.security.KeyPair(null, forger))
+        PackStore(packs, compiled).install(v1.zip.inputStream())
+        val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub })
+        if (!BuildConfig.ALLOW_TEST_ROOTS && UpdateRoots.compiled.isTest) {
+            assertNull(opened.controller)
+            assertEquals(R.string.updates_not_set_up, opened.problem)
+            assertTrue("nothing was asked of the hub", hub.requests.isEmpty())
+        } else {
+            // A build that allows TEST roots is not for real use: the forgery is signed by the compiled catalog key.
+            assertTrue(opened.testKeys == UpdateRoots.compiled.isTest)
+        }
+    }
+
+    /** U7-1: the release build type is the one that must refuse TEST roots; debug, minifiedDebug and demo may keep them for tests. */
+    @Test fun onlyTheReleaseBuildTypeRefusesTestRoots() {
+        assertEquals("build type ${BuildConfig.BUILD_TYPE}", BuildConfig.BUILD_TYPE != "release", BuildConfig.ALLOW_TEST_ROOTS)
+        if (BuildConfig.BUILD_TYPE == "release" && UpdateRoots.compiled.isTest) {
+            val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub })
+            assertNull(opened.controller)
+            assertEquals(R.string.updates_not_set_up, opened.problem)
+        }
+    }
+
+    @Test fun aBuildThatRefusesTestRootsRefusesThemWhateverTheCommentSays() {
+        val roots = UpdateRoots.compiled
+        if (!roots.isTest) return
+        val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub }, roots, UpdateRoots.baselineCatalog(), allowTestRoots = false)
+        assertNull(opened.controller)
+        assertEquals(R.string.updates_not_set_up, opened.problem)
+        assertTrue(hub.requests.isEmpty())
+    }
+
+    @Test fun aBaselineThatDoesNotMatchTheKeysIsABuildProblemNotDamagedData() {
+        val stranger = UpdateKit.keys()
+        val off = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub }, keys.roots, UpdateKit.catalog(stranger, 1, 1, listOf(v1.entry)), compiled, direct, sdk = 28)
+        assertNull(off.controller)
+        assertEquals(R.string.updates_off_build, off.problem)
+        assertFalse("not the damaged-data sentence", off.problem == R.string.updates_off)
+    }
+
+    /** U7-2 at the app: a phone that held other roots starts fresh under the new ones. */
+    @Test fun aPhoneThatHeldOtherRootsStartsFreshAndNoLongerTrustsTheOldCatalogKey() {
+        PackStore(packs, compiled).install(v1.zip.inputStream())
+        val old = open()
+        assertArrayEquals(keys.roots.catalogKey, old.trust!!.state.key)
+        val renewed = UpdateKit.keys()
+        val again = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub }, renewed.roots, UpdateKit.catalog(renewed, 1, 1, listOf(v1.entry)), compiled, direct, sdk = 28)
+        assertNotNull(again.controller)
+        assertArrayEquals(renewed.roots.catalogKey, again.trust!!.state.key)
+        hub.add(v2.zip)
+        hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(v2.entry))
+        again.controller!!.refresh()
+        assertEquals("the old key's list is not believed", Notice.LIST_NOT_TRUSTED, again.controller!!.view().notice)
+    }
+
+    // ---- U7-5
+
+    @Test fun anUpdateThatDoesNotOpenLeavesTheOldPackActiveAtEveryMoment() {
+        PackStore(packs, compiled).install(v1.zip.inputStream())
+        hub.add(v2.zip)
+        hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(v2.entry))
+        val seen = ArrayList<Int>()
+        val opens = PackOpener { info ->
+            seen += PackStore(packs, compiled).list().single().version
+            assertTrue("the candidate is not in the pack list yet", info.root.name.startsWith(".pending-"))
+            false
+        }
+        val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub }, keys.roots, baseline, compiled, direct, sdk = 28, opens = opens)
+        opened.controller!!.refresh(); opened.controller!!.download("3/voice-fr-siwis")
+        assertEquals(listOf(1), seen)
+        val row = opened.controller!!.view().rows.single()
+        assertEquals(org.phonemesh.core.update.UpdateController.Why.OPEN_FAILED, (row.state as State.Failed).why)
+        assertEquals(1, PackStore(packs, compiled).list().single().version)
+        assertEquals(0L, opened.trust!!.floor(UpdateMetadata.VOICE, "voice-fr-siwis").coerceAtMost(0L))
+        assertTrue("no leftover pending copy", packs.list()!!.none { it.startsWith(".pending-") })
+    }
+
+    @Test fun anUpdateThatOpensBecomesTheActivePack() {
+        PackStore(packs, compiled).install(v1.zip.inputStream())
+        hub.add(v2.zip)
+        hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(v2.entry))
+        val opened = HubUpdates.open(dir, packs, PackStore(packs, compiled), { hub }, keys.roots, baseline, compiled, direct, sdk = 28, opens = PackOpener { true })
+        opened.controller!!.refresh(); opened.controller!!.download("3/voice-fr-siwis")
+        assertEquals(State.Done, opened.controller!!.view().rows.single().state)
+        assertEquals(2, PackStore(packs, compiled).list().single().version)
+    }
+
+    // ---- U7-6
+
+    @Test fun aPackTheAcceptedListWithdrawsIsNoLongerLoadedAndTheScreenCanSayWhich() {
+        val store = PackStore(packs, compiled)
+        store.install(v1.zip.inputStream())
+        val opened = HubUpdates.open(dir, packs, store, { hub }, keys.roots, baseline, compiled, direct, sdk = 28)
+        assertEquals(emptySet<String>(), store.blockedIds)
+        hub.catalog = UpdateKit.catalog(keys, 1, 2, listOf(v1.entry), revoked = listOf(v1.entry.digest))
+        opened.controller!!.refresh()
+        assertEquals(setOf("voice-fr-siwis"), store.blockedIds)
+        assertEquals(listOf("voice-fr-siwis"), opened.controller!!.view().revoked)
+        assertTrue(store.usable().isEmpty()); assertEquals("still installed, so it can be replaced", 1, store.list().size)
+        // A restart finds it withdrawn at once, before any look.
+        store.blockedIds = emptySet()
+        HubUpdates.open(dir, packs, store, { null }, keys.roots, baseline, compiled, direct, sdk = 28)
+        assertEquals(setOf("voice-fr-siwis"), store.blockedIds)
+    }
+
+    @Test fun pairingAnEngineWithAVoiceAndAVoiceWithTheEngineInUse() {
+        fun info(id: String, kind: org.phonemesh.core.PackKind, tag: String? = null) = org.phonemesh.core.PackInfo(File(folder.root, id), id, 1, kind, id, null, tag, tag)
+        val tiny = info("engine-whisper-tiny", org.phonemesh.core.PackKind.ENGINE); val base = info("engine-whisper-base", org.phonemesh.core.PackKind.ENGINE)
+        val fr = info("voice-fr-siwis", org.phonemesh.core.PackKind.VOICE, "fr"); val en = info("voice-en", org.phonemesh.core.PackKind.VOICE, "en")
+        val newBase = info("engine-whisper-base", org.phonemesh.core.PackKind.ENGINE)
+        assertEquals(newBase to fr, PackPairing.pair(newBase, listOf(tiny, base, fr, en), null))
+        assertEquals("a voice is tried with the engine the person chose", base to fr, PackPairing.pair(fr, listOf(tiny, base, fr, en), "engine-whisper-base"))
+        assertEquals("else with the tiny one", tiny to fr, PackPairing.pair(fr, listOf(base, tiny, fr), null))
+        assertEquals("never with an older copy of itself", base to fr, PackPairing.pair(fr, listOf(base, fr), null))
+        assertNull("no voice, nothing to try the engine with", PackPairing.pair(newBase, listOf(tiny, base), null))
+        assertNull("no engine, nothing to try the voice with", PackPairing.pair(fr, listOf(fr, en), null))
     }
 
     @Test fun withoutTheHubsWifiTheTransportIsNotEvenTried() {

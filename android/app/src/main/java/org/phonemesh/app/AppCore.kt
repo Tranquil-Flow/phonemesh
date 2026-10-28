@@ -497,7 +497,7 @@ class AppCore private constructor(
         ChatRow(
             chat, contact?.name ?: chatTitle(chat), history.lastMessage(chat.id),
             if (chat.kind == ChatKind.GROUP) peopleHeard(chat.id) else null,
-            contact?.colour, contact?.met, contact?.let { faceOf(it) },
+            contact?.colour, contact?.met, contact?.let { faceOf(it) } ?: groupFace(chat),
         )
     }.sortedBy { it.old }
 
@@ -505,7 +505,192 @@ class AppCore private constructor(
     fun chatColour(chat: Chat): Int? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.colour else null
 
     /** What a person chat's avatar shows; null for other chats. */
-    fun chatFace(chat: Chat): Face? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.let { faceOf(it) } else null
+    fun chatFace(chat: Chat): Face? = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address)?.let { faceOf(it) } else groupFace(chat)
+
+    // ---- Private groups: what the screens show and do (decision 72; mockup reviewed 2026-10-27)
+
+    /** A private group as its screens show it. */
+    class GroupView(
+        val chatId: Long, val hex: String, val name: String, val face: Face, val state: org.phonemesh.core.group.GroupMember.State,
+        val listed: Boolean, val admin: Boolean, val canSend: Boolean, val waitingOn: String?, val recentForNew: Boolean,
+        val people: Int, val invited: Int, val code: IntArray?,
+    ) {
+        val conflict get() = state == org.phonemesh.core.group.GroupMember.State.CONFLICT
+        val gone get() = state == org.phonemesh.core.group.GroupMember.State.REMOVED || state == org.phonemesh.core.group.GroupMember.State.LEFT
+    }
+
+    /** One person in a group's details: on the list ([joined]) or invited and not joined yet. */
+    class GroupPerson(val account: String, val name: String, val face: Face, val admin: Boolean, val me: Boolean, val contact: Boolean, val joined: Boolean)
+
+    private fun groupRow(chat: Chat): GroupRows.GroupRow? =
+        if (chat.kind == ChatKind.PRIVATE_GROUP && account() != null) runCatching { groupStore.rows.group(chat.address) }.getOrNull() else null
+
+    private fun groupFace(chat: Chat): Face? {
+        val row = groupRow(chat) ?: return null
+        val avatar = runCatching { org.phonemesh.core.group.GroupAvatar.decode(row.avatar, 0).first }.getOrDefault(org.phonemesh.core.account.Avatar.Letter)
+        val photo = (avatar as? org.phonemesh.core.account.Avatar.Photo)?.let { want ->
+            groupStore.rows.photo(row.groupId, "")?.webp?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it).contentEquals(want.id) }?.let { decodeAvatar(it) }
+        }
+        return Face(row.name, row.colour, avatar, photo)
+    }
+
+    fun groupView(chatId: Long): GroupView? {
+        val chat = history.chat(chatId) ?: return null
+        val row = groupRow(chat) ?: return null
+        val member = groups.member(AppGroupStore.hexBytes(row.groupId)) ?: return null
+        val list = member.roster
+        val code = list?.let {
+            val c = member.safetyCode()
+            val bits = ((c[0].toInt() and 0xFF) shl 16) or ((c[1].toInt() and 0xFF) shl 8) or (c[2].toInt() and 0xFF)
+            IntArray(4) { i -> (bits ushr (18 - 6 * i)) and 63 }
+        }
+        val waiting = row.waitingOn?.let { personName(row.groupId, it) }
+            ?: if (list == null && member.inviter != null) personName(row.groupId, org.phonemesh.core.account.AccountId.of(member.inviter!!).toString()) else null
+        return GroupView(chatId, row.groupId, row.name, checkNotNull(groupFace(chat)), member.state, list != null, row.admin, member.canSend,
+            waiting, row.recent, list?.members?.size ?: 1, AppGroupStore.decodeInvited(row.invited).size, code)
+    }
+
+    /** A group member's name: a contact's own, else the name they sent the group, else "Someone". */
+    fun personName(groupHex: String, account: String): String {
+        if (account == accounts.accountId.toString()) return accounts.profile()?.name ?: text(UiText(R.string.group_someone))
+        history.contactRow(account)?.let { return it.name }
+        return groupStore.rows.profile(groupHex, account)?.let { org.phonemesh.core.account.Profile.decode(it)?.name } ?: text(UiText(R.string.group_someone))
+    }
+
+    fun personFace(groupHex: String, account: String): Face {
+        if (account == accounts.accountId.toString()) return ownFace() ?: Face("?", AccountStore.UNKNOWN_COLOUR, org.phonemesh.core.account.Avatar.Letter)
+        history.contactRow(account)?.let { return faceOf(it) }
+        val profile = groupStore.rows.profile(groupHex, account)?.let { org.phonemesh.core.account.Profile.decode(it) }
+            ?: return Face(text(UiText(R.string.group_someone)), AccountStore.UNKNOWN_COLOUR, org.phonemesh.core.account.Avatar.Letter)
+        val photo = (profile.avatar as? org.phonemesh.core.account.Avatar.Photo)?.let { want ->
+            groupStore.rows.photo(groupHex, account)?.webp?.takeIf { org.phonemesh.core.account.AvatarPhotos.id(it).contentEquals(want.id) }?.let { decodeAvatar(it) }
+        }
+        return Face(profile.name, profile.colour, profile.avatar, photo)
+    }
+
+    /** Whether [account] is one of this phone's contacts (else the screens say "Not in your contacts"). */
+    fun isContact(account: String): Boolean = history.contactRow(account) != null
+
+    fun groupPeople(chatId: Long): List<GroupPerson> {
+        val chat = history.chat(chatId) ?: return emptyList()
+        val row = groupRow(chat) ?: return emptyList()
+        val mine = accounts.accountId.toString()
+        val listed = groupStore.rows.members(row.groupId).map { m ->
+            GroupPerson(m.accountId, personName(row.groupId, m.accountId), personFace(row.groupId, m.accountId), m.admin, m.accountId == mine,
+                isContact(m.accountId), true)
+        }.ifEmpty { listOf(GroupPerson(mine, personName(row.groupId, mine), personFace(row.groupId, mine), row.admin, true, false, true)) }
+        val invited = AppGroupStore.decodeInvited(row.invited).map { (a, _) ->
+            val id = a.toString()
+            GroupPerson(id, personName(row.groupId, id), personFace(row.groupId, id), false, false, true, false)
+        }
+        return listed + invited
+    }
+
+    /** Contacts that can be asked into a group (people added in person or by link; never old radio chats). */
+    fun groupCandidates(): List<History.ContactRow> = history.contactRows().sortedBy { it.name.lowercase() }
+
+    /** Makes a group and invites [people]; its chat id, or null when it could not be made. */
+    fun createGroup(name: String, colour: Int, avatar: org.phonemesh.core.account.Avatar, photo: AvatarDraft?, people: List<String>): Long? {
+        var chatId: Long? = null
+        mailOperation {
+            val now = System.currentTimeMillis()
+            val group = groups.create(name, colour, avatar, false, people.map { AppMailStore.idOf(it) }, now) ?: return@mailOperation
+            val hex = AppGroupStore.hex(group)
+            if (photo != null && avatar is org.phonemesh.core.account.Avatar.Photo) {
+                groupStore.rows.setPhoto(hex, "", GroupRows.Photo(photo.webp, photo.width, photo.height, photo.sketch))
+            }
+            chatId = groupStore.rows.group(hex)?.chatId
+            flushGroups()
+            schedulePostman()
+        }
+        changed(Change.MESSAGES)
+        return chatId
+    }
+
+    /** Invitations shown with Join and Ignore, newest last, with who sent them. */
+    fun groupInvitations(): List<Pair<org.phonemesh.core.group.GroupStore.Invitation, String>> =
+        if (account() == null) emptyList() else runCatching { groupStore.invitations() }.getOrDefault(emptyList()).map {
+            it to (history.contactRow(it.from.toString())?.name ?: text(UiText(R.string.group_someone)))
+        }
+
+    fun joinGroup(invitation: org.phonemesh.core.group.GroupStore.Invitation): Long? {
+        var chatId: Long? = null
+        mailOperation {
+            if (groups.join(invitation, System.currentTimeMillis())) chatId = groupStore.rows.group(AppGroupStore.hex(invitation.invite.group))?.chatId
+            flushGroups(); schedulePostman()
+        }
+        changed(Change.MESSAGES)
+        return chatId
+    }
+
+    fun ignoreGroup(invitation: org.phonemesh.core.group.GroupStore.Invitation) {
+        mailOperation { groups.ignore(invitation) }
+        changed(Change.MESSAGES)
+    }
+
+    /** Runs a group action, then sends what it left; false when the group refused it. */
+    private fun groupAction(action: (Long) -> Boolean): Boolean {
+        var done = false
+        mailOperation { done = action(System.currentTimeMillis()); flushGroups(); schedulePostman() }
+        changed(Change.MESSAGES)
+        return done
+    }
+
+    private fun groupBytes(chatId: Long): ByteArray? = history.chat(chatId)?.takeIf { it.kind == ChatKind.PRIVATE_GROUP }?.let { AppGroupStore.hexBytes(it.address) }
+
+    fun addToGroup(chatId: Long, people: List<String>): Boolean = groupBytes(chatId)?.let { g -> groupAction { groups.invite(g, people.map { AppMailStore.idOf(it) }, it) } } ?: false
+    fun removeFromGroup(chatId: Long, account: String): Boolean = groupBytes(chatId)?.let { g -> groupAction { groups.remove(g, AppMailStore.idOf(account), it) } } ?: false
+    fun makeGroupAdmin(chatId: Long, account: String): Boolean = groupBytes(chatId)?.let { g -> groupAction { groups.makeAdmin(g, AppMailStore.idOf(account), it) } } ?: false
+    fun fixGroup(chatId: Long): Boolean = groupBytes(chatId)?.let { g -> groupAction { groups.fix(g, it) } } ?: false
+    fun askGroupAgain(chatId: Long): Boolean = groupBytes(chatId)?.let { g -> groupAction { groups.askAgain(g, it) } } ?: false
+    fun leaveGroup(chatId: Long, nextAdmin: String?): Boolean =
+        groupBytes(chatId)?.let { g -> groupAction { groups.leave(g, nextAdmin?.let { a -> AppMailStore.idOf(a) }, it) } } ?: false
+
+    /** New name, colour or picture ([photo] for a group photo), or the "New members see recent messages" setting. */
+    fun restyleGroup(chatId: Long, name: String, colour: Int, avatar: org.phonemesh.core.account.Avatar, photo: AvatarDraft?, recentForNew: Boolean): Boolean {
+        val g = groupBytes(chatId) ?: return false
+        return groupAction { now ->
+            if (photo != null && avatar is org.phonemesh.core.account.Avatar.Photo) {
+                groupStore.rows.setPhoto(AppGroupStore.hex(g), "", GroupRows.Photo(photo.webp, photo.width, photo.height, photo.sketch))
+            }
+            groups.restyle(g, name, colour, avatar, recentForNew, now)
+        }
+    }
+
+    fun setGroupRecent(chatId: Long, on: Boolean): Boolean {
+        val v = groupView(chatId) ?: return false
+        val avatar = runCatching { org.phonemesh.core.group.GroupAvatar.decode(groupStore.rows.group(v.hex)!!.avatar, 0).first }.getOrNull() ?: return false
+        return restyleGroup(chatId, v.name, v.face.colour, avatar, null, on)
+    }
+
+    /** Drops a group this phone left or was removed from, and its chat. */
+    fun forgetGroup(chatId: Long): Boolean {
+        val g = groupBytes(chatId) ?: return deleteChat(chatId)
+        mailOperation { groups.forget(g) }
+        return deleteChat(chatId)
+    }
+
+    /** "Delivered to N of M" for this phone's own group message: (N, M), or null for any other message. */
+    fun groupDelivered(message: Message): Pair<Int, Int>? {
+        if (message.direction != Direction.OUT || history.chat(message.chatId)?.kind != ChatKind.PRIVATE_GROUP) return null
+        val audience = runCatching { groupStore.rows.audience(message.id) }.getOrNull() ?: return null
+        return groupStore.rows.deliveredCount(message.id).coerceAtMost(audience) to audience
+    }
+
+    /** A [MessageKind.NOTE]'s words in the current language. */
+    fun groupNote(chatId: Long, code: String): String {
+        val hex = history.chat(chatId)?.address.orEmpty()
+        fun names(list: String) = list.split(",").filter { it.length == 16 }.map { personName(hex, it) }
+        return when {
+            code == GroupNotes.MADE -> text(UiText(R.string.group_made))
+            code == GroupNotes.YOU_JOINED -> text(UiText(R.string.group_you_joined))
+            code == GroupNotes.YOU_LEFT -> text(UiText(R.string.group_you_left))
+            code == GroupNotes.REMOVED -> text(UiText(R.string.group_removed))
+            code.startsWith("joined:") -> names(code.removePrefix("joined:")).joinToString(" ") { text(UiText(R.string.group_joined, listOf(it))) }
+            code.startsWith("left:") -> names(code.removePrefix("left:")).joinToString(" ") { text(UiText(R.string.group_left, listOf(it))) }
+            else -> ""
+        }
+    }
 
     /** A contact's face, with their photo when this phone holds the one their profile names. */
     fun faceOf(row: History.ContactRow): Face = Face.of(row).let { it.withPhoto(photoOf(row.accountId, it.avatar)) }
@@ -869,8 +1054,20 @@ class AppCore private constructor(
         // Before any notification: observers read setup state from this flag while they render.
         settings.firstMessageSent = true
         if (chat.kind == ChatKind.PERSON) sendPerson(message.id, chat, text, language, message.replyTo)
+        else if (chat.kind == ChatKind.PRIVATE_GROUP) sendGroup(message.id, chat, listOf(Body.encode(personBody(text, language, message.replyTo)) to false))
         else transmit(message.id, text, language, chat, message.replyTo)
         changed(Change.MESSAGES)
+        return true
+    }
+
+    /** Group bodies for message [messageId]: sealed, kept, then out by hub and radio; FAILED when the group cannot send now. */
+    private fun sendGroup(messageId: Long, chat: Chat, bodies: List<Pair<ByteArray, Boolean>>): Boolean {
+        var sent = false
+        if (!mailOperation {
+            sent = groups.send(AppGroupStore.hexBytes(chat.address), bodies, messageId, System.currentTimeMillis()) != null
+            if (sent) flushGroups()
+            schedulePostman()
+        } || !sent) { runCatching { history.setStatus(messageId, DeliveryStatus.FAILED) }; return false }
         return true
     }
 
@@ -878,7 +1075,31 @@ class AppCore private constructor(
 
     /** The messaging engine; only touched once a name (and so the account keys) exists. */
     private val mailStore by lazy { AppMailStore(history, accounts) }
-    val postman: Postman by lazy { Postman(accounts, mailStore) }
+    val postman: Postman by lazy {
+        Postman(accounts, mailStore, groups = Postman.GroupInbox { from, body, now -> groups.takePrivate(from, body, now) })
+    }
+
+    // ---- Private groups (v0.1.2, decisions 47, 66, 69, 72, 74): the engine, its storage, and its packets' way out.
+    val groupStore: AppGroupStore by lazy { AppGroupStore(history, accounts, Vault()) }
+    val groups: org.phonemesh.core.group.GroupPost by lazy { org.phonemesh.core.group.GroupPost(accounts.identity, groupStore) }
+
+    /**
+     * Private bodies the group engine left for contacts go to the Postman (a full window keeps them for later; a
+     * contact without a session drops them), then every group packet still waiting goes to a hub or the radio.
+     * A private body may go twice after a crash: receivers take it twice without harm.
+     */
+    private fun flushGroups() {
+        val now = System.currentTimeMillis()
+        for ((rowId, to, body) in groupStore.privates()) {
+            val out = try { postman.send(to, body, null, now) } catch (_: IllegalStateException) {
+                groupStore.rows.dropPrivate(rowId); continue
+            } finally { body.wipe() }
+            if (out == null) continue
+            groupStore.rows.dropPrivate(rowId)
+            push(out)
+        }
+        for (row in groupStore.rows.outWaiting()) pushId(-row.id)
+    }
 
     private fun sendPerson(messageId: Long, chat: Chat, text: String, language: String, replyTo: Long?) {
         val body = personBody(text, language, replyTo)
@@ -995,11 +1216,14 @@ class AppCore private constructor(
     private val mailStalled = Runnable { pauseMail() }
 
     /** Queue durable row identities, never credit a synchronous send() return as radio acceptance. */
-    private fun push(out: Postman.Out) {
-        if (mailFlight?.outboxId == out.outboxId || out.outboxId in hubFlight) return
+    private fun push(out: Postman.Out) = pushId(out.outboxId)
+
+    /** [id] is an outbox row, or minus a group outbox row (private groups share the radio and hub ways). */
+    private fun pushId(id: Long) {
+        if (mailFlight?.outboxId == id || id in hubFlight) return
         // A joined hub comes first; the stock radio only gets what the hub did not take (see hubOffered).
-        if (offerHub(out.outboxId)) return
-        mailQueue.add(out.outboxId)
+        if (offerHub(id)) return
+        mailQueue.add(id)
         pumpMail()
     }
 
@@ -1007,6 +1231,21 @@ class AppCore private constructor(
         if (!mayTransmit() || mailBlocked || mailFlight != null || draining != null) return
         while (mailQueue.isNotEmpty()) {
             val id = mailQueue.first()
+            if (id < 0) {
+                val g = groupStore.rows.out(-id)
+                // Done already, or only for a hub (decisions 64, 69): it waits for one, never this radio.
+                if (g == null || g.state != AppGroupStore.STATE_WAITING || g.hubOnly) { mailQueue.remove(id); continue }
+                if (!allowanceRoomFor(g.packet.size)) return
+                mailQueue.remove(id)
+                val packetId = try {
+                    radio.sendBroadcastData(MeshRadio.ACCOUNT_PORT, g.packet, PRIMARY_CHANNEL)
+                } catch (_: RuntimeException) { pauseMail(); return }
+                allowance.record(System.currentTimeMillis(), mailMillis(g.packet.size))
+                settings.radioAllowance = allowance.encode()
+                mailFlight = MailFlight(packetId, id)
+                main.postDelayed(mailStalled, DRAIN_WAIT_MS)
+                return
+            }
             val row = history.outboxRow(id)
             // A QR replacement or a peer receipt can retire queued work before its turn.
             if (row == null || row.state !in setOf("WAITING", "SENT", "HUB")) { mailQueue.remove(id); continue }
@@ -1043,7 +1282,7 @@ class AppCore private constructor(
         val flight = mailFlight?.takeIf { it.packetId == packetId } ?: return false
         when (state) {
             DeliveryState.QUEUED -> {
-                if (!mailOperation { postman.transmitted(flight.outboxId) }) {
+                if (!mailOperation { if (flight.outboxId < 0) groupStore.aired(-flight.outboxId) else postman.transmitted(flight.outboxId) }) {
                     mailFlight = null; mailQueue.clear(); mailBlocked = true
                     main.removeCallbacks(mailStalled)
                     return true
@@ -1067,12 +1306,14 @@ class AppCore private constructor(
         if (account() == null) return
         mailOperation {
             if (postman.recoverIncoming(System.currentTimeMillis()).isNotEmpty()) changed(Change.MESSAGES)
+            groups.tick(System.currentTimeMillis())
             materializePictures()
             val hubUp = hubWire() != null
             if (!hubUp && (!mayTransmit() || mailBlocked || mailFlight != null)) { schedulePostman(); return@mailOperation }
             if (!hubUp && mailQueue.isNotEmpty()) { pumpMail(); return@mailOperation }
             val due = postman.due(System.currentTimeMillis())
             (due + postman.unsent()).distinctBy { it.outboxId }.forEach { push(it) }
+            flushGroups()
             changed(Change.DELIVERY)
             schedulePostman()
         }
@@ -1082,7 +1323,8 @@ class AppCore private constructor(
         main.removeCallbacks(postmanTick)
         val mailNext = if (hubWire() == null && (!mayTransmit() || mailBlocked || mailFlight != null || mailQueue.isNotEmpty()))
             postman.nextIncomingExpiry() else postman.nextDue()
-        val next = listOfNotNull(mailNext, pictureWorkAt).minOrNull() ?: return
+        val groupNext = runCatching { groups.nextDue() }.getOrNull()
+        val next = listOfNotNull(mailNext, pictureWorkAt, groupNext).minOrNull() ?: return
         main.postDelayed(postmanTick, (next - System.currentTimeMillis()).coerceIn(1_000L, 30 * 60_000L))
     }
 
@@ -1202,16 +1444,22 @@ class AppCore private constructor(
     private fun offerHub(id: Long): Boolean {
         val route = hubRoute(rest = true) ?: return false
         val pin = hubCard()?.pin ?: return false
+        if (id < 0) {
+            val g = groupStore.rows.out(-id) ?: return false
+            if (g.state != AppGroupStore.STATE_WAITING) return false
+            return offerBytes(id, route, pin, MeshRadio.ACCOUNT_PORT, g.packet.copyOf(), g.hubOnly)
+        }
         val row = history.outboxRow(id) ?: return false
         if (row.state !in setOf("WAITING", "SENT", "HUB")) return false
         // Decision 24: a hub airs a packet once, so a private message's scheduled retry goes back to the same accepting
         // hub as the same stored bytes; the hub decides whether to air it again. Other accepted rows are not reoffered.
         if (HubCustody(history).has(id, pin) && (row.port != MeshRadio.ACCOUNT_PORT || row.isReceipt)) return false
+        return offerBytes(id, route, pin, row.port, row.packet.copyOf(), history.isHubOnly(id))
+    }
+
+    private fun offerBytes(id: Long, route: HubRoutes.Route, pin: String, port: Int, bytes: ByteArray, held: Boolean): Boolean {
         val wire = route.wire
         val epoch = hubEpoch
-        val port = row.port
-        val bytes = row.packet.copyOf()
-        val held = history.isHubOnly(id)
         if (hubFlight.isEmpty()) failedHubWire = null
         hubFlight.add(id)
         try {
@@ -1269,7 +1517,7 @@ class AppCore private constructor(
 
     /** "Reached the hub" for this one row, by id (a hello has no code to acknowledge): never Delivered (review F17). */
     private fun markReachedHub(id: Long, pin: String) {
-        mailOperation { mailStore.markHubReached(id, pin) }
+        mailOperation { if (id < 0) history.transaction { groupStore.reachedHub(-id) } else mailStore.markHubReached(id, pin) }
     }
 
     private fun currentHubWire(path: MailPaths.Path): HubWire? = when (path) {
@@ -1289,7 +1537,7 @@ class AppCore private constructor(
         val wire = route.wire
         val path = route.path
         val card = hubCard() ?: return
-        val currentCodes = runCatching { postman.expectedCodes().toSet() }.getOrNull()
+        val currentCodes = runCatching { (postman.expectedCodes() + groups.expectedCodes(System.currentTimeMillis())).toSet() }.getOrNull()
         if (currentCodes == null) { main.postDelayed(hubPollTick, hubRetryMs); return }
         val pin = card.pin
         val durableSince = runCatching { hubCursor.get(pin) }.getOrNull()
@@ -1376,7 +1624,10 @@ class AppCore private constructor(
             history.transaction {
                 if (item.port == MeshRadio.ACCOUNT_PORT) {
                     if (Start.isHello(item.packet)) request = accountsFlow.onPacket(item.packet)
-                    else shown = postman.receive(item.packet, System.currentTimeMillis()) != null
+                    else {
+                        val now = System.currentTimeMillis()
+                        shown = groups.receive(item.packet, now) || postman.receive(item.packet, now) != null
+                    }
                 }
                 hubCursor.advance(pin, item.seq)
             }
@@ -1592,9 +1843,19 @@ class AppCore private constructor(
 
     private fun receivePerson(payload: ByteArray) {
         mailOperation {
+            // A private group's packet is read by its group; anything else may be private mail.
+            if (groups.receive(payload, System.currentTimeMillis())) {
+                materializePictures()
+                flushGroups()
+                schedulePostman()
+                changed(Change.MESSAGES)
+                return@mailOperation
+            }
             val got = postman.receive(payload, System.currentTimeMillis())
             // The pieces are durable already; a picture whose last piece just arrived gets its file now.
             materializePictures()
+            // A private group body (a key, an invitation, a leaving) may have given the group engine something to send.
+            if (got?.body is Body.Group) flushGroups()
             schedulePostman()
             // Content and ack effects are durable before observers run; a receipt has no bubble of its own.
             if (got == null) changed(Change.DELIVERY) else changed(Change.MESSAGES)
@@ -1749,6 +2010,17 @@ class AppCore private constructor(
         // One emoji (decision 29), not just anything within the 32-byte limit: three thumbs fit the bytes too.
         if (org.phonemesh.core.wire.Reactions.single(emoji) != emoji) return false
         val now = System.currentTimeMillis()
+        if (chat.kind == ChatKind.PRIVATE_GROUP) {
+            if (target < REF_FLOOR) return false
+            var sent = false
+            if (!mailOperation {
+                sent = groups.send(AppGroupStore.hexBytes(chat.address), listOf(Body.encode(Body.Reaction(AppMailStore.refBytes(target), emoji)) to false), null, now) != null
+                if (sent) { history.addReaction(chat.id, null, emoji, target, now, waiting = false); flushGroups() }
+                schedulePostman()
+            } || !sent) return false
+            changed(Change.MESSAGES)
+            return true
+        }
         if (chat.kind == ChatKind.PERSON) {
             if (target < REF_FLOOR) return false
             if (!mailOperation {
@@ -1791,6 +2063,7 @@ class AppCore private constructor(
         ChatKind.DIRECT -> error("old chats are read only")
         // An account id is no radio address: person chats send through wire v2 (step 13), never this path.
         ChatKind.PERSON -> error("person chats do not use radio addresses")
+        ChatKind.PRIVATE_GROUP -> error("private groups send through their group")
     }
 
     /**
@@ -2336,6 +2609,8 @@ class AppCore private constructor(
     /** Saves the name, colour (RGB) and picture: a new profile revision when something changed (decisions 48-49). */
     fun saveProfile(name: String, colour: Int, avatar: org.phonemesh.core.account.Avatar) {
         accounts.setProfile(name, colour, avatar)
+        // Each private group gets the new name and picture soon (decision 72 b).
+        mailOperation { groups.profileChanged(System.currentTimeMillis()); schedulePostman() }
         changed(Change.MESSAGES)
     }
 

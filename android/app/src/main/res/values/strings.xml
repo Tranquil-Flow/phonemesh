@@ -557,4 +557,11 @@
     <string name="recovery_working">Working on the saved copy…</string>
     <string name="recovery_more">And %1$d more.</string>
     <string name="recovery_keep_failed">These people could not be kept.</string>
+    <string name="group_made">You made the group.</string>
+    <string name="group_joined">%1$s joined.</string>
+    <string name="group_left">%1$s left.</string>
+    <string name="group_you_joined">You joined. Earlier messages are not shown.</string>
+    <string name="group_you_left">You left the group.</string>
+    <string name="group_removed">You are no longer in this group.</string>
+    <string name="group_someone">Someone</string>
 </resources>

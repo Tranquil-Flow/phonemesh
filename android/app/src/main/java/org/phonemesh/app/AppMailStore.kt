@@ -85,6 +85,8 @@ class AppMailStore(private val history: History, private val store: AccountStore
                         org.phonemesh.core.account.AvatarPhotos.join(pieces.subList(from, pieces.size))?.webp
                     }.firstOrNull()
                 }
+                // A private group body: the group engine took it (and saved it) before this; only its kind is here.
+                is Body.Group -> Unit
                 else -> error("unsupported incoming body")
             }
         }

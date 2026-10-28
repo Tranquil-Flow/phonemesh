@@ -545,7 +545,7 @@ class PersonPictureTest {
         }
         TestCore.restart()
         val next = TestCore.onMain {
-            assertEquals(20, core.history.readableDatabase.version)
+            assertEquals(21, core.history.readableDatabase.version)
             assertNotNull(core.history.message(message.id))
             PersonPictures(core.history).freshId(chatId) { used }
         }

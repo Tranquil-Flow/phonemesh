@@ -48,7 +48,7 @@ object Looks {
     fun show(view: FrameLayout, palette: Palette, kind: ChatKind, sizeDp: Int, face: Face?) {
         val context = view.context
         view.removeAllViews()
-        val drawn = if (kind == ChatKind.PERSON && face != null) {
+        val drawn = if ((kind == ChatKind.PERSON || kind == ChatKind.PRIVATE_GROUP) && face != null) {
             FaceDrawable(face, palette.outline, Ui.dp(context, 2).toFloat(), FaceDrawable::canDraw)
         } else null
         view.background = when {
@@ -63,7 +63,7 @@ object Looks {
             else -> palette.text
         }
         val icon = Ui.dp(context, sizeDp / 2)
-        view.addView(Ui.icon(context, if (kind == ChatKind.GROUP) R.drawable.ic_group else R.drawable.ic_person, ink, sizeDp / 2),
+        view.addView(Ui.icon(context, if (kind == ChatKind.GROUP || kind == ChatKind.PRIVATE_GROUP) R.drawable.ic_group else R.drawable.ic_person, ink, sizeDp / 2),
             FrameLayout.LayoutParams(icon, icon, Gravity.CENTER))
     }
 

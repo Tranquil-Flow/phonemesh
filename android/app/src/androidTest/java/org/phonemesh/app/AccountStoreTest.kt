@@ -135,7 +135,7 @@ class AccountStoreTest {
         opened.forEach { it.close() }; opened.clear()
 
         val again = store(A, software = true)
-        assertEquals(20, opened.last().readableDatabase.version)
+        assertEquals(21, opened.last().readableDatabase.version)
         assertEquals("green, index 3, as RGB", 0x43A047, opened.last().accountRow()!!.colour)
         assertEquals(org.phonemesh.core.account.Profile("Awa", 0x43A047), again.profile())
         assertEquals("Awa", checkNotNull(ContactCard.decode(again.card().encode())).name)

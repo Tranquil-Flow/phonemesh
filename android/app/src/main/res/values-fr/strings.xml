@@ -553,4 +553,11 @@
     <string name="recovery_working">Travail sur la copie…</string>
     <string name="recovery_more">Et %1$d de plus.</string>
     <string name="recovery_keep_failed">Impossible de garder ces personnes.</string>
+    <string name="group_made">Vous avez créé le groupe.</string>
+    <string name="group_joined">%1$s a rejoint.</string>
+    <string name="group_left">%1$s a quitté le groupe.</string>
+    <string name="group_you_joined">Vous avez rejoint. Les anciens messages restent cachés.</string>
+    <string name="group_you_left">Vous avez quitté le groupe.</string>
+    <string name="group_removed">Vous n’êtes plus dans ce groupe.</string>
+    <string name="group_someone">Quelqu’un</string>
 </resources>

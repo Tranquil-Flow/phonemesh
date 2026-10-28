@@ -8,13 +8,19 @@ import android.database.sqlite.SQLiteOpenHelper
 import org.phonemesh.core.DeliveryRules
 import org.phonemesh.core.DeliveryStatus
 
-/** GROUP: the shared channel. DIRECT: an old chat with one radio (read only once accounts arrive). PERSON: a contact's account. */
-enum class ChatKind { GROUP, DIRECT, PERSON }
+/**
+ * GROUP: the shared channel. DIRECT: an old chat with one radio (read only once accounts arrive). PERSON: a contact's
+ * account. PRIVATE_GROUP: a private group ([GroupRows]; address = the group id in hex).
+ */
+enum class ChatKind { GROUP, DIRECT, PERSON, PRIVATE_GROUP }
 
 enum class Direction { IN, OUT }
 
-/** TEXT is a spoken/written message; PICTURE is a picture sent over the radio (its row in `pictures`). */
-enum class MessageKind { TEXT, PICTURE }
+/**
+ * TEXT is a spoken/written message; PICTURE is a picture sent over the radio (its row in `pictures`); NOTE is a line the
+ * app writes into a private group's chat ("Kofi joined."): its text is a [GroupNotes] code, shown in the current language.
+ */
+enum class MessageKind { TEXT, PICTURE, NOTE }
 
 /**
  * A picture message's details. [file] is set once every byte is on this phone (always for a sent picture);
@@ -40,6 +46,8 @@ data class Message(
     /** When a planned message was meant to go; null for one sent at once. */
     val plannedAt: Long? = null,
     val kind: MessageKind = MessageKind.TEXT,
+    /** In a private group: the admin who shared this recent message with new members (decision 74), else null. */
+    val sharedBy: String? = null,
 )
 
 /** A message waiting on this phone until [due]; it becomes a sent message when it goes out. */
@@ -216,6 +224,11 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         }
         // Decision 64: outbox rows that go only through a hub, never by this phone's radio (photo avatar pieces).
         if (oldVersion < 20) db.execSQL("CREATE TABLE IF NOT EXISTS hub_only (outbox_id INTEGER PRIMARY KEY)")
+        // Private groups (v0.1.2): their tables, and who shared a recent message with new members.
+        if (oldVersion < 21) {
+            GroupRows.createTables(db)
+            if (!hasColumn(db, "messages", "shared_by")) db.execSQL("ALTER TABLE messages ADD COLUMN shared_by TEXT")
+        }
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -670,8 +683,18 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     /** [packetId] is the radio id it arrived with, kept so replies and reactions can point at it. */
     fun addIncoming(
         chatId: Long, senderId: String, text: String, language: String?, time: Long, countUnread: Boolean,
-        packetId: Long? = null, replyTo: Long? = null,
-    ): Message = insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread, packetId, replyTo, null)
+        packetId: Long? = null, replyTo: Long? = null, sharedBy: String? = null,
+    ): Message = insert(chatId, Direction.IN, senderId, text, language, time, null, countUnread, packetId, replyTo, null, sharedBy = sharedBy)
+
+    /** A line the app writes into a private group's chat ([GroupNotes] code); never unread, never sent. */
+    fun addNote(chatId: Long, code: String, time: Long): Message =
+        insert(chatId, Direction.IN, null, code, null, time, null, false, null, null, null, MessageKind.NOTE)
+
+    fun privateGroupChat(groupHex: String, name: String): Chat = chatFor(ChatKind.PRIVATE_GROUP, groupHex, name)
+
+    fun renameChat(chatId: Long, name: String) {
+        writableDatabase.update("chats", ContentValues().apply { put("name", name) }, "id = ?", arrayOf(chatId.toString()))
+    }
 
     fun addOutgoing(chatId: Long, text: String, language: String, time: Long, replyTo: Long? = null, plannedAt: Long? = null): Message =
         insert(chatId, Direction.OUT, null, text, language, time, DeliveryStatus.WAITING, false, null, replyTo, plannedAt)
@@ -818,7 +841,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     private fun insert(
         chatId: Long, direction: Direction, senderId: String?, text: String, language: String?, time: Long,
         status: DeliveryStatus?, countUnread: Boolean, packetId: Long?, replyTo: Long?, plannedAt: Long?,
-        kind: MessageKind = MessageKind.TEXT,
+        kind: MessageKind = MessageKind.TEXT, sharedBy: String? = null,
     ): Message {
         val db = writableDatabase
         db.beginTransaction()
@@ -827,6 +850,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
                 put("chat_id", chatId); put("direction", direction.name); put("sender_id", senderId); put("text", text)
                 put("language", language); put("time", time); put("delivery", status?.name)
                 put("packet_id", packetId); put("reply_to", replyTo); put("planned_at", plannedAt); put("kind", kind.name)
+                if (sharedBy != null) put("shared_by", sharedBy)
             })
             db.execSQL(
                 "UPDATE chats SET last_activity = MAX(last_activity, ?), unread = unread + ? WHERE id = ?",
@@ -963,11 +987,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             replyTo = getColumnIndexOrThrow("reply_to").let { if (isNull(it)) null else getLong(it) },
             plannedAt = getColumnIndexOrThrow("planned_at").let { if (isNull(it)) null else getLong(it) },
             kind = MessageKind.valueOf(getString(getColumnIndexOrThrow("kind"))),
+            sharedBy = getColumnIndex("shared_by").let { if (it < 0 || isNull(it)) null else getString(it) },
         )
     }
 
     private companion object {
-        const val VERSION = 20
+        const val VERSION = 21
         const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */

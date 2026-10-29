@@ -1,5 +1,9 @@
 # Update signing keys: the owner's steps
 
+For v0.1.2 the owner chose this offline round-trip before APK signing (accounts decision 77).
+A staged APK kit with TEST roots is provisional: it must refuse signing and be replaced after
+both public resources land together in their own tested commit.
+
 Hub pack updates (decisions 45, 61, 62, 70) are signed by two keys only the owner holds. This page is what the owner and the people who
 prepare the release do, in order, when the real keys exist. Everything that needs a private key is done by the owner, offline. Until then the app carries **TEST keys**, and a release build refuses them.
 
@@ -12,7 +16,7 @@ prepare the release do, in order, when the real keys exist. Everything that need
   "TEST keys. For testing only."
 - The demo's own keys are made fresh on the phone at every start. No private key is derived from a public label in any file that is built
   into an app or the hub. The deterministic TEST keys exist only in test sources.
-- A signed release can therefore go out before the real keys arrive. The only thing it cannot do is receive hub updates.
+- The software can run with updates off, but the owner's v0.1.2 choice requires real update keys before APK signing.
 
 ## When the real keys arrive
 

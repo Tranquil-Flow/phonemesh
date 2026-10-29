@@ -187,6 +187,16 @@ From handover 3 and the owner on 2026-10-14:
     back in its groups and must be added again (owner, 2026-10-27).
 76. Before v0.1.2 is released, fresh AI review lanes check the new group code, the full backup and the phone side of
     updates, and every finding is fixed; a human cryptographer's review stays skipped for now (owner, 2026-10-27).
+77. v0.1.2 release-gate choices (owner, 2026-10-29, answers 1a/2a/3a/4a):
+    - Keep the current rule that admins have every member as a contact; ordinary members need not know each other.
+      Relayed key delivery is later work, not a change in this release.
+    - Accept the documented same-model-family AI reviews and their limitations; no additional different-family
+      review is required. This is not a human cryptographic audit.
+    - Accept the recorded commit/lane deviations: G2/G3 share a commit, G7 shipped within other commits, and lanes
+      were integrated through cherry-picks. Published history is not rewritten.
+    - Complete the owner's offline update-key round-trip before APK signing. Return only `public-keys.txt` and
+      `baseline-catalog.pmup`; private keys and passphrases stay with the owner. TEST-root staging is provisional
+      and must be rebuilt after the pair's own tested commit. This does not approve main promotion or publication.
 
 ## What an outsider can and cannot learn
 

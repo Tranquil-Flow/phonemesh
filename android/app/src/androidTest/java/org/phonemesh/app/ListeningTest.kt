@@ -219,6 +219,45 @@ class ListeningTest {
         assertEquals(words(R.string.roaming_block_permission), core.text(core.lastNote!!))
     }
 
+    // ---- The screen being opened says why listening stayed off (N3b: its own start raises the refusal)
+
+    private fun shownNote(screen: Activity): String? = Views.tagged(screen, ScreenActivity.NOTE_TAG)?.let { Views.textOf(it) }
+
+    @Test fun theNextScreenShowsThatAStopFromAndroidKeptListeningOff() {
+        val r = rig(hub = false, radio = true)
+        enable(r)
+        TestCore.exits.stoppedAt = core.settings.listeningSince + 1
+        val again = newProcess()
+        val chats: ChatsActivity = Views.start(ChatsActivity::class.java)
+        activity = chats
+        assertTrue("nothing is started again", again.starts.isEmpty())
+        assertFalse(core.settings.hubRoaming)
+        assertEquals("the screen itself says so, not only the core", words(R.string.roaming_block_stopped), shownNote(chats))
+    }
+
+    @Test fun theNextScreenShowsThatALostPermissionKeptListeningOff() {
+        val r = rig(hub = false, radio = true)
+        enable(r)
+        val again = newProcess()
+        TestCore.access.radioMissing = listOf("android.permission.BLUETOOTH_CONNECT")
+        val chats: ChatsActivity = Views.start(ChatsActivity::class.java)
+        activity = chats
+        assertTrue(again.starts.isEmpty())
+        assertFalse(core.settings.hubRoaming)
+        assertEquals(words(R.string.roaming_block_permission), shownNote(chats))
+    }
+
+    @Test fun aScreenDoesNotRepeatANoteFromBeforeItStarted() {
+        val r = rig(hub = false, radio = true)
+        enable(r)
+        // Raised while no screen was open; nobody saw it, and it is not news by the time a screen opens.
+        TestCore.onMain { core.note(UiText(R.string.add_name_first)) }
+        val chats: ChatsActivity = Views.start(ChatsActivity::class.java)
+        activity = chats
+        assertTrue("listening carries on", core.roamingActive)
+        assertNull(Views.tagged(chats, "note_box"))
+    }
+
     // ---- Settings
 
     @Test fun settingsOffersListeningOffByDefaultAndItsSwitchStartsIt() {

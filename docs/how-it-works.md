@@ -458,6 +458,10 @@ asks for no battery exemption. What happens in each case:
 | Radio or hub out of reach, then back | Asked for again about once a minute | Reconnects when a screen opens |
 
 Forgetting the radio or the hub keeps listening while the other is still saved; forgetting the last one stops it.
+On Android 13 and later the notification, with its **Stop**, shows only if the app may send notifications (the Alerts
+switch asks for that). Without it listening still runs, and Android's Active apps list still shows it. If the phone
+restarts soon after a Force stop, Android may lose its record of that stop, so listening can start again when the app
+is next opened; turning the switch off in the app is kept either way.
 Listening does not promise immediate delivery, delivery before the phone is first unlocked, or delivery after a
 restart until the app is opened. Battery use and delays have not been measured on real phones yet.
 

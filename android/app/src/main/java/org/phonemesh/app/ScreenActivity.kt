@@ -127,6 +127,7 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
         }
         observed = current
         current.activityStarted()
+        val noteBefore = current.lastNote
         current.resumeRoaming()
         current.observe(this)
         onScreenStart()
@@ -137,6 +138,9 @@ abstract class ScreenActivity : Activity(), AppCore.Observer {
             if (remaining <= 0L) hideNote.run() else box.postDelayed(hideNote, remaining)
         }
         render()
+        // Listening refused while this screen started (stopped in Android, a lost permission) said so before the screen
+        // observed; it is this screen's news, so it shows here. A note from before this start is not repeated (v0.1.3 N3b).
+        if (current.lastNote !== noteBefore) showNote()
     }
 
     override fun onStop() {

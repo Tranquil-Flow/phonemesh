@@ -312,7 +312,7 @@ def signing_steps(receipt: dict) -> str:
     ]
     for abi in ABIS:
         a = receipt["apks"][abi]
-        lines.append("   apksigner sign --ks <your keystore> \\")
+        lines.append("   apksigner sign --ks <your keystore> --v4-signing-enabled false \\")
         lines.append(f"     --out signed/{a['signed_name']} {a['unsigned']}")
     lines += [
         "   ```",
@@ -329,8 +329,9 @@ def signing_steps(receipt: dict) -> str:
     lines += [
         "   ```",
         "",
-        "5. Send back only the two files in `signed/`. Before anything is published the developer",
-        "   checks them against this folder with",
+        "5. Send back only the two `.apk` files in `signed/` (an older command may also have",
+        "   written `.idsig` files; they are not needed). Before anything is published the",
+        "   developer checks the APKs against this folder with",
         "   `android/scripts/signing_inputs.py verify --inputs <this folder> --signed signed`.",
         "",
     ]

@@ -285,6 +285,9 @@ def test_builds_bound_signing_inputs_from_the_source_zip(tmp_path, source, env, 
     assert (out / "phonemesh-0.1.2-source.zip").read_bytes() == source["zip"].read_bytes()
     signing = (out / "SIGNING.md").read_text()
     assert sha(source["repo"] / KEYS) in signing and RELEASE_CERT in signing
+    # apksigner writes .idsig (v4) files by default; a release needs neither them nor v4.
+    assert signing.count("--v4-signing-enabled false") == 2
+    assert "Send back only the two `.apk` files" in signing
     assert not (out / "NOT-SIGNING-INPUTS.txt").exists()
     sums = dict(
         reversed(line.split("  ", 1)) for line in (out / "SHA256SUMS").read_text().splitlines()

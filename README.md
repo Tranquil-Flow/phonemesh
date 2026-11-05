@@ -44,7 +44,8 @@ phones and a small number of radios. It is not a finished product and makes no r
 capacity or delivery guarantee.
 
 **The v0.1.2 production release is not signed or published.** The `v0.1.2` branch adds
-[private group chats](#private-groups), [saved chats](#saving-your-chats) and hub speech-pack updates.
+[private group chats](#private-groups), [saved chats](#saving-your-chats), hub speech-pack updates
+and text replies to people who use the stock Meshtastic app (ordinary radio text, not private chats).
 Release builds currently refuse the TEST update keys, so their Updates screen says
 "Updates are not set up in this version." The [candidate notes](docs/releases/v0.1.2.md)
 separate completed checks from owner signing and physical tests that remain.
@@ -477,8 +478,11 @@ pictures.
 ## Coming next
 
 Private group chats, saved chats and signed speech-pack updates through the local hub were
-the plan for v0.1.2, and the candidate on this branch contains all three. After v0.1.2:
-**Ewe and Kabiyè**, for the pilot in Togo.
+the plan for v0.1.2, and the candidate on this branch contains all three. Planned for v0.1.3
+([plan](docs/specs/2026-11-04-v0.1.3-release-plan.md)): alerts for new private and group
+messages with an opt-in listening mode, group admins who can manage members without adding
+everyone as contacts, and a Windows Bluetooth hub companion. **Ewe and Kabiyè**, for the pilot
+in Togo, remain planned separately and are not part of v0.1.3.
 
 Planned for later: TalkBack support, quantum-safe keys, app updates through a hub (v0.1.2
 passes on speech packs only), and the radio settings profile that cuts automatic

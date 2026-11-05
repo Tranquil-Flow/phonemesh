@@ -77,7 +77,22 @@ keystore or passphrase to an agent, a chat or a repository. An agent or develope
    `./gradlew :core:test :hub:test :app:testReleaseUnitTest` and `scripts/check.sh`. The tests that name the TEST keys step aside by
    themselves once the file holds other keys; the others check that the pair opens a fresh state. In a release build updates now run.
 6. **Rebuild everything that was already frozen.** An unsigned APK built before the swap does not contain the new baseline. Rebuild the
-   release inputs from the new commit, give the owner those to sign, and never sign an older kit. Then check that updates are available
+   release inputs from the new commit, give the owner those to sign, and never sign an older kit. Build them from the `git archive` ZIP
+   of the release commit with `android/scripts/signing_inputs.py` (Java 17 and the Android SDK set as for `scripts/check.sh`):
+
+   ```sh
+   git archive --format=zip -o phonemesh-source.zip <release commit>
+   python3 android/scripts/signing_inputs.py build --source-zip phonemesh-source.zip \
+     --commit <release commit> --tree "$(git rev-parse '<release commit>^{tree}')" \
+     --packs model-packs --out signing-inputs
+   ```
+
+   It unpacks the ZIP in a fresh folder, checks that it is that commit's tree, and builds nothing unless `check-baseline` accepts the
+   compiled pair, so TEST keys never become signing inputs. Then it runs `scripts/check.sh` there and writes the two unsigned APKs,
+   the hub ZIP, the source ZIP, a build receipt, the owner's `SIGNING.md` and `SHA256SUMS`. `--provisional` builds TEST-key sources
+   into a folder marked as not signing inputs, to prove the isolated build early. When the signed APKs come back,
+   `signing_inputs.py verify --inputs signing-inputs --signed <folder>` checks the release certificate, one signer, version, ABI,
+   signed size ceiling, alignment, and that each signed APK holds exactly its input's files. Then check that updates are available
    in the release build.
 7. **Phones and hubs that held the TEST keys** need nothing from the owner. A phone records which keys its update state was made under;
    when the app starts with other keys it sets the old state aside and starts from the new baseline (the TEST catalog key is gone from it;

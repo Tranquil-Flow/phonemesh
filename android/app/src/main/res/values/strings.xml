@@ -156,6 +156,17 @@
     <string name="delete_chat">Delete chat</string>
     <string name="delete_chat_title">Delete this chat?</string>
     <string name="read_new_aloud">Read new messages aloud</string>
+    <!-- v0.1.3 N2: new-message alerts (opt-in; generic; their own channel) -->
+    <string name="settings_alerts">Alerts</string>
+    <string name="new_message_alerts">Alert me to new messages</string>
+    <string name="alerts_private">Alerts show no names or words.</string>
+    <string name="alerts_scope">Only while open or keeping the hub.</string>
+    <string name="alerts_blocked">Android blocks these alerts.</string>
+    <string name="alerts_settings">Allow in Android settings</string>
+    <string name="alerts_channel">New messages</string>
+    <string name="alert_new_message">New message</string>
+    <string name="alert_new_messages">New messages</string>
+    <string name="alert_open_to_read">Open the app to read.</string>
     <string name="reply">Reply</string>
     <string name="react">React</string>
     <string name="reply_cancel">Do not reply</string>

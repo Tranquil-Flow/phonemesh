@@ -51,7 +51,8 @@ class AppBoundaryTest {
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.BLUETOOTH_CONNECT,
             // Planned messages sent while the app is closed (owner decision, 2026-10-12): an exact alarm and a short
-            // foreground service; its notification is never asked for.
+            // foreground service. The notification permission is asked for only by the opt-in new-message alerts switch
+            // in Settings (v0.1.3 N2), never at start-up.
             Manifest.permission.USE_EXACT_ALARM,Manifest.permission.FOREGROUND_SERVICE,Manifest.permission.POST_NOTIFICATIONS,
             // Opt-in hub/radio roaming uses the approved connected-device foreground service.
             Manifest.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE,Manifest.permission.CAMERA)

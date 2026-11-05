@@ -65,6 +65,29 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         get() = prefs.getBoolean(READ_ALOUD, false)
         set(value) { prefs.edit().putBoolean(READ_ALOUD, value).apply() }
 
+    /**
+     * v0.1.3 N2, opt-in: the person's wish for new-message alerts. Off by default. The wish alone shows nothing while
+     * Android blocks alerts, and it never keeps the app running in the background (that is [hubRoaming]'s choice).
+     */
+    var newMessageAlerts: Boolean
+        get() = prefs.getBoolean(NEW_MESSAGE_ALERTS, false)
+        set(value) { prefs.edit().putBoolean(NEW_MESSAGE_ALERTS, value).apply() }
+
+    /** v0.1.3 N2: the chats a new-message alert is shown for and how many texts each brought; ids and counts only. */
+    var alertedChats: LinkedHashMap<Long, Int>
+        get() = LinkedHashMap<Long, Int>().also { chats ->
+            prefs.getString(ALERTED_CHATS, null)?.split(',')?.forEach { entry ->
+                val id = entry.substringBefore(':').toLongOrNull()
+                val count = entry.substringAfter(':', "").toIntOrNull()
+                if (id != null && count != null && count > 0) chats[id] = count
+            }
+        }
+        set(value) {
+            prefs.edit().apply {
+                if (value.isEmpty()) remove(ALERTED_CHATS) else putString(ALERTED_CHATS, value.entries.joinToString(",") { "${it.key}:${it.value}" })
+            }.apply()
+        }
+
     /** The hub QR scanned in person (HubCard text), or null. It holds the hub Wi-Fi's password, in this app's private storage. */
     var hubCard: String?
         get() = prefs.getString(HUB_CARD, null)
@@ -162,6 +185,8 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val FIRST_PERSON_ADDED = "firstPersonAdded"
         private const val SETUP_FINISHED = "setupFinished"
         private const val READ_ALOUD = "readAloud"
+        private const val NEW_MESSAGE_ALERTS = "newMessageAlerts"
+        private const val ALERTED_CHATS = "alertedChats"
         private const val HUB_CARD = "hubCard"
         private const val HUB_ROAMING = "hubRoaming"
         private const val TIPS_SHOWN = "tipsShown"

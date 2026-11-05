@@ -11,12 +11,28 @@ class FakeAccess : DeviceAccess {
     var microphone = true
     var country: String? = null
     var offline = false
-    fun reset() { radioMissing = emptyList(); bluetooth = true; microphone = true; country = null; offline = false }
+    /** Android's new-message alert permission is held (true on Android 12 and older, where none is needed). */
+    var alertPermission = true
+    fun reset() { radioMissing = emptyList(); bluetooth = true; microphone = true; country = null; offline = false; alertPermission = true }
     override fun radioPermissionsMissing() = radioMissing
     override fun bluetoothOn() = bluetooth
     override fun microphoneAllowed() = microphone
     override fun countryCode() = country
     override fun noInternet() = offline
+    override fun alertPermissionMissing() = !alertPermission
+}
+
+/** New-message alerts as the app asks for them (v0.1.3 N2); nothing reaches Android. Main thread. */
+class FakeAlertHost : AlertHost {
+    @Volatile var allow = true
+    val shown = java.util.Collections.synchronizedList(ArrayList<Alert>())
+    @Volatile var cleared = 0
+    @Volatile var prepared = 0
+    fun reset() { allow = true; shown.clear(); cleared = 0; prepared = 0 }
+    override fun allowed() = allow
+    override fun prepare(words: Context) { prepared++ }
+    override fun show(alert: Alert, words: Context) { shown += alert }
+    override fun clear() { cleared++ }
 }
 
 /** Puts an AppCore with fakes in place of the real one: test history, test settings, fixture packs. */
@@ -29,6 +45,8 @@ object TestCore {
     lateinit var speech: FakeSpeech
     val access = FakeAccess()
 
+    /** Where the test core's new-message alerts go; never Android's notifications. */
+    val alerts = FakeAlertHost()
     /** The planned-message alarm the core last set; null when none is armed. Never touches the real AlarmManager. */
     val alarm = FakePlanAlarm()
 
@@ -52,6 +70,7 @@ object TestCore {
             clearPacks()
             if (voices.isNotEmpty()) Fixtures.installReady(context, voices)
             access.reset()
+            alerts.reset()
             build(language, realSpeech, nextTheme)
             core.settings.firstPersonAdded = added
             if (named) core.saveAccount("Awa", 0x43A047)
@@ -76,6 +95,7 @@ object TestCore {
             speech = chosenSpeech, historyName = HISTORY, prefsName = PREFS, access = access, planAlarm = alarm,
         )
         if (language != null) built.settings.language = language
+        built.alertHost = alerts
         // Only a fresh install overrides appearance; restart must retain the saved choice.
         if (theme != null) built.settings.theme = theme
         AppCore.replaceForTest(built)

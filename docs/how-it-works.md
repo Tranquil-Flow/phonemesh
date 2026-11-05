@@ -476,6 +476,10 @@ used. Release builds accept only packs in that built-in catalog.
 - History is stored in the app's private storage under Android's file encryption, not in
   a separately encrypted database. Account and session keys are sealed by the Keystore.
 - There is no account server and no analytics library.
+- New-message alerts (v0.1.3 development branch) stay off until turned on in **Settings → Alerts**, which is the only
+  place the app asks for Android's notification permission. An alert says only "New message"; it names nobody, shows
+  no words or pictures and is hidden on the lock screen. None is shown for the chat already on screen. Alerts arrive
+  only while the app is open or keeping the hub; turning them on starts nothing in the background.
 
 ## Limits of v0.1
 

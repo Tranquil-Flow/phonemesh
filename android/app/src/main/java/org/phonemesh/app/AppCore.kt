@@ -243,14 +243,81 @@ class AppCore private constructor(
 
     private fun changed(change: Change) {
         // Every committed receive ends in one of these; inside a transaction nothing is handed out yet.
-        if (change == Change.MESSAGES || change == Change.DELIVERY) handOutIncomingAlerts()
+        if (change == Change.MESSAGES || change == Change.DELIVERY) {
+            handOutIncomingAlerts()
+            withdrawReadAlerts()
+        }
         observers.toList().forEach { it.onCoreChange(change) }
     }
 
     private fun handOutIncomingAlerts() {
         // A write refusal leaves the events for the next change; the messages themselves are kept either way.
         val fresh = try { incomingAlerts.take() } catch (_: SQLiteException) { return }
-        if (fresh.isNotEmpty()) incomingAlertSink?.invoke(fresh)
+        if (fresh.isEmpty()) return
+        raiseAlerts(fresh)
+        incomingAlertSink?.invoke(fresh)
+    }
+
+    // ---- New-message alerts (v0.1.3 N2): opt-in, generic, one coalesced alert, never for the chat on screen
+
+    /** Where new-message alerts are shown: Android's notifications on a phone ([create]), a fake in tests. */
+    internal var alertHost: AlertHost? = null
+    /**
+     * Chats with an alert shown, and how many fresh texts each brought. Kept in [Settings] (ids and counts only), so a
+     * later process can still withdraw the alert Android kept when this one ended.
+     */
+    private val alerted: LinkedHashMap<Long, Int> by lazy { settings.alertedChats }
+
+    /**
+     * The person's wish for new-message alerts. On prepares the alert channel; it asks no permission (Settings does, only
+     * from its switch) and keeps nothing running in the background. Off withdraws the alert shown.
+     */
+    fun setNewMessageAlerts(on: Boolean) {
+        settings.newMessageAlerts = on
+        val host = alertHost ?: return
+        if (on) {
+            runCatching { host.prepare(localized()) }.onFailure { Log.w(TAG, "alert channel refused", it) }
+        } else {
+            forgetAlerts()
+            runCatching { host.clear() }
+        }
+    }
+
+    /** Alerts are wanted but Android does not allow them (permission refused, app or channel blocked). */
+    fun alertsBlocked(): Boolean = settings.newMessageAlerts && runCatching { alertHost?.allowed() }.getOrNull() != true
+
+    private fun raiseAlerts(fresh: List<IncomingAlerts.Fresh>) {
+        val host = alertHost ?: return
+        // While they are not wanted or not allowed, a text is only kept unread: no alert is saved up for later.
+        if (!settings.newMessageAlerts || runCatching { host.allowed() }.getOrNull() != true) return
+        // The conversation on screen shows its own new text.
+        val alerting = fresh.filter { it.chatId != openChatId }
+        if (alerting.isEmpty()) return
+        alerting.forEach { alerted[it.chatId] = (alerted[it.chatId] ?: 0) + 1 }
+        settings.alertedChats = alerted
+        showAlert(host, fresh = true)
+    }
+
+    /** Chats opened (nothing unread) or deleted leave the alert: it narrows quietly, or goes with the last one. */
+    private fun withdrawReadAlerts() {
+        if (alerted.isEmpty() || history.writableDatabase.inTransaction()) return
+        val read = alerted.keys.filter { id -> (history.chat(id)?.unread ?: 0) == 0 }
+        if (read.isEmpty()) return
+        read.forEach { alerted.remove(it) }
+        settings.alertedChats = alerted
+        val host = alertHost ?: return
+        if (alerted.isEmpty()) runCatching { host.clear() }
+        else if (runCatching { host.allowed() }.getOrNull() == true) showAlert(host, fresh = false)
+    }
+
+    private fun showAlert(host: AlertHost, fresh: Boolean) {
+        val alert = Alert(alerted.keys.singleOrNull(), alerted.values.sum(), fresh)
+        runCatching { host.show(alert, localized()) }.onFailure { Log.w(TAG, "alert refused", it) }
+    }
+
+    private fun forgetAlerts() {
+        alerted.clear()
+        settings.alertedChats = alerted
     }
 
     /** The chosen language's resources (the phone's before the first choice). */
@@ -3070,6 +3137,7 @@ class AppCore private constructor(
                 core.hub = WifiHubLink(app)
                 core.bluetoothHub = BleHubLink(app)
                 core.roamingHost = SystemRoamingHost(app)
+                core.alertHost = SystemAlertHost(app)
             }
         }
 

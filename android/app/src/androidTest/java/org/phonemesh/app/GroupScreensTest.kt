@@ -236,6 +236,18 @@ class GroupScreensTest {
         assertEquals(listOf(bread.id, milk.id), TestCore.onMain { got.map { it.messageId } })
     }
 
+    /** v0.1.3 N2: with alerts wanted, a member's group text raises the same generic alert as a person's, for the group chat. */
+    @Test fun aGroupTextRaisesAnAlertForTheGroupChat() {
+        prepare()
+        TestCore.onMain { core.setNewMessageAlerts(true) }
+        val (chatId, group) = activeGroup()
+        assertTrue("making the group and Bea joining raise no alert", TestCore.alerts.shown.isEmpty())
+        assertNotNull(beaGroups.post.send(group, listOf(Body.encode(Body.Text("en-US", "Fresh bread today")) to false), null, 2_200_000))
+        toAwa(2_200_000)
+        until { TestCore.onMain { core.history.messages(chatId).any { it.text == "Fresh bread today" } } }
+        assertEquals(listOf(Alert(chatId, 1, fresh = true)), TestCore.alerts.shown.toList())
+    }
+
     private fun picture(bytes: Int): PreparedPicture = PreparedPicture(org.phonemesh.core.PictureCodec.WEBP, 2, 2,
         ByteArray(bytes) { (it * 7).toByte() }, byteArrayOf(1, 2, 3), android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888), 70)
 

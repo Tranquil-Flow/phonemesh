@@ -22,6 +22,9 @@ interface DeviceAccess {
      * its connection, so a download that failed or is waiting for the network is the only sign there is.
      */
     fun noInternet(): Boolean
+
+    /** v0.1.3 N2: Android 13+ needs a permission before this app may show new-message alerts, and it is not held. */
+    fun alertPermissionMissing(): Boolean
 }
 
 class PhoneAccess(private val context: Context) : DeviceAccess {
@@ -43,4 +46,7 @@ class PhoneAccess(private val context: Context) : DeviceAccess {
     }
 
     override fun noInternet(): Boolean = PackDownloads.noInternet(context)
+
+    override fun alertPermissionMissing(): Boolean = Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
 }

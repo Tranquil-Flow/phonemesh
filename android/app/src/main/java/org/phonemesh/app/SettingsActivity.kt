@@ -1,6 +1,7 @@
 package org.phonemesh.app
 
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
@@ -24,6 +25,9 @@ class SettingsActivity : ScreenActivity() {
     private lateinit var themes: LinearLayout
     private lateinit var engineList: LinearLayout
     private lateinit var helpers: View
+    private lateinit var alertsSwitch: Switch
+    private lateinit var alertsBlocked: TextView
+    private lateinit var alertsSettings: View
     private var licencesDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,6 +52,8 @@ class SettingsActivity : ScreenActivity() {
         column.addView(section(R.string.settings_appearance))
         themes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         column.addView(themes)
+        column.addView(section(R.string.settings_alerts))
+        column.addView(alertsRows())
         column.addView(section(R.string.settings_speech))
         column.addView(Switch(this).apply {
             tag = "read_aloud"
@@ -148,6 +154,53 @@ class SettingsActivity : ScreenActivity() {
     private fun spaced() = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         .apply { topMargin = pad() }
 
+    /**
+     * v0.1.3 N2: the opt-in switch for new-message alerts, what they show and when, and a blocked line with a way to
+     * Android's settings. Android's permission is asked for here only, when the switch turns on without it.
+     */
+    private fun alertsRows(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        alertsSwitch = Switch(this).apply {
+            tag = "new_message_alerts"
+            text = getString(R.string.new_message_alerts)
+            contentDescription = getString(R.string.new_message_alerts)
+            textSize = Ui.BODY_SP
+            setTextColor(palette.text)
+            minHeight = Ui.dp(this@SettingsActivity, 64)
+            isChecked = core.settings.newMessageAlerts
+            setOnCheckedChangeListener { _, on -> if (on != core.settings.newMessageAlerts) setAlerts(on) }
+        }
+        box.addView(alertsSwitch)
+        box.addView(Ui.text(this, getString(R.string.alerts_private), palette.muted).apply { tag = "alerts_private" })
+        box.addView(Ui.text(this, getString(R.string.alerts_scope), palette.muted).apply { tag = "alerts_scope" })
+        alertsBlocked = Ui.text(this, getString(R.string.alerts_blocked), palette.text, bold = true).apply {
+            tag = "alerts_blocked"
+            visibility = View.GONE
+        }
+        box.addView(alertsBlocked, spaced())
+        alertsSettings = Ui.button(this, palette, getString(R.string.alerts_settings), R.drawable.ic_gear).apply {
+            tag = "alerts_settings"
+            visibility = View.GONE
+            setOnClickListener { runCatching { startActivity(alertSettings(this@SettingsActivity)) } }
+        }
+        box.addView(alertsSettings, spaced())
+        return box
+    }
+
+    private fun setAlerts(on: Boolean) {
+        core.setNewMessageAlerts(on)
+        if (on && core.access.alertPermissionMissing()) askPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+        renderAlerts()
+    }
+
+    private fun renderAlerts() {
+        val on = core.settings.newMessageAlerts
+        if (alertsSwitch.isChecked != on) alertsSwitch.isChecked = on
+        val blocked = if (core.alertsBlocked()) View.VISIBLE else View.GONE
+        alertsBlocked.visibility = blocked
+        alertsSettings.visibility = blocked
+    }
+
     private fun section(title: Int) = Ui.text(this, getString(title), palette.text, 20f, bold = true).apply {
         setPadding(0, pad() * 3 / 2, 0, pad() / 2)
     }
@@ -160,6 +213,7 @@ class SettingsActivity : ScreenActivity() {
         nameDot.background = core.ownFace()?.let { FaceDrawable(it, palette.outline, Ui.dp(this, 2).toFloat(), FaceDrawable::canDraw) }
             ?: Ui.outline(this, palette.background, palette.outline, radiusDp = 16)
         helpers.visibility = if (core.connected) View.VISIBLE else View.GONE
+        renderAlerts()
         renderThemes()
         val downloads = core.downloads()
         val pending = runCatching { downloads.pending() }.getOrDefault(emptyMap())
@@ -369,4 +423,21 @@ class SettingsActivity : ScreenActivity() {
 
     // Test hook
     internal val licencesDialogForTest: AlertDialog? get() = licencesDialog?.takeIf { it.isShowing }
+
+    /** Asks Android for one permission; tests replace it so no system dialog opens. */
+    internal var askPermission: (String) -> Unit = { requestPermissions(arrayOf(it), REQUEST_ALERTS) }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // A refusal keeps the wish; the blocked line then says so and leads to Android's settings.
+        if (requestCode == REQUEST_ALERTS) render()
+    }
+
+    companion object {
+        private const val REQUEST_ALERTS = 31
+
+        /** Android's notification settings for this app, where blocked alerts are allowed again. */
+        fun alertSettings(context: Context): Intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+    }
 }

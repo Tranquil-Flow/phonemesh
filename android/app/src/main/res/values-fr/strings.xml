@@ -153,6 +153,17 @@
     <string name="delete_chat">Supprimer la discussion</string>
     <string name="delete_chat_title">Supprimer cette discussion ?</string>
     <string name="read_new_aloud">Lire les nouveaux messages à voix haute</string>
+    <!-- v0.1.3 N2 : alertes de nouveaux messages (au choix ; génériques ; leur propre canal) -->
+    <string name="settings_alerts">Alertes</string>
+    <string name="new_message_alerts">M\'alerter des nouveaux messages</string>
+    <string name="alerts_private">Les alertes ne montrent ni noms ni mots.</string>
+    <string name="alerts_scope">Si l\'application est ouverte ou garde le relais.</string>
+    <string name="alerts_blocked">Android bloque ces alertes.</string>
+    <string name="alerts_settings">Autoriser dans les réglages Android</string>
+    <string name="alerts_channel">Nouveaux messages</string>
+    <string name="alert_new_message">Nouveau message</string>
+    <string name="alert_new_messages">Nouveaux messages</string>
+    <string name="alert_open_to_read">Ouvrez l\'application pour lire.</string>
     <string name="reply">Répondre</string>
     <string name="react">Réagir</string>
     <string name="reply_cancel">Ne pas répondre</string>

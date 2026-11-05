@@ -1,5 +1,39 @@
 # Android qualification record
 
+## v0.1.2 broad emulator run and test fixes, 2026-11-05
+
+**Development software qualification, not a signed release.** Application, core, radio and protocol code are unchanged
+by this entry; it records a broader emulator run on the candidate and three fixes it found (two tests, one demo line),
+committed as `6d3ab5e174ce388825ccafebb1ad2cea186a1685`.
+
+- Broad silent selection: 66 instrumentation classes, 872 tests, Android 15 arm64 emulator, fake radio and speech.
+  Excluded: 7 classes / 16 tests needing real speech, device measurements, the GPU, real-model comparison,
+  research reference packs (PackEquivalenceTest) or the local pack server (PackDownloadTest, run separately below).
+- Every selected test reached a result: **863 passed, 9 skipped by design** (screenshot and clip exports and a
+  frame-rate measurement, which skip themselves unless asked for), **0 failed**. The first run and later reruns are
+  layered: every receipt installed the same app APK (SHA-256 `3dada264…`); only the test APK changed, by the test
+  fixes below.
+- PackDownloadTest against the product's test pack server, bound to loopback only: 7 run, 5 passed, 2 skipped by
+  design (they run only when asked to simulate a dropped connection or low storage).
+- Found and fixed:
+  - `PersonPictureRedTest` still asserted that an old radio chat cannot send text, the rule decision 39 replaced. It now
+    asserts only the picture refusals; LegacyRepliesTest covers legacy text.
+  - Demo: Sena chose her reply language from the language tag that plain stock-app replies no longer carry. She now
+    keeps a tagged text's language and otherwise uses the app's language (demo unit tests 166/166).
+  - `ConversationActivityTest#aQuickFingerTapLocksWithoutAFlashOfATip` waited for the app to go idle between touch-down
+    and its check. On a slow emulator the 300 ms hold confirmation ran first and showed the tip. The test now presses,
+    checks and lifts in one main-thread turn: the class passed 78/78, and restoring the old flashing-tip rule fails it.
+- Not product failures: a "System UI isn't responding" dialog holding focus broke clipboard and visibility tests (they
+  pass with normal focus); the runner's data clear removes pushed model packs (PackManagerUiTest and SharingTest pass
+  15/15 with packs pushed again); `LanguageActivityTest` timed out waiting for an idle main thread while the build host
+  was heavily loaded, then passed 10/10 on a quieter host.
+- The maintained `scripts/check.sh` passed on the fixed source before commit: Python 337 passed; JUnit **1,507 variant
+  result records** (one new demo test), zero failures/errors/skips; most Gradle tasks were up to date, so these are not
+  1,507 newly executed methods. The committed tree equals the checked bytes file for file.
+- Raw receipts stay outside Git (`v012-broad-red-20261105`, `v012-rest3-*`, `v012-convo-*`, `v012-packs-20261105`,
+  `v012-packdl-20261105`, `v012-language-20261105`, `v012-fix-precommit-20261105`). These runs do not qualify physical
+  radios, real speech, battery or a release-signed upgrade.
+
 ## v0.1.2 legacy text replies, 2026-11-05
 
 **Development software qualification, not a signed release.** The candidate is now schema **23**, version

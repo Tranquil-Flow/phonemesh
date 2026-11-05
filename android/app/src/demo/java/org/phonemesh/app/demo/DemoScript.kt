@@ -43,8 +43,14 @@ object DemoScript {
 
     fun stockDirect(language: String) = if (fr(language)) "Bonjour, c'est Sena. Tu as une minute ?" else "Hi, it's Sena. Do you have a minute?"
 
-    /** Sena's answer to a private text; the app tags its own texts [pm1:fr] or [pm1:en-US]. */
-    fun stockReply(text: String) = if (text.startsWith("[pm1:fr")) "Merci, bien reçu." else "Thanks, got it."
+    /**
+     * Sena's answer to a text sent to her radio. An older tagged text ([pm1:fr], [pm1:en-US]) keeps its own language;
+     * since decision 39 the app's replies to her are plain, so she answers in the app's [language].
+     */
+    fun stockReply(text: String, language: String): String {
+        val tagged = if (text.startsWith("[pm1:")) text.substring(5).substringBefore(']') else language
+        return if (fr(tagged)) "Merci, bien reçu." else "Thanks, got it."
+    }
 
     /** What someone using the stock Meshtastic app writes: plain text, no name, no language. */
     fun stockText(language: String) = if (fr(language)) "Salut, quelqu'un m'entend ?" else "Hi, can anyone hear me?"

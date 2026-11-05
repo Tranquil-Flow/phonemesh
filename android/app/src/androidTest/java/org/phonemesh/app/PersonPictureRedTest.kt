@@ -31,8 +31,8 @@ import java.io.File
 
 /**
  * Behavioral RED, existing APIs only: no new helper, so a failure here is behaviour, not missing compilation. Bea's real
- * account scans Awa's real code (SoftKeys, mutual QR) exactly as PersonChatTest does. Today a picture body from a person
- * is dropped without a bubble, and an old radio chat still sends texts and pictures.
+ * account scans Awa's real code (SoftKeys, mutual QR) exactly as PersonChatTest does. When written, a picture body from a
+ * person was dropped without a bubble, and an old radio chat still sent texts and pictures.
  */
 @RunWith(AndroidJUnit4::class)
 class PersonPictureRedTest {
@@ -103,12 +103,11 @@ class PersonPictureRedTest {
         assertArrayEquals(bytes, File(core.picturesDir, checkNotNull(file)).readBytes())
     }
 
-    @Test fun anOldRadioChatCannotSendATextOrAPicture() {
+    /** Decision 39 (v0.1.2) lets an old radio chat send explicit text replies (LegacyRepliesTest); pictures stay refused. */
+    @Test fun anOldRadioChatStillCannotSendAPicture() {
         TestCore.install()
         val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
         val photo = Bitmap.createBitmap(120, 90, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(90, 140, 200)) }
-        TestCore.onMain { core.setDraft(chat, "hello") }
-        assertFalse(TestCore.onMain { core.send(chat) })
         assertFalse(TestCore.onMain { core.canSendPictures(chat) })
         assertFalse(TestCore.onMain { core.sendPicture(chat, PictureMaker.prepare(photo, PictureSize.MEDIUM, grey = false)) })
         assertTrue(TestCore.radio.sent.isEmpty())

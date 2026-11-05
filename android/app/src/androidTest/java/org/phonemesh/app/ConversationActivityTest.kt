@@ -456,13 +456,16 @@ class ConversationActivityTest {
     /** A touch on the microphone [dxDp], [dyDp] from where it went down, at [atMs] after touch-down. */
     private fun touch(a: Activity, action: Int, dxDp: Float = 0f, dyDp: Float = 0f, atMs: Long = 0) {
         val mic = checkNotNull(Views.tagged(a, "mic"))
-        val density = context.resources.displayMetrics.density
-        TestCore.onMain {
-            val event = MotionEvent.obtain(1_000, 1_000 + atMs, action, 100f + dxDp * density, 100f + dyDp * density, 0)
-            mic.dispatchTouchEvent(event)
-            event.recycle()
-        }
+        TestCore.onMain { micEvent(mic, action, dxDp, dyDp, atMs) }
         inst.waitForIdleSync()
+    }
+
+    /** On the main thread: one touch on [mic], as [touch] sends it, without waiting for idle. */
+    private fun micEvent(mic: View, action: Int, dxDp: Float = 0f, dyDp: Float = 0f, atMs: Long = 0) {
+        val density = context.resources.displayMetrics.density
+        val event = MotionEvent.obtain(1_000, 1_000 + atMs, action, 100f + dxDp * density, 100f + dyDp * density, 0)
+        mic.dispatchTouchEvent(event)
+        event.recycle()
     }
 
     /** A finger on the microphone's centre, dispatched through the window so the parents register the touch target. */
@@ -978,9 +981,18 @@ class ConversationActivityTest {
     @Test fun aQuickFingerTapLocksWithoutAFlashOfATip() {
         TestCore.install()
         val a = open(TestCore.onMain { core.groupChatId() })
-        touch(a, MotionEvent.ACTION_DOWN)
-        assertNull("not a hold yet", Views.tagged(a, "tip:cancel"))
-        touch(a, MotionEvent.ACTION_UP, atMs = 100)
+        val mic = checkNotNull(Views.tagged(a, "mic"))
+        // Down, look and up in one main-thread turn, as a quick finger does. The hold is confirmed by a callback
+        // TAP_MS after touch-down, and one emulator frame can take longer than that, so an idle wait between the two
+        // could let it run and show the hold's tip before the finger lifts. The touch-down's own render must show none.
+        val tipBeforeUp = TestCore.onMain {
+            micEvent(mic, MotionEvent.ACTION_DOWN)
+            val shown = Views.descendants(a.window.decorView).firstOrNull { it.isShown && it.tag == "tip:cancel" }
+            micEvent(mic, MotionEvent.ACTION_UP, atMs = 100)
+            shown
+        }
+        inst.waitForIdleSync()
+        assertNull("not a hold yet", tipBeforeUp)
         assertTrue(core.recordLocked)
         Thread.sleep(RecordGesture.TAP_MS + 200)
         inst.waitForIdleSync()

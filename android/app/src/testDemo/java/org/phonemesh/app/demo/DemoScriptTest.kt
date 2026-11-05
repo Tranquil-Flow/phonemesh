@@ -53,11 +53,20 @@ class DemoScriptTest {
                     listOf(DemoScript.reply(who, language, n), DemoScript.news(who, language, n), DemoScript.linkGreeting(who, language))
                 }
             } + DemoScript.metGreeting(language) + DemoScript.stockText(language) + DemoScript.stockDirect(language) +
-                DemoScript.stockReply("[pm1:${DemoScript.tag(language)}] hello")
+                DemoScript.stockReply("[pm1:${DemoScript.tag(language)}] hello", language) + DemoScript.stockReply("hello", language)
         }
         for (line in lines) {
             MessageCodec.validateText(line)
             assertTrue(line, line.toByteArray(Charsets.UTF_8).size <= MessageCodec.MAX_BYTES - 20)
         }
+    }
+
+    /** Decision 39: replies to a stock-app user are plain words, so Sena cannot read a language tag on them. */
+    @Test fun senaAnswersAPlainReplyInTheAppsLanguage() {
+        assertEquals("Merci, bien reçu.", DemoScript.stockReply("Bonjour Sena", "fr"))
+        assertEquals("Merci, bien reçu.", DemoScript.stockReply("Bonjour Sena", "fr-FR"))
+        assertEquals("Thanks, got it.", DemoScript.stockReply("Hello Sena", "en-US"))
+        assertEquals("an older tagged text keeps its own language", "Merci, bien reçu.", DemoScript.stockReply("[pm1:fr] Bonjour", "en-US"))
+        assertEquals("Thanks, got it.", DemoScript.stockReply("[pm1:en-US] Hello", "fr"))
     }
 }

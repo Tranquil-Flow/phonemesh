@@ -46,8 +46,12 @@ class DemoWorld(private val app: Context) {
         // Sena uses the stock Meshtastic app: plain text, and a short answer to anything sent to her radio.
         mesh.join(STOCK_NODE) { from, port, payload, to ->
             if (port == DemoRadio.TEXT_PORT && to == STOCK_NODE) {
-                val reply = DemoScript.stockReply(String(payload, Charsets.UTF_8)).toByteArray(Charsets.UTF_8)
-                clock.after(STOCK_REPLY_MS) { mesh.send(STOCK_NODE, from, DemoRadio.TEXT_PORT, reply) { } }
+                val text = String(payload, Charsets.UTF_8)
+                // The app's replies to her are plain (decision 39): she answers in the app's language, read on main.
+                main.post {
+                    val reply = DemoScript.stockReply(text, language()).toByteArray(Charsets.UTF_8)
+                    clock.after(STOCK_REPLY_MS) { mesh.send(STOCK_NODE, from, DemoRadio.TEXT_PORT, reply) { } }
+                }
             }
         }
         if (state.string(KEY_HUB_OFF) != null) hub.setPower(false)

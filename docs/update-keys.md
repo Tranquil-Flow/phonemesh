@@ -58,9 +58,22 @@ keystore or passphrase to an agent, a chat or a repository. An agent or develope
    pair opens a fresh phone state.
 4. **Only two public files come back:** `signed/public-keys.txt` and `signed/baseline-catalog.pmup` (plus the `shasum` lines the kit
    prints for them). Two public key lines on their own are not enough: the baseline has to be signed by the offline catalog key.
-5. **Check and commit, with no partial swap.** Before anything is committed, check that each key line has the right id (1 and 100) and
-   exactly 66 hex characters starting `02` or `03`, that both are valid P-256 points, and that the returned pair verifies with the
-   product's own parsers. Copy both files to `android/core/src/main/resources/update` and commit them together, alone. Run
+   Before they leave the offline computer the owner can check them with the same tool; it reads only these public files, asks for
+   no passphrase and writes nothing:
+
+   ```sh
+   sh phonemesh-hub/bin/phonemesh-hub check-baseline \
+     --public-keys signed/public-keys.txt \
+     --baseline signed/baseline-catalog.pmup \
+     --list hub/update-baseline.list \
+     --packs model-packs
+   ```
+5. **Check and commit, with no partial swap.** Before anything is committed, run the same `check-baseline` command on the returned
+   files, with the release source's `android/hub/update-baseline.list` and the four packs it names (the kit's `model-packs`). It reads
+   both files with the product's own parsers (key ids, 66 hex characters, valid P-256 points) and refuses TEST keys, a baseline that
+   is not signed by this catalog key or is not exactly the catalog of this list, a list that does not name the packs this build
+   carries, and a pair that would not open a fresh release-build state. It must print `catalog key id 1, recovery key id 100`, and its
+   two SHA-256 lines must match the owner's. Copy both files to `android/core/src/main/resources/update` and commit them together, alone. Run
    `./gradlew :core:test :hub:test :app:testReleaseUnitTest` and `scripts/check.sh`. The tests that name the TEST keys step aside by
    themselves once the file holds other keys; the others check that the pair opens a fresh state. In a release build updates now run.
 6. **Rebuild everything that was already frozen.** An unsigned APK built before the swap does not contain the new baseline. Rebuild the

@@ -19,6 +19,12 @@ import java.io.PrintStream
  *   `baseline-catalog.pmup` together into the folder (the app's `core/src/main/resources/update`). TEST keys are refused unless
  *   `--allow-test-keys` is given.
  *
+ * - `phonemesh-hub check-baseline --public-keys public-keys.txt --baseline baseline-catalog.pmup --list update-baseline.list
+ *   [--packs <folder with the pack archives>]` (developer or owner, public files only): checks the pair `sign-baseline` returned
+ *   before it is committed. No key or passphrase is asked for and nothing is written. It refuses TEST keys (there is no override),
+ *   a baseline not signed by this catalog key, one that is not exactly the catalog of this list, a list that does not name the
+ *   packs this build carries, and a pair that would not open a fresh release-build state. It prints the SHA-256 of both files.
+ *
  * - `phonemesh-hub sign-recovery --key recovery-key.pem --public-keys public-keys.txt --new-catalog-key <66 hex> --new-key-id N
  *   --epoch E --min-sequence S --out <new folder>` (owner, offline, only after a catalog key is lost or stolen): writes `recovery.pmup`,
  *   checked the way a phone checks it.
@@ -30,7 +36,7 @@ import java.io.PrintStream
  * Exit codes: 0 done, 2 refused or misused (nothing written).
  */
 object UpdateCli {
-    val COMMANDS = setOf("sign-catalog", "sign-baseline", "sign-recovery", "import-updates", "update-status")
+    val COMMANDS = setOf("sign-catalog", "sign-baseline", "check-baseline", "sign-recovery", "import-updates", "update-status")
 
     /** The line printed beside any output that depends on TEST keys; the text is shared with `update-status`. */
     private fun testNote(roots: UpdateRoots, io: Io) {
@@ -60,6 +66,7 @@ object UpdateCli {
         when (args.firstOrNull()) {
             "sign-catalog" -> signCatalog(args.drop(1), io)
             "sign-baseline" -> signBaseline(args.drop(1), io)
+            "check-baseline" -> checkBaseline(args.drop(1), io)
             "sign-recovery" -> signRecovery(args.drop(1), io)
             "import-updates" -> importUpdates(args.drop(1), io)
             "update-status" -> updateStatus(args.drop(1), io)
@@ -214,6 +221,44 @@ object UpdateCli {
         io.out.println("Wrote ${File(out, "public-keys.txt").path} and ${File(out, "baseline-catalog.pmup").path} together.")
         io.out.println("Baseline: epoch ${list.epoch}, catalog number ${list.sequence}, ${list.items.size} packs, signed by catalog key id ${roots.catalogKeyId}.")
         io.out.println(if (roots.isTest) "These are TEST keys: a release build still refuses updates." else "Next: rebuild the app and the hub, run the tests, and build the release (docs/update-keys.md, step 4).")
+        return 0
+    }
+
+    /**
+     * Checks a returned `public-keys.txt` and `baseline-catalog.pmup` with the same parsers the app and hub use, before they are
+     * committed (docs/update-keys.md, step 5). Public files only: no key or passphrase is asked for, and nothing is written.
+     */
+    private fun checkBaseline(args: List<String>, io: Io): Int {
+        val o = options(args, setOf("--public-keys", "--baseline", "--list", "--packs"))
+        val keysPath = o["--public-keys"] ?: throw Usage("check-baseline needs --public-keys <the returned public-keys.txt>")
+        val basePath = o["--baseline"] ?: throw Usage("check-baseline needs --baseline <the returned baseline-catalog.pmup>")
+        val listPath = o["--list"] ?: throw Usage("check-baseline needs --list <update-baseline.list>")
+        val roots = readRoots(keysPath)
+        if (roots.isTest) throw CatalogSigner.Refused("$keysPath holds TEST keys, which anyone can sign with; a release build refuses them. Check the owner's own public-keys.txt")
+        val baseFile = File(basePath)
+        if (!baseFile.isFile) throw CatalogSigner.Refused("$basePath is not a file")
+        if (baseFile.length() > UpdateMetadata.MAX_ENVELOPE) throw CatalogSigner.Refused("$basePath is too large to be a baseline catalog")
+        val bytes = baseFile.readBytes()
+        val list = CatalogSigner.readList(File(listPath), packs = o["--packs"]?.let(::File))
+        baselineMismatch(list, io.compiledPacks)?.let { throw CatalogSigner.Refused(it) }
+        val env = UpdateMetadata.verify(bytes, mapOf(roots.catalogKeyId to roots.catalogKey), null)?.takeIf { it.kind == UpdateMetadata.CATALOG }
+            ?: throw CatalogSigner.Refused("$basePath is not signed by the catalog key in $keysPath")
+        if (!env.payload.contentEquals(CatalogSigner.payload(list))) {
+            throw CatalogSigner.Refused("$basePath is not the catalog of $listPath: another list, epoch or catalog number was signed")
+        }
+        // Exactly what a release build does at its first start: TEST roots are not allowed here.
+        val trial = UpdateTrust.open(TrialStore(), roots, maxOf(1L, list.minReader), bytes, allowTestRoots = false)
+        if (trial !is UpdateTrust.Opened.Ready) throw CatalogSigner.Refused("the pair would not open a fresh release-build state")
+        fun sha(f: File) = org.phonemesh.core.crypto.Bytes.sha256(f.readBytes()).joinToString("") { "%02x".format(it) }
+        val packs = list.items.size
+        io.out.println("OK: $keysPath and $basePath belong together.")
+        io.out.println("Keys: catalog key id ${roots.catalogKeyId}, recovery key id ${roots.recoveryKeyId}" +
+            (if (roots.burnt.isEmpty()) "." else ", ${roots.burnt.size} burnt."))
+        io.out.println("Baseline: epoch ${list.epoch}, catalog number ${list.sequence}, $packs pack${if (packs == 1) "" else "s"}, signed by catalog key id ${env.keyId}; it opens a fresh release-build state.")
+        io.out.println("SHA-256, as shasum -a 256 prints it:")
+        io.out.println("${sha(File(keysPath))}  $keysPath")
+        io.out.println("${sha(baseFile)}  $basePath")
+        io.out.println("Nothing was written. Compare these lines with the ones the owner sent, then copy both files into android/core/src/main/resources/update and commit them together, alone (docs/update-keys.md, step 5).")
         return 0
     }
 

@@ -521,7 +521,10 @@ class AppCore private constructor(
         val message = sharedFlight(packetId) ?: history.byPacket(packetId) ?: return
         val chat = history.chat(message.chatId) ?: return
         val current = message.status ?: return
-        val next = DeliveryRules.next(current, RadioReport.valueOf(state.name), chat.kind == ChatKind.GROUP)
+        // Stock radios acknowledge packets, not durable receipt by the stock phone app.
+        val next = if (chat.kind == ChatKind.DIRECT && state == DeliveryState.ACKNOWLEDGED &&
+            current in listOf(DeliveryStatus.WAITING, DeliveryStatus.QUEUED, DeliveryStatus.SENT)) DeliveryStatus.SENT
+        else DeliveryRules.next(current, RadioReport.valueOf(state.name), chat.kind == ChatKind.GROUP)
         if (next != current) {
             history.setStatus(message.id, next)
             changed(Change.DELIVERY)
@@ -537,7 +540,7 @@ class AppCore private constructor(
         else -> text(unnamedRadio(chat.address))
     }
 
-    /** Group and person chats first; old radio-addressed chats (read-only, plan step 12) after them. */
+    /** Group and person chats first; explicitly less-private old radio-addressed chats after them. */
     fun chatRows(): List<ChatRow> = history.chats().map { chat ->
         val contact = if (chat.kind == ChatKind.PERSON) history.contactRow(chat.address) else null
         ChatRow(
@@ -871,6 +874,12 @@ class AppCore private constructor(
      * replaced by other bytes: it throws [Unsendable].
      */
     private fun sendText(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?) {
+        if (chat.kind == ChatKind.DIRECT) {
+            // Validate against the existing conservative text budget; stock apps display plain words, not pm1 tags.
+            MessageCodec.encode(text, language)
+            history.attachPacket(messageId, radio.send(text, destinationOf(chat), PRIMARY_CHANNEL, replyTo ?: 0L))
+            return
+        }
         val answersOld = replyTo != null && replyTo in 1 until REF_FLOOR
         if (chat.kind != ChatKind.GROUP || answersOld) {
             history.attachPacket(messageId, radio.send(MessageCodec.encode(text, language), destinationOf(chat), PRIMARY_CHANNEL, replyTo ?: 0L))
@@ -1087,8 +1096,8 @@ class AppCore private constructor(
         val chat = history.chat(chatId) ?: return false
         // A shared post carries the sender's name: without a postable one nothing goes out and the draft stays.
         if (chat.kind == ChatKind.GROUP && !canPost()) { note(UiText(R.string.add_name_first)); return false }
-        // Old radio-addressed chats are read only: nothing goes out, whatever the draft says.
-        if (chat.kind == ChatKind.DIRECT) { note(UiText(R.string.old_chat_read_only)); return false }
+        // A legacy chat must name a real radio node; an account id can never fall back to this route.
+        if (chat.kind == ChatKind.DIRECT && !isLegacyNode(chat.address)) return false
         if (playingId == DRAFT_PLAYBACK) stopPlayback()
         val message = history.addOutgoing(chatId, text, language, System.currentTimeMillis(), replyTarget(chatId)?.packetId)
         drafts.remove(chatId)
@@ -1934,7 +1943,7 @@ class AppCore private constructor(
     fun resend(messageId: Long): Boolean {
         val message = history.message(messageId) ?: return false
         if (message.direction != Direction.OUT || message.status?.canResend != true) return false
-        if (history.chat(message.chatId)?.kind == ChatKind.DIRECT) return false
+        if (history.chat(message.chatId)?.kind == ChatKind.DIRECT && message.kind != MessageKind.TEXT) return false
         if (message.kind == MessageKind.PICTURE) return resendPicture(message)
         val chat = history.chat(message.chatId) ?: return false
         // Like send: no region yet, or a region write is running. Nothing goes out and the message stays as it is.
@@ -1955,8 +1964,10 @@ class AppCore private constructor(
      * itself once one is (sendQueued). True when the radio took it.
      */
     private fun transmit(messageId: Long, text: String, language: String, chat: Chat, replyTo: Long?): Boolean {
-        // Last guard: no path may address a radio in an old chat.
-        if (chat.kind == ChatKind.DIRECT) { history.setStatus(messageId, DeliveryStatus.FAILED); return false }
+        // Legacy support is text-only; never revive an old picture through the addressed-radio path.
+        if (chat.kind == ChatKind.DIRECT && (!isLegacyNode(chat.address) || history.message(messageId)?.kind != MessageKind.TEXT)) {
+            history.setStatus(messageId, DeliveryStatus.FAILED); return false
+        }
         if (!mayTransmit()) { history.setStatus(messageId, DeliveryStatus.QUEUED); return false }
         return try {
             sendText(messageId, text, language, chat, replyTo)
@@ -2125,10 +2136,13 @@ class AppCore private constructor(
     /** A radio is connected and may send now (it has a region and none is being written). */
     private fun mayTransmit(): Boolean = connected && !region.blocksSending
 
+    private fun isLegacyNode(address: String): Boolean =
+        Regex("![0-9a-fA-F]{8}").matches(address) && !address.equals("!ffffffff", ignoreCase = true)
+
     private fun destinationOf(chat: Chat): String = when (chat.kind) {
         ChatKind.GROUP -> BROADCAST
-        // Old radio-addressed chats are read only (accounts spec, decision 11): receive, never send.
-        ChatKind.DIRECT -> error("old chats are read only")
+        // Decision 39 permits explicit stock-radio text replies, never account/private-group fallback.
+        ChatKind.DIRECT -> chat.address.also { require(isLegacyNode(it)) }
         // An account id is no radio address: person chats send through wire v2 (step 13), never this path.
         ChatKind.PERSON -> error("person chats do not use radio addresses")
         ChatKind.PRIVATE_GROUP -> error("private groups send through their group")
@@ -2144,7 +2158,7 @@ class AppCore private constructor(
         val message = history.queued().firstOrNull()
         if (message != null) {
             val chat = history.chat(message.chatId)
-            if (chat == null || chat.kind == ChatKind.DIRECT) {
+            if (chat == null || (chat.kind == ChatKind.DIRECT && (!isLegacyNode(chat.address) || message.kind != MessageKind.TEXT))) {
                 history.setStatus(message.id, DeliveryStatus.FAILED)
                 main.post { sendQueued() }
                 return

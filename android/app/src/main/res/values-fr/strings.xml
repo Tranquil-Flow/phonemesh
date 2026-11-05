@@ -458,7 +458,9 @@
     <string name="old_chats">Anciennes discussions</string>
     <string name="mail_save_failed">Non enregistré. Libérez de l’espace, puis réessayez.</string>
     <string name="mail_radio_retry">Non confirmé. Reconnectez la radio pour réessayer.</string>
-    <string name="old_chat_read_only">Cette ancienne discussion est en lecture seule.</string>
+    <string name="old_chat_read_only">Ancienne discussion radio : réponses texte seulement.</string>
+    <string name="old_chat_privacy">Ancienne discussion radio. Pas une discussion privée Phonemesh.</string>
+    <string name="old_chat_channel_key">La clé du canal permet de lire.</string>
     <string name="contact_details">Cette personne</string>
     <string name="contact_start_again">Recommencer</string>
     <string name="contact_start_again_note">Scannez chacun le nouveau code de l’autre.</string>

@@ -1,5 +1,31 @@
 # Android qualification record
 
+## v0.1.2 legacy text replies, 2026-11-05
+
+**Development software qualification, not a signed release.** The candidate is now schema **23**, version
+**0.1.2 / code 3**. This new implementation supersedes the earlier statement that later changes were documentation-only;
+the older source pins and receipts below remain historical, not fresh evidence for this routing change.
+
+- Decision 39 is implemented, not deferred: explicit legacy text/replies, plain stock-app text, original node address,
+  persistent English/French privacy warning, durable new-send queueing/retry, no private-message plaintext fallback.
+- Schema 23 retires pre-upgrade legacy queued/waiting sends without deleting their text; other queues and account
+  identity/session material survive. A radio ACK is not presented as delivery to the stock phone app.
+- Seven initial new emulator tests: six intended failures and one existing private-route positive control on the original
+  implementation, then seven passes after implementation. An eighth adversarial test exposed acceptance of the reserved
+  broadcast node; its intended RED was preserved before adding a shared unicast-address guard to all legacy send paths.
+  The final affected selection passed **205/205**, with no skips, across LegacyRepliesTest, OldChatsReadOnlyTest, AppCoreTest,
+  MailPersistenceTest, GroupStorageTest, ArchiveImportTest, AccountStoreTest, AccountsFlowTest, HubPathsTest and PersonPictureTest.
+- The maintained `scripts/check.sh` passed on the changed source: Python checks, JVM checks, Android build/lint/size/network
+  boundaries, hub distribution and Linux bridge checks. Its JUnit inventory has **1,497 variant result records**, zero
+  failures/errors/skips; unchanged Gradle tasks were cached, so this is not 1,497 newly executed or distinct methods.
+  An earlier full-gate attempt caught an overlong warning string; copy was shortened without relaxing the copy rule.
+- Raw RED, final emulator and full-gate receipts plus source manifests are retained outside Git under the release
+  artifacts, with `legacy-ack-red-20261105`, `legacy-broadcast-red-20261105`, `legacy-final-205-20261105` and
+  `legacy-full-green-20261105` labels. Clean-tip binding receipts are recorded in the autonomous release checkpoint.
+- These runs used an Android 15 emulator with fake speech/radio. They do not qualify physical stock-Meshtastic
+  interoperability, real speech, radio range, battery or a release-signed upgrade. The actual Fairphone is accessible
+  but still has v0.1.0/code 1; its installation/data were not modified. Owner update keys, signing and publication remain gated.
+
 ## v0.1.2 production candidate, 2026-10-29
 
 **Software qualification, not a signed release.** The software source is

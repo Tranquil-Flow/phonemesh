@@ -471,7 +471,9 @@
     <string name="old_chats">Old chats</string>
     <string name="mail_save_failed">Not saved. Free space, then try again.</string>
     <string name="mail_radio_retry">Unconfirmed. Reconnect the radio to retry.</string>
-    <string name="old_chat_read_only">This old chat is read only.</string>
+    <string name="old_chat_read_only">This old radio chat supports text replies only.</string>
+    <string name="old_chat_privacy">Old radio chat. Not a private Phonemesh chat.</string>
+    <string name="old_chat_channel_key">Anyone with the channel key can read messages.</string>
     <string name="step_add_hint">Scan their code or send your link.</string>
     <string name="step_add_done">Someone added.</string>
     <string name="howto_add_qr">Hold your camera over their code.</string>

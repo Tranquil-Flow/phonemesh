@@ -231,6 +231,12 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
         }
         // Saved chat copies read back (v0.1.2): read-only archive tables, kept apart from every live table.
         if (oldVersion < 22) ArchiveRows.createTables(db)
+        // Legacy replies become writable in schema 23. Earlier read-only queues are not fresh send consent.
+        // Preserve their words for explicit retry, while leaving every private/shared queue untouched.
+        if (oldVersion < 23) db.execSQL(
+            "UPDATE messages SET delivery = 'FAILED' WHERE direction = 'OUT' AND delivery IN ('QUEUED','WAITING') " +
+                "AND chat_id IN (SELECT id FROM chats WHERE kind = 'DIRECT')",
+        )
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -994,7 +1000,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 22
+        const val VERSION = 23
         const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */

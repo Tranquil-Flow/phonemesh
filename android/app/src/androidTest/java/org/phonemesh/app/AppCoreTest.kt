@@ -264,9 +264,11 @@ class AppCoreTest {
         val direct = core.history.chats().single { it.kind == ChatKind.DIRECT }
         assertEquals("!0000bbbb", direct.address)
         assertEquals("Salut toi", core.history.lastMessage(direct.id)!!.text)
-        // Old radio-addressed chats still receive, but sending now requires a person's session.
-        main { core.setDraft(direct.id, "Pour toi"); assertFalse(core.send(direct.id)) }
-        assertEquals("Pour toi", core.draft(direct.id))
+        // Decision 39 restores explicit legacy text, separate from account-private sends.
+        main { core.setDraft(direct.id, "Pour toi"); assertTrue(core.send(direct.id)) }
+        assertNull(core.draft(direct.id))
+        assertEquals("!0000bbbb", radio.sent.single().destinationId)
+        assertEquals("Pour toi", radio.sent.single().text)
         val (bea, person) = PersonFixture.meet("Bea")
         sendIn(group, "Pour tous")
         sendIn(person, "Pour toi")
@@ -277,7 +279,7 @@ class AppCoreTest {
         val opened = bea.postman.receive(radio.broadcasts[1].payload, 1_000)!!.body as org.phonemesh.core.wire.Body.Text
         assertEquals("Pour toi", opened.text)
         assertEquals("fr", opened.language)
-        assertEquals("Salut toi", core.history.lastMessage(direct.id)!!.text)
+        assertEquals("Pour toi", core.history.lastMessage(direct.id)!!.text)
         assertEquals("Pour toi", core.history.lastMessage(person)!!.text)
     }
 

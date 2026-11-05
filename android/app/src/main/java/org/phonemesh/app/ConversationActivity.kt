@@ -152,6 +152,12 @@ class ConversationActivity : ScreenActivity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(topBar(chat))
         root.addView(noteLine())
+        if (chat.kind == ChatKind.DIRECT) root.addView(
+            Ui.text(this, getString(R.string.old_chat_privacy) + "\n" + getString(R.string.old_chat_channel_key), palette.muted).apply {
+                tag = "legacy_privacy"
+                setPadding(pad(), pad() / 2, pad(), pad() / 2)
+            },
+        )
         groupBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             tag = "group_state"
@@ -182,7 +188,6 @@ class ConversationActivity : ScreenActivity() {
         bars.forEach { root.addView(it) }
         show(root)
         built = true
-        if (chat.kind == ChatKind.DIRECT) core.note(UiText(R.string.old_chat_read_only))
         if (editing) loadDraftForEditing()
     }
 
@@ -640,8 +645,8 @@ class ConversationActivity : ScreenActivity() {
         // A finger on the microphone does not survive a rotation: the recording carries on, locked.
         if (recordingHere && !pressing) core.recordLocked = true
         val draft = core.draft(chatId)
-        // An old radio chat is read only: no microphone, no keyboard, no draft, no Send.
-        val closed = chat.kind == ChatKind.DIRECT || group?.gone == true
+        // Old radio chats allow explicit text replies; their persistent privacy warning stays above the list.
+        val closed = group?.gone == true
         val drafting = (draft != null || editing) && !closed
         draftBox.visibility = if (drafting) View.VISIBLE else View.GONE
         draftText.visibility = if (draft != null && !editing) View.VISIBLE else View.GONE
@@ -1091,10 +1096,11 @@ class ConversationActivity : ScreenActivity() {
         val picture = message.kind == MessageKind.PICTURE
         val privateOthers = others.filter { core.canSendPictures(it.chat.id) }
         // Only a message that went over the radio has an id the other phones know, so only it can be answered.
-        val overRadio = message.packetId != null && core.history.chat(chatId)?.kind != ChatKind.DIRECT
+        val legacy = core.history.chat(chatId)?.kind == ChatKind.DIRECT
+        val overRadio = message.packetId != null
         show(Actions.menu(this, palette, listOfNotNull(
             if (overRadio) Actions.Item("action_reply", R.string.reply, R.drawable.ic_reply) { core.setReplyTarget(chatId, message.id) } else null,
-            if (overRadio) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,
+            if (overRadio && !legacy) Actions.Item("action_react", R.string.react, R.drawable.ic_react) { askForReaction(message.id) } else null,
             if (picture) Actions.Item("action_open", R.string.picture_open, R.drawable.ic_picture) {
                 startActivity(PictureViewActivity.intent(this, message.id))
             } else null,

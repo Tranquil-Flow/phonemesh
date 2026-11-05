@@ -18,7 +18,7 @@ import org.phonemesh.core.PictureCodec
 import org.phonemesh.core.PictureWire
 import java.io.File
 
-/** Old radio-addressed (DIRECT) chats: read only on every path, and still received. Kept apart from the person tests. */
+/** Retained legacy restrictions: text replies are covered by LegacyRepliesTest; other send paths stay closed. */
 @RunWith(AndroidJUnit4::class)
 class OldChatsReadOnlyTest {
     private val core get() = TestCore.core
@@ -32,23 +32,21 @@ class OldChatsReadOnlyTest {
         for (x in 0 until 300) for (y in 0 until 200) setPixel(x, y, Color.rgb((x * 7) % 256, (y * 5) % 256, (x + y) % 256))
     }
 
-    @Test fun oldRadioChatsAreReadOnlyOnEveryPath() {
+    @Test fun oldRadioChatsStillRefusePicturesPlansReactionsAndForwarding() {
         TestCore.install()
         val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
         TestCore.onMain {
             core.setDraft(chat, "hello")
-            assertFalse(core.send(chat))
             assertFalse(core.plan(chat, System.currentTimeMillis() + 60_000))
             assertFalse(core.canSendPictures(chat))
             assertFalse(core.sendPicture(chat, PictureMaker.prepare(photo(), PictureSize.MEDIUM, grey = false)))
-            val failed = core.history.addOutgoing(chat, "old", "fr", 1L)
-            core.history.setStatus(failed.id, DeliveryStatus.FAILED)
-            assertFalse(core.resend(failed.id))
             val queued = core.history.addOutgoing(chat, "queued", "fr", 2L)
+            core.history.writableDatabase.execSQL("UPDATE messages SET kind = 'PICTURE' WHERE id = ?", arrayOf<Any>(queued.id))
             core.history.setStatus(queued.id, DeliveryStatus.QUEUED)
             core.history.addReaction(chat, null, "\uD83D\uDC4D", 77L, 3L, waiting = true)
             core.sendQueued()
             assertEquals(DeliveryStatus.FAILED, core.history.message(queued.id)!!.status)
+            assertFalse(core.resend(queued.id))
             core.history.addPlanned(chat, "planned", "fr", 1L, null)
             core.sendDue()
             assertFalse(core.hasDuePlanned())
@@ -77,7 +75,7 @@ class OldChatsReadOnlyTest {
         assertTrue(TestCore.radio.sentData.isEmpty() && TestCore.radio.broadcasts.isEmpty() && TestCore.radio.sent.isEmpty())
     }
 
-    @Test fun anOldChatShowsNoWayToWrite() {
+    @Test fun anOldChatStillDoesNotOfferPictures() {
         TestCore.install()
         val chat = TestCore.onMain { core.startDirectChat(RadioPeer("!0000aaaa", "Kofi")) }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -85,7 +83,7 @@ class OldChatsReadOnlyTest {
         try {
             Views.waitUntil { screen.window.decorView.findViewWithTag<android.view.View>("mic") != null }
             TestCore.onMain {
-                for (tag in listOf("mic", "keyboard", "picture", "draft_bar")) {
+                for (tag in listOf("picture")) {
                     val view = screen.window.decorView.findViewWithTag<android.view.View>(tag)
                     assertTrue("$tag must not show in an old chat", view == null || !view.isShown)
                 }

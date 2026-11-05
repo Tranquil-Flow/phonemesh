@@ -49,7 +49,7 @@ class AlertSettingsTest {
         assertEquals("M'alerter des nouveaux messages", Views.textOf(switch))
         assertFalse(TestCore.onMain { switch.isChecked })
         assertEquals("Les alertes ne montrent ni noms ni mots.", Views.textOf(Views.tagged(screen, "alerts_private")!!))
-        assertEquals("Si l'application est ouverte ou garde le relais.", Views.textOf(Views.tagged(screen, "alerts_scope")!!))
+        assertEquals("Si l'application est ouverte ou à l'écoute.", Views.textOf(Views.tagged(screen, "alerts_scope")!!))
         assertFalse("nothing blocked while off", shown(screen, "alerts_blocked"))
         assertEquals(emptyList<String>(), A11yCheck.problems(screen))
     }

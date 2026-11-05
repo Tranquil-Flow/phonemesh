@@ -437,12 +437,13 @@ class AppCore private constructor(
     fun isAttempting(address: String): Boolean = connectingAddress == address &&
         (pairing || SystemClock.elapsedRealtime() - connectingSince < connectWaitMs)
 
-    /** The user let the radio go: it is forgotten, so it does not reconnect by itself. */
+    /** The user let the radio go: it is forgotten, so it does not reconnect by itself. Listening ends with its last route. */
     fun disconnect() {
         settings.radioAddress = null
         connectingAddress = null
         main.removeCallbacks(connectExpired)
         runCatching { radio.disconnect() }
+        if (settings.hubRoaming && roamingPrerequisite() == RoamingBlock.NO_ROUTE) stopRoaming()
         changed(Change.RADIO)
     }
 
@@ -1547,6 +1548,8 @@ class AppCore private constructor(
 
     /** The platform side of roaming: [create] sets it on a phone, tests set a fake. Null means roaming cannot start. */
     internal var roamingHost: RoamingHost? = null
+    /** v0.1.3 N3: how the last process ended, as Android recorded it: [create] sets it on a phone, tests set a fake. */
+    internal var processExits: ProcessExits? = null
     /** The foreground service runs for the current epoch: only then does hub work outlive the last screen. */
     var roamingActive = false
         private set
@@ -1564,9 +1567,10 @@ class AppCore private constructor(
     private val roamingRetryMs = 60_000L
 
     private fun retryRoaming() {
-        if (!roamingActive || hubCard() == null) return
+        if (!roamingActive) return
         // The links fence their own live attempts; this tick also recovers a scan that ended silently.
-        if (hub?.wire() == null && bluetoothHub?.wire() == null) hubOpen()
+        if (hubCard() != null && hub?.wire() == null && bluetoothHub?.wire() == null) hubOpen()
+        // A radio that went away while listening is asked for again, with or without a hub (v0.1.3 N3).
         autoReconnect()
         main.postDelayed(roamingRetryTick, roamingRetryMs)
     }
@@ -1847,9 +1851,12 @@ class AppCore private constructor(
         if (started > 0) hubOpen()
     }
 
-    /** Forgets the hub: roaming ends, both hub transports close and the saved card (with the Wi-Fi password) is erased. */
+    /**
+     * Forgets the hub: both hub transports close and the saved card (with the Wi-Fi password) is erased. Listening ends
+     * too, unless a saved radio still gives it a route (v0.1.3 N3).
+     */
     fun forgetHub() {
-        stopRoaming()
+        if (!settings.hubRoaming || settings.radioAddress == null) stopRoaming()
         settings.hubCard = null
         hubReset()
         hubFailedAt.clear()
@@ -1907,13 +1914,15 @@ class AppCore private constructor(
         changed(Change.RADIO)
     }
 
-    // ---- Hub roaming (accounts decision 9): opt-in, default off. Every start, stop and late callback carries an epoch;
-    // turning roaming off, forgetting the hub and every failure bump it, so a late callback cannot restore a stopped service.
-    // Roaming holds the hub work only. The stock radio is still let go after the grace, as without roaming.
+    // ---- Hub roaming (accounts decision 9), since v0.1.3 N3 "keep listening when the app is closed": opt-in, default off.
+    // Every start, stop and late callback carries an epoch; turning it off, forgetting the last route and every failure
+    // bump it, so a late callback cannot restore a stopped service. While it runs, the saved radio is kept past the last
+    // screen's grace and asked for again every minute, and the saved hub's ways are held and reopened, with or without
+    // the other route. Nothing starts it by itself: no boot start, no sticky restart, no battery exemption.
 
-    /** Why roaming cannot start now, or null: a saved hub and the Bluetooth permissions the hub link needs. */
+    /** Why listening cannot start now, or null: a saved radio or hub, and the Bluetooth permissions both need. */
     fun roamingPrerequisite(): RoamingBlock? = when {
-        hubCard() == null -> RoamingBlock.NO_HUB
+        hubCard() == null && settings.radioAddress == null -> RoamingBlock.NO_ROUTE
         access.radioPermissionsMissing().isNotEmpty() -> RoamingBlock.PERMISSION
         else -> null
     }
@@ -1934,6 +1943,8 @@ class AppCore private constructor(
         if (host == null) { stopRoaming(RoamingBlock.START_REFUSED); return false }
         val epoch = ++roamingEpoch
         settings.hubRoaming = true
+        // Dated at every start, so only a stop the person made after it is kept (resumeRoaming).
+        settings.listeningSince = System.currentTimeMillis()
         roamingBlock = null
         roamingStarting = true
         main.removeCallbacks(roamingStartLate)
@@ -1995,9 +2006,15 @@ class AppCore private constructor(
         if (epoch == roamingEpoch && (roamingActive || roamingStarting)) stopRoaming(block)
     }
 
-    /** A real screen opened: a standing choice whose service died with the process starts again (a screen may start it). */
+    /**
+     * A real screen opened: a standing choice whose service died with the process starts again (a screen may start it),
+     * unless the person stopped the app in Android since listening last started (Force stop, Active apps Stop): that stop
+     * is kept, the wish turns off and the person is told (v0.1.3 N3).
+     */
     fun resumeRoaming() {
         if (!settings.hubRoaming || roamingActive || roamingStarting) return
+        val stopped = runCatching { processExits?.lastStoppedByPersonAt() }.getOrNull()
+        if (stopped != null && stopped > settings.listeningSince) { stopRoaming(RoamingBlock.STOPPED_BY_PERSON); return }
         roamingPrerequisite()?.let { stopRoaming(it); return }
         startRoaming()
     }
@@ -3137,6 +3154,7 @@ class AppCore private constructor(
                 core.hub = WifiHubLink(app)
                 core.bluetoothHub = BleHubLink(app)
                 core.roamingHost = SystemRoamingHost(app)
+                core.processExits = SystemProcessExits(app)
                 core.alertHost = SystemAlertHost(app)
             }
         }

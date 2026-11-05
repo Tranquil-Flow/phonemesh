@@ -438,6 +438,29 @@ By default the app talks to the hub only while it is open. **Keep hub when app i
 turns on a background service with a silent notification, which uses more battery.
 **Forget this hub** removes it; using it again needs a new scan.
 
+### Listening while the app is closed (v0.1.3 development branch)
+
+On the v0.1.3 development branch that switch is **Keep listening when app is closed**, on the hub screen and in
+**Settings → Alerts**. It is one choice, off by default, and works with a connected radio, a saved hub, or both: a
+hub is no longer needed just to listen to your own radio. While it runs, the app keeps the radio and the hub after
+the last screen closes and asks for them again about once a minute if they go away. It needs no new permission and
+asks for no battery exemption. What happens in each case:
+
+| What happens | With listening on | With listening off |
+|---|---|---|
+| Home button or screen locked | Keeps listening | Radio and hub let go about a minute after the last screen |
+| App swiped away in Recents | Most phones keep listening; if Android ends the app, see Stop below | App ends |
+| Android ends the app for memory or a crash | Stops; starts again when you next open the app | — |
+| **Stop** in Active apps, or **Force stop** | Stops; on Android 11 and later it stays off and the app says so when opened | — |
+| **Stop** in the notification, or the switch off | Stops at once, with its retries | — |
+| Phone restarted | Nothing starts by itself; starts again when you next open the app | — |
+| Bluetooth permission removed | Android ends the app; when opened it says Bluetooth is needed | — |
+| Radio or hub out of reach, then back | Asked for again about once a minute | Reconnects when a screen opens |
+
+Forgetting the radio or the hub keeps listening while the other is still saved; forgetting the last one stops it.
+Listening does not promise immediate delivery, delivery before the phone is first unlocked, or delivery after a
+restart until the app is opened. Battery use and delays have not been measured on real phones yet.
+
 ### Updates from the hub
 
 **Settings → Local hub → Updates** lists newer versions of speech packs the phone already has, when the hub's
@@ -479,7 +502,7 @@ used. Release builds accept only packs in that built-in catalog.
 - New-message alerts (v0.1.3 development branch) stay off until turned on in **Settings → Alerts**, which is the only
   place the app asks for Android's notification permission. An alert says only "New message"; it names nobody, shows
   no words or pictures and is hidden on the lock screen. None is shown for the chat already on screen. Alerts arrive
-  only while the app is open or keeping the hub; turning them on starts nothing in the background.
+  only while the app is open or listening (above); turning them on starts nothing in the background.
 
 ## Limits of v0.1
 

@@ -35,6 +35,14 @@ class FakeAlertHost : AlertHost {
     override fun clear() { cleared++ }
 }
 
+/** How the app's last process ended, as Android would say (v0.1.3 N3); never Android's own record. */
+class FakeExits : ProcessExits {
+    /** When the person stopped the app in Android (Force stop, Active apps Stop), or null for any other end. */
+    @Volatile var stoppedAt: Long? = null
+    fun reset() { stoppedAt = null }
+    override fun lastStoppedByPersonAt() = stoppedAt
+}
+
 /** Puts an AppCore with fakes in place of the real one: test history, test settings, fixture packs. */
 object TestCore {
     const val HISTORY = "history-test.db"
@@ -47,6 +55,8 @@ object TestCore {
 
     /** Where the test core's new-message alerts go; never Android's notifications. */
     val alerts = FakeAlertHost()
+    /** What the test core reads about its last process end; never Android's exit records. */
+    val exits = FakeExits()
     /** The planned-message alarm the core last set; null when none is armed. Never touches the real AlarmManager. */
     val alarm = FakePlanAlarm()
 
@@ -71,6 +81,7 @@ object TestCore {
             if (voices.isNotEmpty()) Fixtures.installReady(context, voices)
             access.reset()
             alerts.reset()
+            exits.reset()
             build(language, realSpeech, nextTheme)
             core.settings.firstPersonAdded = added
             if (named) core.saveAccount("Awa", 0x43A047)
@@ -96,6 +107,7 @@ object TestCore {
         )
         if (language != null) built.settings.language = language
         built.alertHost = alerts
+        built.processExits = exits
         // Only a fresh install overrides appearance; restart must retain the saved choice.
         if (theme != null) built.settings.theme = theme
         AppCore.replaceForTest(built)

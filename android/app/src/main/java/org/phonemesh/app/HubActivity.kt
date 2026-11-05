@@ -213,7 +213,8 @@ class HubActivity : ScreenActivity() {
             .setMessage(R.string.hub_forget_ask)
             .setPositiveButton(R.string.hub_forget) { _, _ ->
                 core.forgetHub()
-                core.note(UiText(R.string.hub_forgotten))
+                // v0.1.3 N3: a saved radio keeps listening going, so "background use is off" would not be true then.
+                core.note(UiText(if (core.settings.hubRoaming) R.string.hub_forgotten_listening else R.string.hub_forgotten))
             }
             .setNegativeButton(R.string.close, null)
             .create()).also { dialog ->

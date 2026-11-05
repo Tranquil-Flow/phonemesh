@@ -94,12 +94,18 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         set(value) { prefs.edit().putString(HUB_CARD, value).apply() }
 
     /**
-     * Accounts decision 9, opt-in: the person's wish to keep the hub when the app is closed. Off by default. The flag alone
-     * keeps nothing; only HubRoamingService running for the current epoch is roaming (AppCore.roamingActive).
+     * Accounts decision 9, opt-in: the person's wish to keep listening when the app is closed (v0.1.3 N3: with a saved
+     * radio or hub; before, the hub only). Off by default. The flag alone keeps nothing; only HubRoamingService running
+     * for the current epoch is listening (AppCore.roamingActive).
      */
     var hubRoaming: Boolean
         get() = prefs.getBoolean(HUB_ROAMING, false)
         set(value) { prefs.edit().putBoolean(HUB_ROAMING, value).apply() }
+
+    /** v0.1.3 N3: when listening last started (wall clock), so an older stop the person made in Android is not reapplied. */
+    var listeningSince: Long
+        get() = prefs.getLong(LISTENING_SINCE, 0L)
+        set(value) { prefs.edit().putLong(LISTENING_SINCE, value).apply() }
 
     /** True once the setup guide folded away; it never returns. */
     var setupFinished: Boolean
@@ -189,6 +195,7 @@ class Settings(context: Context, name: String = PREFS) : RegionMemory {
         private const val ALERTED_CHATS = "alertedChats"
         private const val HUB_CARD = "hubCard"
         private const val HUB_ROAMING = "hubRoaming"
+        private const val LISTENING_SINCE = "listeningSince"
         private const val TIPS_SHOWN = "tipsShown"
         private const val TIP_SHOWINGS = "tipShowings"
         private const val KEPT = "keptRegions."

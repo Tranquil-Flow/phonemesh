@@ -28,6 +28,9 @@ class SettingsActivity : ScreenActivity() {
     private lateinit var alertsSwitch: Switch
     private lateinit var alertsBlocked: TextView
     private lateinit var alertsSettings: View
+    private lateinit var listeningSwitch: Switch
+    private lateinit var listeningState: TextView
+    private var rendering = false
     private var licencesDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +57,7 @@ class SettingsActivity : ScreenActivity() {
         column.addView(themes)
         column.addView(section(R.string.settings_alerts))
         column.addView(alertsRows())
+        column.addView(listeningRows())
         column.addView(section(R.string.settings_speech))
         column.addView(Switch(this).apply {
             tag = "read_aloud"
@@ -193,6 +197,43 @@ class SettingsActivity : ScreenActivity() {
         renderAlerts()
     }
 
+    /**
+     * v0.1.3 N3: the same opt-in as the hub screen's switch, keep listening while the app is closed, with a saved radio
+     * or hub. The switch shows the person's choice; the line under it says whether the service really runs, or why not.
+     */
+    private fun listeningRows(): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        listeningSwitch = Switch(this).apply {
+            tag = "keep_listening"
+            text = getString(R.string.hub_roaming)
+            contentDescription = getString(R.string.hub_roaming)
+            textSize = Ui.BODY_SP
+            setTextColor(palette.text)
+            minHeight = Ui.dp(this@SettingsActivity, 64)
+            isChecked = core.settings.hubRoaming
+            // AppCore decides and explains a refusal with a note; the switch then shows the choice it kept.
+            setOnCheckedChangeListener { _, on -> if (!rendering) { core.setHubRoaming(on); renderListening() } }
+        }
+        box.addView(listeningSwitch, spaced())
+        box.addView(Ui.text(this, getString(R.string.hub_roaming_hint), palette.muted))
+        listeningState = Ui.text(this, "", palette.text, bold = true).apply { tag = "listening_state" }
+        box.addView(listeningState, spaced())
+        return box
+    }
+
+    private fun renderListening() {
+        rendering = true
+        listeningSwitch.isChecked = core.settings.hubRoaming
+        rendering = false
+        val block = core.roamingBlock
+        listeningState.text = getString(when {
+            core.roamingActive -> R.string.roaming_on
+            core.roamingStarting -> R.string.roaming_starting
+            block != null -> block.words
+            else -> R.string.roaming_off
+        })
+    }
+
     private fun renderAlerts() {
         val on = core.settings.newMessageAlerts
         if (alertsSwitch.isChecked != on) alertsSwitch.isChecked = on
@@ -214,6 +255,7 @@ class SettingsActivity : ScreenActivity() {
             ?: Ui.outline(this, palette.background, palette.outline, radiusDp = 16)
         helpers.visibility = if (core.connected) View.VISIBLE else View.GONE
         renderAlerts()
+        renderListening()
         renderThemes()
         val downloads = core.downloads()
         val pending = runCatching { downloads.pending() }.getOrDefault(emptyMap())

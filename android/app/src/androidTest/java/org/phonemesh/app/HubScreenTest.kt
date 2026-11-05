@@ -200,11 +200,12 @@ class HubScreenTest {
 
     // ---- Enabling: guards, refusals, timeouts, failures
 
-    @Test fun noHubMeansRefusedWithARemedy() {
+    /** v0.1.3 N3: a saved radio would be enough (ListeningTest); with neither a radio nor a hub it is refused. */
+    @Test fun noHubAndNoRadioMeansRefusedWithARemedy() {
         val r = rig(saved = false)
         assertFalse(TestCore.onMain { core.setHubRoaming(true) })
-        assertEquals(RoamingBlock.NO_HUB, core.roamingBlock)
-        assertEquals(words(R.string.roaming_block_no_hub), core.text(core.lastNote!!))
+        assertEquals(RoamingBlock.NO_ROUTE, core.roamingBlock)
+        assertEquals(words(R.string.roaming_block_no_route), core.text(core.lastNote!!))
         assertFalse(core.settings.hubRoaming)
         assertTrue("no service is asked for", r.host.starts.isEmpty())
     }

@@ -5,6 +5,8 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -13,12 +15,15 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 
-/** Why roaming is off or refused, each with the sentence that tells the person what to do. */
+/** Why roaming (v0.1.3: listening while closed) is off or refused, each with the sentence that tells the person what to do. */
 enum class RoamingBlock(val words: Int) {
-    NO_HUB(R.string.roaming_block_no_hub),
+    /** Neither a radio nor a hub is saved (v0.1.3 N3: either is enough). */
+    NO_ROUTE(R.string.roaming_block_no_route),
     PERMISSION(R.string.roaming_block_permission),
     START_REFUSED(R.string.roaming_block_refused),
     SERVICE_ENDED(R.string.roaming_block_ended),
+    /** v0.1.3 N3: the person stopped the app in Android after listening last started; it is not started again. */
+    STOPPED_BY_PERSON(R.string.roaming_block_stopped),
 }
 
 /** What a starting service learns about its own start: run, a start that was cancelled or replaced, or a start Android would refuse. */
@@ -45,6 +50,26 @@ class SystemRoamingHost(private val app: Context) : RoamingHost {
 
     override fun stop() {
         runCatching { app.stopService(Intent(app, HubRoamingService::class.java)) }
+    }
+}
+
+/** v0.1.3 N3: what Android recorded about how this app's last process ended, so that a stop the person made is kept. */
+interface ProcessExits {
+    /**
+     * When the app's last process ended because the person stopped it (Force stop, Active apps Stop, or a swipe that ended
+     * the app), or null for any other end and wherever Android cannot say (before Android 11).
+     */
+    fun lastStoppedByPersonAt(): Long?
+}
+
+class SystemProcessExits(private val app: Context) : ProcessExits {
+    override fun lastStoppedByPersonAt(): Long? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        // This app's own records only (null package), newest first; the process that is running now has none.
+        val last = runCatching {
+            app.getSystemService(ActivityManager::class.java)?.getHistoricalProcessExitReasons(null, 0, 1)?.firstOrNull()
+        }.getOrNull() ?: return null
+        return last.timestamp.takeIf { last.reason == ApplicationExitInfo.REASON_USER_REQUESTED }
     }
 }
 

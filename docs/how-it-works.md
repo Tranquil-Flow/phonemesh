@@ -459,7 +459,10 @@ asks for no battery exemption. What happens in each case:
 
 Forgetting the radio or the hub keeps listening while the other is still saved; forgetting the last one stops it.
 On Android 13 and later the notification, with its **Stop**, shows only if the app may send notifications (the Alerts
-switch asks for that). Without it listening still runs, and Android's Active apps list still shows it. If the phone
+switch asks for that). Without it listening still runs, Android's Active apps list still shows it, and the hub screen
+and Settings say **Running, without a notification.** If you allow notifications later, the notification appears the
+next time you open the app. While neither the radio nor a hub that has answered is connected, the notification's
+second line says **Not connected. Trying again every minute.** If the phone
 restarts soon after a Force stop, Android may lose its record of that stop, so listening can start again when the app
 is next opened; turning the switch off in the app is kept either way.
 Listening does not promise immediate delivery, delivery before the phone is first unlocked, or delivery after a

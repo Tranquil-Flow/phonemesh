@@ -480,4 +480,32 @@ class HubScreenTest {
         assertNotNull(failure)
         assertEquals(words(R.string.hub_failure_silent), Views.textOf(failure!!))
     }
+
+    /** v0.1.3 N3b: the listening notification counts a hub as connected only once it answered over its pinned key. */
+    @Test fun listeningCountsOnlyAnAnsweringHubAsConnected() {
+        val r = rig()
+        TestCore.radio.acceptBroadcasts = true
+        val bea = PersonChatTest.Bea()
+        TestCore.onMain { core.accountsFlow.showCode() }
+        val added = TestCore.onMain { core.accountsFlow.scanned(AddCode.of(bea.qr)) } as Accounts.Added.Contact
+        activity = Views.start(HubActivity::class.java)
+        val wire = WireStub()
+        // The account's first poll would answer at once and earn ANSWERED: hold it until the bare link is checked.
+        val gate = java.util.concurrent.CountDownLatch(1)
+        wire.mailGate = gate
+        try {
+            r.wifi.up(wire)
+            Views.waitUntil { status().wifi == HubWay.LINKED }
+            TestCore.onMain { TestCore.radio.connected(false) }
+            // Read together, in one main-thread turn, so the way cannot change between the two.
+            val (way, heard) = here { core.hubStatus().wifi to core.listeningConnected() }
+            assertEquals(HubWay.LINKED, way)
+            assertFalse("a mere connection to the hub is not connected", heard)
+        } finally { gate.countDown() }
+        TestCore.onMain { TestCore.radio.connected(true) }
+        TestCore.onMain { core.setDraft(added.chatId, "par le relais"); assertTrue(core.send(added.chatId)) }
+        Views.waitUntil { status().wifi == HubWay.ANSWERED }
+        TestCore.onMain { TestCore.radio.connected(false) }
+        assertTrue("an answering hub alone is connected", here { core.listeningConnected() })
+    }
 }

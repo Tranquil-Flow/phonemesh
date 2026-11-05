@@ -534,6 +534,7 @@
     <string name="roaming_off">Background use is off.</string>
     <string name="roaming_starting">Starting in the background.</string>
     <string name="roaming_on">Running in the background.</string>
+    <string name="roaming_on_hidden">Running, without a notification.</string>
     <string name="roaming_block_no_route">Connect a radio or scan a hub first.</string>
     <string name="roaming_block_permission">Allow Bluetooth to keep listening.</string>
     <string name="roaming_block_refused">Android refused. Open the app, then retry.</string>
@@ -541,6 +542,7 @@
     <string name="roaming_block_stopped">The app was stopped. Listening is off.</string>
     <string name="roaming_channel">Listening in the background</string>
     <string name="roaming_notification">Listening for new messages</string>
+    <string name="listening_not_connected">Not connected. Trying again every minute.</string>
     <string name="roaming_stop">Stop</string>
     <string name="recovery_title">Recovery kit</string>
     <string name="recovery_why">Save your people for another phone.</string>

@@ -1,6 +1,10 @@
 package org.phonemesh.app
 
+import android.Manifest
 import android.app.Activity
+import android.app.Notification
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Switch
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -10,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.phonemesh.core.hub.HubCard
@@ -19,7 +24,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * v0.1.3 N3: keeping listening while the app is closed, with a paired radio or a trusted hub (either is enough), and
  * honouring a stop the person made in Android. Real AppCore, Settings and screens; fake radio, hub links, service host
- * and exit record. The real foreground service, its notification and Android's process rules are not exercised here.
+ * and exit record. The real foreground service and Android's process rules are not exercised here; its notification
+ * is only built, and Android is only asked whether it would show it (N3b).
  */
 @RunWith(AndroidJUnit4::class)
 class ListeningTest {
@@ -45,8 +51,14 @@ class ListeningTest {
     private class HostFake : RoamingHost {
         val starts = CopyOnWriteArrayList<Int>()
         @Volatile var stops = 0
+        /** What Android would say about showing the listening notification (Android 13+ permission, app, channel). */
+        @Volatile var shown = true
+        /** Each time the running service's notification is posted again: connected or not. */
+        val updates = CopyOnWriteArrayList<Boolean>()
         override fun start(epoch: Int): Boolean { starts += epoch; return true }
         override fun stop() { stops++ }
+        override fun notificationShown() = shown
+        override fun update(connected: Boolean, words: android.content.Context) { updates += connected }
     }
 
     private class Rig(val wifi: LinkFake, val ble: LinkFake, val host: HostFake)
@@ -69,6 +81,8 @@ class ListeningTest {
     private fun enable(r: Rig): Int {
         assertTrue("listening may start", TestCore.onMain { core.setHubRoaming(true) })
         val epoch = r.host.starts.last()
+        // As the real service does: it builds its notification from roamingNotice() before it attaches.
+        TestCore.onMain { core.roamingNotice() }
         assertTrue(TestCore.onMain { core.roamingAttach(epoch) })
         return epoch
     }
@@ -256,6 +270,82 @@ class ListeningTest {
         activity = chats
         assertTrue("listening carries on", core.roamingActive)
         assertNull(Views.tagged(chats, "note_box"))
+    }
+
+    // ---- What the running service's notification says, and whether Android shows it (N3b)
+
+    @Test fun theNotificationSaysWhenNoRouteIsConnectedAndWhenOneIsBack() {
+        val r = rig(hub = false, radio = true)
+        TestCore.onMain { TestCore.radio.connected(false) }
+        enable(r)
+        assertFalse("posted as not connected", TestCore.onMain { core.listeningConnected() })
+        assertTrue("nothing changed since it was posted", r.host.updates.isEmpty())
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertEquals(listOf(true), r.host.updates.toList())
+        TestCore.onMain { TestCore.radio.connected(false) }
+        assertEquals(listOf(true, false), r.host.updates.toList())
+        // A retry that changes nothing does not post it again.
+        TestCore.onMain { timer("roamingRetryTick").run() }
+        assertEquals(listOf(true, false), r.host.updates.toList())
+    }
+
+    @Test fun nothingIsPostedOnceListeningStopped() {
+        val r = rig(hub = false, radio = true)
+        TestCore.onMain { TestCore.radio.connected(false) }
+        enable(r)
+        TestCore.onMain { core.setHubRoaming(false) }
+        TestCore.onMain { TestCore.radio.connected(true) }
+        assertTrue("no notification may appear after the stop", r.host.updates.isEmpty())
+    }
+
+    @Test fun aScreenOpenedAfterNotificationsWereAllowedPostsTheNotificationOnce() {
+        val r = rig(hub = false, radio = true)
+        r.host.shown = false
+        enable(r)
+        assertTrue(r.host.updates.isEmpty())
+        // The person allowed notifications in Android while listening ran without one.
+        r.host.shown = true
+        val first: ChatsActivity = Views.start(ChatsActivity::class.java)
+        Views.finish(first)
+        assertEquals("posted again, so Android shows it now", 1, r.host.updates.size)
+        val second: ChatsActivity = Views.start(ChatsActivity::class.java)
+        activity = second
+        assertEquals("not again while nothing changed", 1, r.host.updates.size)
+    }
+
+    @Test fun bothScreensSayWhenListeningRunsWithoutANotification() {
+        val r = rig(hub = true, radio = true)
+        r.host.shown = false
+        enable(r)
+        val settings: SettingsActivity = Views.start(SettingsActivity::class.java)
+        assertEquals(words(R.string.roaming_on_hidden), Views.textOf(Views.tagged(settings, "listening_state")!!))
+        Views.finish(settings)
+        val hub: HubActivity = Views.start(HubActivity::class.java)
+        activity = hub
+        assertEquals(words(R.string.roaming_on_hidden), Views.textOf(Views.tagged(hub, "roaming_state")!!))
+    }
+
+    /** The notification the real service posts, built here and never posted (tests run without notification permission). */
+    @Test fun theListeningNotificationHasASecondLineOnlyWhileNothingIsConnected() {
+        val context = inst.targetContext
+        val fr = Locales.wrap(context, "fr")
+        val off = HubRoamingService.build(context, fr, connected = false)
+        assertEquals(HubRoamingService.CHANNEL, off.channelId)
+        assertEquals(fr.getString(R.string.roaming_notification), off.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+        assertEquals("Pas connecté. Nouvel essai chaque minute.", off.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString())
+        assertTrue("posting it again never sounds", off.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+        assertEquals(fr.getString(R.string.roaming_stop), off.actions.single().title.toString())
+        val on = HubRoamingService.build(context, fr, connected = true)
+        assertEquals(fr.getString(R.string.roaming_notification), on.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString())
+        assertNull("connected: the title alone", on.extras.getCharSequence(Notification.EXTRA_TEXT))
+    }
+
+    /** What Android itself answers, as on every test run: on Android 13+ without the permission nothing would show. */
+    @Test fun withoutTheNotificationPermissionAndroidShowsNoListeningNotification() {
+        assumeTrue("the permission exists from Android 13", Build.VERSION.SDK_INT >= 33)
+        val context = inst.targetContext
+        assertEquals(PackageManager.PERMISSION_DENIED, context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS))
+        assertFalse(SystemRoamingHost(context).notificationShown())
     }
 
     // ---- Settings

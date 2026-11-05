@@ -227,7 +227,7 @@ class SettingsActivity : ScreenActivity() {
         rendering = false
         val block = core.roamingBlock
         listeningState.text = getString(when {
-            core.roamingActive -> R.string.roaming_on
+            core.roamingActive -> if (core.listeningHidden()) R.string.roaming_on_hidden else R.string.roaming_on
             core.roamingStarting -> R.string.roaming_starting
             block != null -> block.words
             else -> R.string.roaming_off

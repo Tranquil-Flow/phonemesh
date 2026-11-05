@@ -1,5 +1,6 @@
 package org.phonemesh.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +10,7 @@ import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.drawable.Icon
 import android.os.Build
@@ -36,6 +38,15 @@ interface RoamingHost {
 
     /** Stops the service if it runs; harmless when it does not. */
     fun stop()
+
+    /**
+     * v0.1.3 N3b: Android lets the listening notification show now (on Android 13+ the notification permission, the app's
+     * notifications and the listening channel). Without it the service still runs, with no notification and no Stop in it.
+     */
+    fun notificationShown(): Boolean = true
+
+    /** v0.1.3 N3b: posts the running service's notification again, saying whether a radio or hub is [connected] now. */
+    fun update(connected: Boolean, words: Context) {}
 }
 
 class SystemRoamingHost(private val app: Context) : RoamingHost {
@@ -50,6 +61,24 @@ class SystemRoamingHost(private val app: Context) : RoamingHost {
 
     override fun stop() {
         runCatching { app.stopService(Intent(app, HubRoamingService::class.java)) }
+    }
+
+    override fun notificationShown(): Boolean {
+        val manager = app.getSystemService(NotificationManager::class.java) ?: return false
+        if (Build.VERSION.SDK_INT >= 33 &&
+            app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return false
+        if (!manager.areNotificationsEnabled()) return false
+        // No channel yet: the service makes it when it posts.
+        return manager.getNotificationChannel(HubRoamingService.CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    /** Same id as the running service's foreground notification, so this replaces it; AppCore asks only while it runs. */
+    override fun update(connected: Boolean, words: Context) {
+        runCatching {
+            app.getSystemService(NotificationManager::class.java)
+                ?.notify(HubRoamingService.NOTE_ID, HubRoamingService.build(app, words, connected))
+        }.onFailure { Log.w("Phonemesh", "listening notification not updated", it) }
     }
 }
 
@@ -107,14 +136,15 @@ class HubRoamingService : Service() {
             }
             RoamingGate.STALE -> {
                 // Started, then switched off or replaced before it ran: Android still expects the foreground call, so make it and leave.
-                runCatching { enter(held) }
+                runCatching { enter(build(this, held.localized(), held.listeningConnected())) }
                 leave()
                 return START_NOT_STICKY
             }
             RoamingGate.RUN -> Unit
         }
         val foreground = try {
-            enter(held)
+            // What it says (connected or not) is kept by AppCore, which posts it again only when that changes.
+            enter(build(this, held.localized(), held.roamingNotice()))
             true
         } catch (e: RuntimeException) {
             Log.w("Phonemesh", "hub roaming cannot run in the foreground", e)
@@ -133,8 +163,7 @@ class HubRoamingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun enter(held: AppCore) {
-        val note = notification(held)
+    private fun enter(note: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTE_ID, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
@@ -162,34 +191,35 @@ class HubRoamingService : Service() {
         super.onDestroy()
     }
 
-    private fun notification(core: AppCore): Notification {
-        val words = core.localized()
-        getSystemService(NotificationManager::class.java)?.createNotificationChannel(
-            NotificationChannel(CHANNEL, words.getString(R.string.roaming_channel), NotificationManager.IMPORTANCE_LOW).apply {
-                setSound(null, null)
-                enableVibration(false)
-                setShowBadge(false)
-            },
-        )
-        val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        val stop = PendingIntent.getService(this, 0, Intent(this, HubRoamingService::class.java).setAction(ACTION_STOP), flags)
-        val open = PendingIntent.getActivity(this, 1, Intent(this, HubActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags)
-        val builder = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_radio_on)
-            .setContentTitle(words.getString(R.string.roaming_notification))
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(open)
-            .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stop), words.getString(R.string.roaming_stop), stop).build())
-        // API 26+ channel above disables sound and vibration; framework Builder has no setSilent API.
-        return builder.build()
-    }
-
     companion object {
         const val CHANNEL = "hub_roaming"
         const val NOTE_ID = 8
         const val ACTION_STOP = "org.phonemesh.app.STOP_HUB_ROAMING"
         const val EXTRA_EPOCH = "epoch"
         private const val NO_EPOCH = -1
+
+        /** The listening notification in [words]' language; a second line while neither radio nor hub is [connected]. */
+        fun build(context: Context, words: Context, connected: Boolean): Notification {
+            context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+                NotificationChannel(CHANNEL, words.getString(R.string.roaming_channel), NotificationManager.IMPORTANCE_LOW).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
+                },
+            )
+            val flags = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            val stop = PendingIntent.getService(context, 0, Intent(context, HubRoamingService::class.java).setAction(ACTION_STOP), flags)
+            val open = PendingIntent.getActivity(context, 1, Intent(context, HubActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), flags)
+            val builder = Notification.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_radio_on)
+                .setContentTitle(words.getString(R.string.roaming_notification))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(open)
+                .addAction(Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_stop), words.getString(R.string.roaming_stop), stop).build())
+            if (!connected) builder.setContentText(words.getString(R.string.listening_not_connected))
+            // API 26+ channel above disables sound and vibration; framework Builder has no setSilent API.
+            return builder.build()
+        }
     }
 }

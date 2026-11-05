@@ -530,6 +530,7 @@
     <string name="roaming_off">Usage en arrière-plan désactivé.</string>
     <string name="roaming_starting">Démarrage en arrière-plan.</string>
     <string name="roaming_on">Actif en arrière-plan.</string>
+    <string name="roaming_on_hidden">Actif, sans notification.</string>
     <string name="roaming_block_no_route">Connectez d’abord une radio ou scannez un relais.</string>
     <string name="roaming_block_permission">Autorisez le Bluetooth pour rester à l’écoute.</string>
     <string name="roaming_block_refused">Android refuse. Ouvrez l’application, puis réessayez.</string>
@@ -537,6 +538,7 @@
     <string name="roaming_block_stopped">L’application a été arrêtée. L’écoute est coupée.</string>
     <string name="roaming_channel">Écoute en arrière-plan</string>
     <string name="roaming_notification">À l’écoute des nouveaux messages</string>
+    <string name="listening_not_connected">Pas connecté. Nouvel essai chaque minute.</string>
     <string name="roaming_stop">Arrêter</string>
     <string name="recovery_title">Kit de récupération</string>
     <string name="recovery_why">Gardez vos contacts pour un autre téléphone.</string>

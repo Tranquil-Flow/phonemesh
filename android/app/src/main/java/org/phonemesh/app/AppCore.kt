@@ -247,6 +247,8 @@ class AppCore private constructor(
             handOutIncomingAlerts()
             withdrawReadAlerts()
         }
+        // A radio or hub way came or went (hub links report DELIVERY, answers RADIO): the listening notification follows.
+        if (change == Change.RADIO || change == Change.DELIVERY) refreshRoamingNotice(screenOpened = false)
         observers.toList().forEach { it.onCoreChange(change) }
     }
 
@@ -1575,6 +1577,46 @@ class AppCore private constructor(
         main.postDelayed(roamingRetryTick, roamingRetryMs)
     }
 
+    /**
+     * v0.1.3 N3b: listening can hear something now: the radio is connected or a hub way answered over its pinned key (a
+     * bare connection to the hub is not enough). While this is false the running service's notification says so.
+     */
+    fun listeningConnected(): Boolean {
+        if (connected) return true
+        val status = hubStatus()
+        return status.wifi == HubWay.ANSWERED || status.bluetooth == HubWay.ANSWERED
+    }
+
+    /** What the running service's notification last said, and whether Android could show it then; null before it is posted. */
+    private var noticeConnected: Boolean? = null
+    private var noticeShown: Boolean? = null
+
+    /** Android may show the listening notification now; true where the host cannot tell. */
+    private fun listeningNotificationShown(): Boolean = runCatching { roamingHost?.notificationShown() }.getOrNull() ?: true
+
+    /** Listening runs, but Android shows no notification for it (Android 13+ without the permission, or turned off). */
+    fun listeningHidden(): Boolean = roamingActive && !listeningNotificationShown()
+
+    /** The service is posting its notification now: whether it says connected, kept so that only a change posts it again. */
+    fun roamingNotice(): Boolean {
+        noticeShown = listeningNotificationShown()
+        return listeningConnected().also { noticeConnected = it }
+    }
+
+    /**
+     * While listening, the notification is posted again when what it says changed (a route came or went) or, as a screen
+     * opens, when Android now lets it show: one posted while notifications were not allowed does not appear by itself later.
+     */
+    private fun refreshRoamingNotice(screenOpened: Boolean) {
+        if (!roamingActive) return
+        val connectedNow = listeningConnected()
+        val shownNow = if (screenOpened) listeningNotificationShown() else noticeShown
+        if (connectedNow == noticeConnected && shownNow == noticeShown) return
+        noticeConnected = connectedNow
+        noticeShown = shownNow
+        runCatching { roamingHost?.update(connectedNow, localized()) }
+    }
+
     /** The hub the order of ways puts first, if any: Wi-Fi joined, else Bluetooth connected, and the app open or roaming on. */
     private fun hubAllowed(): HubWire? = hubRoute(rest = false)?.wire
 
@@ -1966,6 +2008,8 @@ class AppCore private constructor(
         roamingActive = false
         roamingStarting = false
         roamingBlock = block
+        noticeConnected = null
+        noticeShown = null
         runCatching { roamingHost?.stop() }
         if (block != null) note(UiText(block.words))
         // Without a screen, the hub work only roaming kept ends now, not after the grace.
@@ -2009,10 +2053,12 @@ class AppCore private constructor(
     /**
      * A real screen opened: a standing choice whose service died with the process starts again (a screen may start it),
      * unless the person stopped the app in Android since listening last started (Force stop, Active apps Stop): that stop
-     * is kept, the wish turns off and the person is told (v0.1.3 N3).
+     * is kept, the wish turns off and the person is told (v0.1.3 N3). While it runs, the opening screen lets its
+     * notification catch up with Android's current permission (v0.1.3 N3b).
      */
     fun resumeRoaming() {
-        if (!settings.hubRoaming || roamingActive || roamingStarting) return
+        if (roamingActive) { refreshRoamingNotice(screenOpened = true); return }
+        if (!settings.hubRoaming || roamingStarting) return
         val stopped = runCatching { processExits?.lastStoppedByPersonAt() }.getOrNull()
         if (stopped != null && stopped > settings.listeningSince) { stopRoaming(RoamingBlock.STOPPED_BY_PERSON); return }
         roamingPrerequisite()?.let { stopRoaming(it); return }

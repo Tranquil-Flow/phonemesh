@@ -417,7 +417,8 @@ See [Run a local hub](#run-a-local-hub).
 - **My name:** change your name, your colour and your picture (letter, emoji or photo).
 - **Show my code:** your QR code and link for adding someone.
 - **Local hub** (**Village hub** in v0.1.0): scan or forget a hub, see how messages are
-  sent, and **Keep hub when app is closed**.
+  sent, and **Keep listening when app is closed** (**Keep hub when app is closed** up to
+  v0.1.2; on the v0.1.3 branch it is also in **Settings → Alerts**).
   - **Updates** (v0.1.2): copies newer speech packs from the hub over its Wi-Fi, only after
     you tap **Download** (the button shows the size). It uses no mobile data. You can
     **Pause** and **Resume**. A new pack replaces the old one only after it checks out and

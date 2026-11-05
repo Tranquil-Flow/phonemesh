@@ -158,11 +158,13 @@ recovery within 60 seconds. On real phones, rc3 reconnected automatically after 
 restart with the same pin and data, and v0.1.0 recovered a lost receipt through the
 sender's retry. Each was a single trial, not a guarantee of continuous recovery.
 
-Background use is **off by default**. **Keep hub when app is closed** explicitly opts
-into a foreground service with a silent notification and additional battery use. Check
-its status line: a selected switch alone does not prove the service started. Turn it
-off (or use the notification's Stop) to end background use. **Forget this hub** clears
-enrollment and disables background use; using it again requires another trusted scan.
+Background use is **off by default**. **Keep listening when app is closed** (**Keep hub
+when app is closed** up to v0.1.2) explicitly opts into a foreground service with a silent
+notification and additional battery use; on the v0.1.3 branch a saved radio alone is also
+enough. Check its status line: a selected switch alone does not prove the service started.
+Turn it off (or use the notification's Stop) to end background use. **Forget this hub**
+clears enrollment and, unless a radio is saved (v0.1.3 branch), disables background use;
+using it again requires another trusted scan.
 
 ## Durable forwarding and its limits
 

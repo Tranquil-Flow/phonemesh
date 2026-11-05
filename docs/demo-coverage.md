@@ -71,7 +71,7 @@ screen) or from the "Demo controls" icon.
 | Sending by Hub Wi-Fi | Default after joining | Simulated way | Yes |
 | Sending by Hub Bluetooth | Controls: "Switch the hub's Wi-Fi off" | Simulated way | Yes |
 | Hub off, back to the radio | Controls: "Switch the hub off" | Real fallback | Yes |
-| Keep hub when app is closed | Local hub screen switch | Real service and notification | Verified: "Running in the background." and a silent notification |
+| Keep listening when app is closed (**Keep hub when app is closed** up to v0.1.2) | Local hub screen switch | Real service and notification | Verified under the earlier name: "Running in the background." and a silent notification |
 | Forget this hub | Local hub screen | Real | Verified: confirm, then "No hub saved." |
 | Pack update from the hub | Settings, Local hub, **Updates**, **Download** (the hub offers "Demo voice") | Real screens, verifier, trust state and downloader; demo-only keys the real app rejects; the hub's files are served in-process; no Wi-Fi join, no TLS | Verified: "An update is ready.", progress, Pause, Resume, "Installed." |
 

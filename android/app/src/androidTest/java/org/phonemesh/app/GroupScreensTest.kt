@@ -214,6 +214,28 @@ class GroupScreensTest {
         return chatId to beaGroups.saved.keys.single().toByteArray()
     }
 
+    /** v0.1.3 N1: a member's group text is one alert once kept; making the group, join notes and reactions are none. */
+    @Test fun aGroupTextIsOneAlertButMakingTheGroupNotesAndReactionsAreNone() {
+        prepare()
+        val got = ArrayList<IncomingAlerts.Fresh>()
+        TestCore.onMain { core.incomingAlertSink = { got += it } }
+        val (chatId, group) = activeGroup()
+        assertTrue("making the group and Bea joining raise no alert", TestCore.onMain { got.isEmpty() })
+        assertNotNull(beaGroups.post.send(group, listOf(Body.encode(Body.Text("en-US", "Fresh bread today")) to false), null, 2_200_000))
+        toAwa(2_200_000)
+        until { TestCore.onMain { core.history.messages(chatId).any { it.text == "Fresh bread today" } } }
+        val bread = TestCore.onMain { core.history.messages(chatId).single { it.text == "Fresh bread today" } }
+        assertEquals(listOf(IncomingAlerts.Fresh(bread.id, chatId, ChatKind.PRIVATE_GROUP)), TestCore.onMain { got.toList() })
+        val reaction = Body.encode(Body.Reaction(AppMailStore.refBytes(checkNotNull(bread.packetId)), "👍"))
+        assertNotNull(beaGroups.post.send(group, listOf(reaction to false), null, 2_300_000))
+        assertNotNull(beaGroups.post.send(group, listOf(Body.encode(Body.Text("en-US", "Milk too")) to false), null, 2_300_001))
+        toAwa(2_300_000)
+        until { TestCore.onMain { core.history.messages(chatId).any { it.text == "Milk too" } } }
+        assertEquals("the reaction was kept", 1, TestCore.onMain { core.history.reactions(chatId).size })
+        val milk = TestCore.onMain { core.history.messages(chatId).single { it.text == "Milk too" } }
+        assertEquals(listOf(bread.id, milk.id), TestCore.onMain { got.map { it.messageId } })
+    }
+
     private fun picture(bytes: Int): PreparedPicture = PreparedPicture(org.phonemesh.core.PictureCodec.WEBP, 2, 2,
         ByteArray(bytes) { (it * 7).toByte() }, byteArrayOf(1, 2, 3), android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888), 70)
 
@@ -270,6 +292,8 @@ class GroupScreensTest {
 
     @Test fun aNewMemberSeesRecentMessagesSharedByTheAdmin() {
         prepare()
+        val alerts = ArrayList<IncomingAlerts.Fresh>()
+        TestCore.onMain { core.incomingAlertSink = { alerts += it } }
         // Bea's group, which shares recent messages with new members, already has Cey (a third phone, its private
         // bodies handed over directly); Bea has one message from last week's market day.
         val cey = PersonFixture.Bea("Cey", 0x00838F)
@@ -319,6 +343,8 @@ class GroupScreensTest {
         assertEquals(bea.account, m.sharedBy)
         assertEquals(bea.account, m.senderId)
         assertEquals("kept at its own time", 1_900_000L, m.time)
+        // v0.1.3 N1: an older message shared on joining is history, not a fresh alert; nor is the invitation or the join.
+        assertTrue(TestCore.onMain { alerts.isEmpty() })
         val conversation = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId))
         until { Views.withText(conversation, "Shared by Bea") != null }
         assertNotNull(group)

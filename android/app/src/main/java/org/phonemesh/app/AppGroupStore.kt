@@ -34,6 +34,7 @@ class AppGroupStore(
     private val me: ByteArray get() = accounts.identity
     private val myAccount: String get() = accounts.accountId.toString()
     internal val pictures = GroupPictures(history, rows)
+    private val alerts = IncomingAlerts(history)
     /** Signing keys made for a group whose first change is not committed yet. */
     private val pendingSigners = HashMap<String, ByteArray>()
 
@@ -196,10 +197,11 @@ class AppGroupStore(
         val at = shared?.let { it.atSeconds * 1000 } ?: now()
         val ref = if (shared == null) AppMailStore.refNumber(Ratchet.reference(e.code)) else null
         when (body) {
+            // A fresh group text or reply is an alert event in this change's transaction; a shared older one is not (N1).
             is Body.Text -> history.addIncoming(chat, author, body.text, body.language, at, shared == null, packetId = ref,
-                sharedBy = if (shared != null) sender else null)
+                sharedBy = if (shared != null) sender else null).also { if (shared == null) alerts.record(it) }
             is Body.Reply -> history.addIncoming(chat, author, body.text, body.language, at, shared == null, packetId = ref,
-                replyTo = AppMailStore.refNumber(body.ref), sharedBy = if (shared != null) sender else null)
+                replyTo = AppMailStore.refNumber(body.ref), sharedBy = if (shared != null) sender else null).also { if (shared == null) alerts.record(it) }
             is Body.Reaction -> if (shared == null) history.addReaction(chat, sender, body.emoji, AppMailStore.refNumber(body.ref), at)
             is Body.PictureHead, is Body.PicturePart -> if (shared == null) pictures.accept(g, chat, sender, body, ref, at)
             else -> Unit

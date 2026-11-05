@@ -234,7 +234,24 @@ class AppCore private constructor(
 
     fun unobserve(observer: Observer) { observers -= observer }
 
-    private fun changed(change: Change) = observers.toList().forEach { it.onCoreChange(change) }
+    /**
+     * v0.1.3 N1: who hears of fresh incoming person and private-group text, each once and only after it is committed
+     * ([IncomingAlerts]). Null drops them, so nothing piles up while no alert is wanted. Main thread.
+     */
+    var incomingAlertSink: ((List<IncomingAlerts.Fresh>) -> Unit)? = null
+    private val incomingAlerts by lazy { IncomingAlerts(history) }
+
+    private fun changed(change: Change) {
+        // Every committed receive ends in one of these; inside a transaction nothing is handed out yet.
+        if (change == Change.MESSAGES || change == Change.DELIVERY) handOutIncomingAlerts()
+        observers.toList().forEach { it.onCoreChange(change) }
+    }
+
+    private fun handOutIncomingAlerts() {
+        // A write refusal leaves the events for the next change; the messages themselves are kept either way.
+        val fresh = try { incomingAlerts.take() } catch (_: SQLiteException) { return }
+        if (fresh.isNotEmpty()) incomingAlertSink?.invoke(fresh)
+    }
 
     /** The chosen language's resources (the phone's before the first choice). */
     fun localized(): Context = Locales.wrap(app, settings.language)

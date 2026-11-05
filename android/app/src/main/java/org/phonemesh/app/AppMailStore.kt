@@ -19,6 +19,7 @@ class AppMailStore(private val history: History, private val store: AccountStore
     private val ledger = MailLedger(history)
     private val incomingHeld = IncomingHeld(history)
     private val incomingPictures = PersonPictures(history)
+    private val alerts = IncomingAlerts(history)
     override fun holdIncoming(contact: AccountId, digest: String, packet: ByteArray, now: Long) {
         history.transaction {
             val state = store.session(contact) ?: return@transaction
@@ -73,9 +74,10 @@ class AppMailStore(private val history: History, private val store: AccountStore
             val chat = history.personChat(person.accountId, person.name)
             val ref = refNumber(incoming.ref)
             when (val body = incoming.body) {
-                is Body.Text -> history.addIncoming(chat.id, person.accountId, body.text, body.language, incoming.at, true, packetId = ref)
-                is Body.Reply -> history.addIncoming(chat.id, person.accountId, body.text, body.language, incoming.at, true,
-                    packetId = ref, replyTo = refNumber(body.ref))
+                // A fresh text or reply is an alert event in this same transaction (v0.1.3 N1).
+                is Body.Text -> alerts.record(history.addIncoming(chat.id, person.accountId, body.text, body.language, incoming.at, true, packetId = ref))
+                is Body.Reply -> alerts.record(history.addIncoming(chat.id, person.accountId, body.text, body.language, incoming.at, true,
+                    packetId = ref, replyTo = refNumber(body.ref)))
                 is Body.Reaction -> history.addReaction(chat.id, person.accountId, body.emoji, refNumber(body.ref), incoming.at)
                 is Body.PictureHead, is Body.PicturePart -> incomingPictures.accept(chat, person.accountId, body, ref, incoming.at)
                 is Body.ProfileUpdate -> keepProfile(person, body.profile)

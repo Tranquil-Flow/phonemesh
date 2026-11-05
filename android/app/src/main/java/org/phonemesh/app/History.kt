@@ -237,6 +237,8 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
             "UPDATE messages SET delivery = 'FAILED' WHERE direction = 'OUT' AND delivery IN ('QUEUED','WAITING') " +
                 "AND chat_id IN (SELECT id FROM chats WHERE kind = 'DIRECT')",
         )
+        // Fresh-text alert events (v0.1.3 N1): empty, so messages already here never become alerts.
+        if (oldVersion < 24) IncomingAlerts.createTables(db)
     }
 
     private fun hasColumn(db: SQLiteDatabase, table: String, column: String): Boolean =
@@ -1000,7 +1002,7 @@ class History(context: Context, name: String?) : SQLiteOpenHelper(context, name,
     }
 
     private companion object {
-        const val VERSION = 23
+        const val VERSION = 24
         const val MAX_AVATAR_PIECES = 24
 
         /** Version 15's eight colour indices as RGB (red, orange, yellow, green, blue, purple, pink, brown), else grey. */

@@ -262,7 +262,7 @@ class ArchiveImportTest {
             val upgraded = History(context, OLD)
             try {
                 val db = upgraded.readableDatabase
-                assertEquals(23, db.version)
+                assertEquals(24, db.version)
                 val tables = db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table'", null).use { c -> buildSet { while (c.moveToNext()) add(c.getString(0)) } }
                 assertTrue(tables.containsAll(ArchiveRows.TABLES))
                 assertEquals("Salut", upgraded.lastMessage(upgraded.chats().single { it.name == "Kofi" }.id)!!.text)

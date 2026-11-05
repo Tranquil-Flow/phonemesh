@@ -164,7 +164,7 @@ class HubPathsTest {
         }
         TestCore.restart()
         TestCore.onMain {
-            assertEquals(23, core.history.readableDatabase.version)
+            assertEquals(24, core.history.readableDatabase.version)
             assertTrue(row.packet.contentEquals(core.history.outboxRow(row.id)!!.packet))
             assertEquals("HUB", core.history.outboxRow(row.id)!!.state)
             assertFalse("legacy HUB is not proof of a particular pinned hub", HubCustody(core.history).has(row.id, pin))
@@ -403,6 +403,23 @@ class HubPathsTest {
         TestCore.restart()
         assertEquals("the cursor is durable, per hub pin", 7L, cursor())
         assertEquals(0L, TestCore.onMain { HubCursor(core.history).get(HubCard.pinOf(ByteArray(91) { (it + 1).toByte() })) })
+    }
+
+    /** v0.1.3 N1: a hub letter's fresh text is one alert once its cursor move commits; the same letter again is none. */
+    @Test fun aHubLetterIsOneAlertAndTheSameLetterAgainIsNone() {
+        val rig = rig(hubUp = false)
+        val got = ArrayList<IncomingAlerts.Fresh>()
+        TestCore.onMain { core.incomingAlertSink = { got += it } }
+        val packet = rig.bea.postman.send(rig.bea.awa, Body.Text("fr", "alerte par le relais"), 1, 0)!!.packet
+        rig.wire.letters += HubClient.Mail(4, 301, packet)
+        rig.wire.letters += HubClient.Mail(5, 301, packet)
+        rig.link.up(rig.wire)
+        Views.waitUntil(8_000) { cursor() == 5L }
+        TestCore.onMain {
+            val kept = core.history.messages(rig.chatId).single()
+            assertEquals("alerte par le relais", kept.text)
+            assertEquals(listOf(IncomingAlerts.Fresh(kept.id, rig.chatId, ChatKind.PERSON)), got.toList())
+        }
     }
 
     @Test fun aHubThatLostItsMailMakesTheCursorStartAgain() {

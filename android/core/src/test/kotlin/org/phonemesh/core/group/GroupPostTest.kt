@@ -320,6 +320,74 @@ class GroupPostTest {
         assertEquals(listOf(kofi.account), esi.store.private.map { it.first })
     }
 
+    /** Who [p] was told left its two-person group [g], ending it there (G4, review G9-14). */
+    private fun ended(p: Phone, g: ByteArray) =
+        p.store.events.filterIsInstance<GroupPost.Event.Ended>().filter { it.group.contentEquals(g) }.map { it.by }
+
+    @Test fun theOnlyAdminOfATwoPersonGroupLeavingEndsItForTheOtherPerson() {
+        val (ps, g) = group("Ama", "Kofi")
+        val (ama, kofi) = ps
+        // Nobody is left to hand over to, so Ama names nobody; the other person is told instead of nobody.
+        assertTrue(ama.post.leave(g, null, now))
+        assertEquals("the other person is told", listOf(kofi.account), ama.store.private.map { it.first })
+        settle()
+        assertEquals(GroupMember.State.LEFT, ama.state(g))
+        assertEquals(GroupMember.State.ENDED, kofi.state(g))
+        assertEquals(listOf(ama.account), ended(kofi, g))
+        assertNull("nobody is left to write to", kofi.post.send(g, listOf(byteArrayOf(1, 1) to false), null, now))
+        assertTrue("an ended group can be dropped", kofi.post.forget(g))
+    }
+
+    @Test fun theOtherPersonOfATwoPersonGroupLeavingEndsItForTheAdmin() {
+        val (ps, g) = group("Ama", "Kofi")
+        val (ama, kofi) = ps
+        val epoch = ama.post.member(g)!!.epoch
+        assertTrue(kofi.post.leave(g, null, now))
+        settle(); tickAll()
+        assertEquals(GroupMember.State.ENDED, ama.state(g))
+        assertEquals("no epoch for one person", epoch, ama.post.member(g)!!.epoch)
+        assertEquals(listOf(kofi.account), ended(ama, g))
+        assertNull(ama.post.send(g, listOf(byteArrayOf(1, 1) to false), null, now))
+        assertTrue(ama.post.forget(g))
+    }
+
+    @Test fun aLeavingEndsOnlyATwoPersonGroupAndOnlyInTheEpochHeld() {
+        val (ps, g) = group("Ama", "Kofi", "Esi")
+        val (ama, kofi, esi) = ps
+        // Three people: Ama's next epoch drops Kofi, as before, and the group goes on for both others.
+        assertTrue(kofi.post.leave(g, null, now))
+        settle(); tickAll()
+        assertNull(esi.post.member(g)!!.roster!!.member(kofi.id))
+        assertEquals(GroupMember.State.ACTIVE, esi.state(g))
+        assertTrue(ended(esi, g).isEmpty() && ended(ama, g).isEmpty())
+        // Now two. Esi's notice is held back while Ama restyles, so it names the epoch before the one Ama holds: a
+        // notice that old may be from before someone came back (review G9-14), so it ends nothing.
+        assertTrue(esi.post.leave(g, null, now))
+        val late = esi.store.private.toList(); esi.store.private.clear()
+        assertTrue(ama.post.restyle(g, "Puits 2", 0x2E7D32, Avatar.Letter, false, now)); settle()
+        for ((_, body) in late) assertTrue(ama.post.takePrivate(esi.account, body, now))
+        tickAll()
+        assertEquals(GroupMember.State.ACTIVE, ama.state(g))
+        assertTrue(ended(ama, g).isEmpty())
+    }
+
+    @Test fun aTwoPersonGroupWithSomeoneInvitedGoesOnWithoutTheLeaver() {
+        val (ps, g) = group("Ama", "Kofi")
+        val (ama, kofi) = ps
+        val yaw = Phone("Yaw"); phones += yaw; ama.know(yaw); yaw.know(ama)
+        assertTrue(ama.post.invite(g, listOf(yaw.account), now)); settle()
+        assertTrue(kofi.post.leave(g, null, now))
+        settle(); tickAll()
+        assertEquals("someone invited may still join", GroupMember.State.ACTIVE, ama.state(g))
+        assertTrue(ended(ama, g).isEmpty())
+        assertTrue(yaw.post.join(yaw.store.invitations().single(), now))
+        settle(); tickAll()
+        assertNotNull("the admin's next epoch adds Yaw", yaw.post.member(g)?.roster)
+        val list = yaw.post.member(g)!!.roster!!
+        assertNull("the person who left is not added back", list.member(kofi.id))
+        assertEquals(listOf(ama.id, yaw.id).map { it.toList() }, list.members.map { it.identity.toList() })
+    }
+
     @Test fun anAdminChangesTheGroupOnlyWhenEveryMemberIsAContact() {
         val (ps, g) = group("Ama", "Kofi", "Esi", "Yaw")
         val (ama, kofi, esi, yaw) = ps

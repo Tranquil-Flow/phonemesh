@@ -445,4 +445,36 @@ class GroupScreensTest {
         assertNull(TestCore.onMain { core.history.chat(chatId) })
         assertNull("no live group behind a deleted chat", TestCore.onMain { core.groupStore.rows.group(hex) })
     }
+
+    /** G4 (review G9-14): in a group of two, the other person leaving ends it here with a note; then it can be deleted. */
+    @Test fun whenTheOtherPersonOfAGroupOfTwoLeavesItEndsWithANote() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        assertTrue(beaGroups.post.leave(group, null, 2_400_000))
+        toAwa(2_400_000)
+        until(10_000) { TestCore.onMain { core.groupView(chatId)?.state } == GroupMember.State.ENDED }
+        val notes = TestCore.onMain { core.history.messages(chatId).filter { it.kind == MessageKind.NOTE }.map { core.groupNote(chatId, it.text) } }
+        assertTrue(notes.toString(), "Bea left. The group has ended." in notes)
+        assertFalse("Awa did not leave", "You left the group." in notes)
+        val conversation = Views.launch<ConversationActivity>(ConversationActivity.intent(context, chatId))
+        until { Views.withText(conversation, "This group has ended.") != null }
+        assertNotNull(Views.tagged(conversation, "group_delete"))
+        Views.finish(conversation)
+        assertTrue(TestCore.onMain { core.deleteChat(chatId) })
+        assertNull(TestCore.onMain { core.history.chat(chatId) })
+    }
+
+    /** G4: Awa, the only admin of a group of two, leaving tells Bea, whose group ends too. */
+    @Test fun theOnlyAdminOfAGroupOfTwoLeavingTellsTheOtherPerson() {
+        prepare()
+        val (chatId, group) = activeGroup()
+        assertTrue(TestCore.onMain { core.leaveGroup(chatId, null) })
+        assertEquals(GroupMember.State.LEFT, TestCore.onMain { core.groupView(chatId)!!.state })
+        until(10_000) {
+            TestCore.onMain { core.runPostman() }
+            toBea(2_500_000)
+            beaGroups.post.member(group)?.state == GroupMember.State.ENDED
+        }
+        assertEquals(listOf(bea.awa), beaGroups.events.filterIsInstance<GroupPost.Event.Ended>().map { it.by })
+    }
 }

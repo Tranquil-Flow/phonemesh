@@ -151,7 +151,7 @@ class AppGroupStore(
             g, chatId, vault.seal(s.state, stateLabel(g)), s.signer, signerSealed, encodeInvited(s.invited), s.receiptDue, s.profileDue,
             s.adminDue, s.askedEpoch, s.draft?.let(::encodeDraft), member.state.name, member.epoch, list?.isAdmin(me) ?: (member.inviter == null),
             looks.name, looks.colour, GroupAvatar.encode(looks.avatar), looks.recentForNew, waiting,
-            member.state == GroupMember.State.LEFT || member.state == GroupMember.State.REMOVED,
+            member.gone,
         ))
         if (existing == null && member.inviter == null) history.addNote(chatId, GroupNotes.MADE, now())
     }
@@ -180,6 +180,7 @@ class AppGroupStore(
             }
             is GroupPost.Event.InvitationArrived -> Unit
             is GroupPost.Event.CannotReach -> history.addNote(chat, GroupNotes.unreachable(e.people.map { it.toString() }), now())
+            is GroupPost.Event.Ended -> history.addNote(chat, GroupNotes.ended(e.by.toString()), now())
         }
     }
 
@@ -347,4 +348,6 @@ object GroupNotes {
     fun left(accounts: List<String>) = "left:" + accounts.joinToString(",")
     /** People an admin's epoch could not reach because they are no longer contacts (review G9-7). */
     fun unreachable(accounts: List<String>) = "unreachable:" + accounts.joinToString(",")
+    /** The other person of a group of two left, so it ended on this phone (G4). */
+    fun ended(account: String) = "ended:$account"
 }

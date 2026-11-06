@@ -257,3 +257,9 @@ group with no admin and is not told. Proposed: the leaving admin sends the other
 contact, else op 11 naming them), and that phone ends the group for itself (`LEFT`) with a note that the other person
 left and the group has ended. A v0.1.2 receiver ignores the notice as now. This needs no new key path and can be
 built and tested separately from D1-D5.
+
+Built as G4a (2026-11-06), with two differences from the proposal above. The ending is its own state, `ENDED`, so the
+conversation can say "This group has ended." rather than "You left the group."; it is stored after the earlier states,
+so saved v0.1.2 states read the same. The notice goes only privately, to a contact; op 11 for a non-contact waits for
+G2/G3. Either person's `Leave` ends a group of two, but only one that names the epoch the receiver holds, while no
+newer key waits and while nobody invited may still join (the admin's next epoch then adds them without the leaver).

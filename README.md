@@ -459,9 +459,10 @@ pictures.
   longer than about 126 bytes are not shared with new members.
 - **Group pictures and photos need a local hub.** Members without it see a sketch or the
   member's emoji or letter. Recent messages for new members go only through a hub too.
-- **The last admin of a two-person group cannot hand it over.** If that admin leaves, the
-  other person keeps a group with no admin and nobody is told. Both people leaving is
-  cleaner.
+- **Leaving a group of two ends it.** The other person's phone is told privately, so only
+  when the two of you are contacts. It then says "This group has ended." and the chat can be
+  deleted. If someone invited has not joined yet, the group goes on without the person who
+  left. A phone still on v0.1.2 is not told and keeps the group open, as before.
 - **Hub updates cover speech packs, not the app.** They need the hub's Wi-Fi and a build
   that carries the project's real update keys. The app itself is still updated by installing
   a new APK.

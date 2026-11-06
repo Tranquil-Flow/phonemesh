@@ -652,7 +652,8 @@ class AppCore private constructor(
         val people: Int, val invited: Int, val code: IntArray?,
     ) {
         val conflict get() = state == org.phonemesh.core.group.GroupMember.State.CONFLICT
-        val gone get() = state == org.phonemesh.core.group.GroupMember.State.REMOVED || state == org.phonemesh.core.group.GroupMember.State.LEFT
+        val gone get() = state == org.phonemesh.core.group.GroupMember.State.REMOVED || state == org.phonemesh.core.group.GroupMember.State.LEFT ||
+            state == org.phonemesh.core.group.GroupMember.State.ENDED
     }
 
     /** One person in a group's details: on the list ([joined]) or invited and not joined yet. */
@@ -821,6 +822,7 @@ class AppCore private constructor(
             code.startsWith("joined:") -> names(code.removePrefix("joined:")).joinToString(" ") { text(UiText(R.string.group_joined, listOf(it))) }
             code.startsWith("left:") -> names(code.removePrefix("left:")).joinToString(" ") { text(UiText(R.string.group_left, listOf(it))) }
             code.startsWith("unreachable:") -> names(code.removePrefix("unreachable:")).joinToString(" ") { text(UiText(R.string.group_cannot_reach, listOf(it))) }
+            code.startsWith("ended:") -> names(code.removePrefix("ended:")).joinToString(" ") { text(UiText(R.string.group_ended, listOf(it))) }
             else -> ""
         }
     }

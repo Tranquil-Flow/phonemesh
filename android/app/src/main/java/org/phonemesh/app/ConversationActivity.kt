@@ -688,7 +688,11 @@ class ConversationActivity : ScreenActivity() {
             LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad() / 4 })
         when {
             group.gone -> {
-                line(if (group.state == org.phonemesh.core.group.GroupMember.State.LEFT) R.string.group_you_left else R.string.group_removed)
+                line(when (group.state) {
+                    org.phonemesh.core.group.GroupMember.State.LEFT -> R.string.group_you_left
+                    org.phonemesh.core.group.GroupMember.State.ENDED -> R.string.group_ended_here
+                    else -> R.string.group_removed
+                })
                 action(R.string.group_delete_chat, null, R.drawable.ic_delete, "group_delete") { if (core.forgetGroup(chatId)) finish() }
             }
             group.conflict && group.admin -> {

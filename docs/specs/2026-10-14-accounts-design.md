@@ -197,6 +197,11 @@ From handover 3 and the owner on 2026-10-14:
     - Complete the owner's offline update-key round-trip before APK signing. Return only `public-keys.txt` and
       `baseline-catalog.pmup`; private keys and passphrases stay with the owner. TEST-root staging is provisional
       and must be rebuilt after the pair's own tested commit. This does not approve main promotion or publication.
+78. v0.1.3 size (owner, 2026-11-06, answer D6a): as in decision 73, each ABI may grow by at most 256 KB (262,144 B) over
+    v0.1.2 for the whole release, not per slice. Each slice's measured growth is recorded beside the build ceiling in
+    `android/gradle.properties`, which is raised by that growth within the allowance; the first raise is arm64
+    16,803,000 → 16,804,000 B for G4a. Until signed v0.1.2 exists, growth is measured on unsigned release builds over
+    the prepared candidate. The signed APKs are still checked against their own ceilings when they exist.
 
 ## What an outsider can and cannot learn
 

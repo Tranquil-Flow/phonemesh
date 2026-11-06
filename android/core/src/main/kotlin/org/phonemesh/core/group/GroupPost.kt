@@ -104,6 +104,8 @@ class GroupPost(
         class InvitationArrived(override val group: ByteArray, val from: AccountId) : Event()
         /** An epoch did not start because keys go privately and these members are not contacts (review G9-7). */
         class CannotReach(override val group: ByteArray, val people: List<AccountId>) : Event()
+        /** The only other person of a two-person group ([by]) left: the group ended on this phone (G4, review G9-14). */
+        class Ended(override val group: ByteArray, val by: AccountId) : Event()
     }
 
     /**
@@ -280,6 +282,12 @@ class GroupPost(
         // join and leaving that came meanwhile (one epoch for many: each costs a key per member and the list).
         val forAdmin = (control is GroupControl.Signer && o.invited.any { it.first == from }) || control is GroupControl.Leave
         if (taken && forAdmin && isAdmin(o) && o.adminDue == null) o.adminDue = now + ADMIN_BATCH_MS
+        // The other person of a group of two left: nobody is left to write to, so the group ends here too (G4, review
+        // G9-14). Not while someone invited may still join: the admin's next epoch then adds them without the leaver.
+        if (taken && control is GroupControl.Leave && o.invited.isEmpty() && o.member.endedBy(fromIdentity, control.epoch)) {
+            o.member.end()
+            o.events += Event.Ended(o.group, from)
+        }
         return finish(o, now)
     }
 
@@ -304,7 +312,6 @@ class GroupPost(
         }
         o.invited.removeAll { it.first in bad }
         if (ready.isEmpty()) return bad.isNotEmpty()
-        val room = GroupRoster.MAX_MEMBERS - (list?.members?.size ?: 1)
         val base: List<GroupRoster.Member>
         val build: (List<GroupRoster.Member>) -> GroupRoster
         if (list == null) {
@@ -312,9 +319,13 @@ class GroupPost(
             base = listOf(GroupRoster.Member(me, true, o.member.mySigner))
             build = { GroupRoster(d.name, d.colour, it, d.avatar, d.recentForNew) }
         } else {
-            base = list.members
+            // Someone who said they left is not carried into the next list: an epoch for the leaving alone cannot be
+            // made when only one person would stay (a group of two whose other person left while someone was invited).
+            val gone = o.member.leaving()
+            base = list.members.filter { mem -> gone.none { it.contentEquals(mem.identity) } }
             build = { GroupRoster(list.name, list.colour, it, list.avatar, list.recentForNew) }
         }
+        val room = GroupRoster.MAX_MEMBERS - base.size
         // Add joiners one by one: one that the list refuses is dropped, never an exception for the others.
         val taken = ArrayList<Triple<AccountId, ByteArray, ByteArray>>()
         var next: GroupRoster? = null
@@ -448,7 +459,7 @@ class GroupPost(
         }
         if (m.state != o.stateBefore) {
             o.events += Event.StateChanged(o.group, m.state)
-            if (m.state == GroupMember.State.REMOVED || m.state == GroupMember.State.LEFT) { o.receiptDue = null; o.profileDue = null; o.invited.clear() }
+            if (m.gone) { o.receiptDue = null; o.profileDue = null; o.invited.clear() }
         }
         return commit(o, now)
     }
@@ -490,8 +501,10 @@ class GroupPost(
                         val list = m.roster!!
                         val gone = m.leaving()
                         val stay = list.members.filter { mem -> gone.none { it.contentEquals(mem.identity) } }
-                        val next = GroupRoster(list.name, list.colour, stay, list.avatar, list.recentForNew)
+                        // A list holds at least two people: with one left there is no epoch for the leaving alone, and
+                        // making one would throw before anyone invited is added below (G4).
                         if (stay.size >= 2) {
+                            val next = GroupRoster(list.name, list.colour, stay, list.avatar, list.recentForNew)
                             val unreachable = unreachable(next)
                             if (unreachable.isEmpty()) startEpoch(o, next, now) else o.events += Event.CannotReach(o.group, unreachable)
                         }
@@ -548,7 +561,7 @@ class GroupPost(
     /** This phone's name or picture changed: every group gets the new profile soon. */
     fun profileChanged(now: Long): Boolean = store.groups().all { g ->
         val o = open(g) ?: return@all true
-        if (o.member.roster == null || o.member.state == GroupMember.State.REMOVED || o.member.state == GroupMember.State.LEFT) return@all true
+        if (o.member.roster == null || o.member.gone) return@all true
         o.profileDue = now + profileDelay()
         commit(o, now)
     }
@@ -628,10 +641,10 @@ class GroupPost(
         return finish(o, now)
     }
 
-    /** Drop a group this phone left or was removed from (its chat is the app's). */
+    /** Drop a group this phone left, was removed from or saw end (its chat is the app's). */
     fun forget(group: ByteArray): Boolean {
         val o = open(group) ?: return false
-        if (o.member.state != GroupMember.State.LEFT && o.member.state != GroupMember.State.REMOVED) return false
+        if (!o.member.gone) return false
         return commit(o, 0L, Change(group, deleted = true))
     }
 

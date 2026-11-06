@@ -192,7 +192,11 @@ hub only. New members see them marked "Shared by &lt;admin&gt;". Without that sw
 sees nothing from before: "You joined. Earlier messages are not shown."
 
 **Leaving and removing.** **Leave group** asks first; messages already sent may still arrive.
-Someone who is removed keeps the messages they already have.
+Someone who is removed keeps the messages they already have. In a group of two, leaving ends
+the group: the other person's phone says "&lt;name&gt; left. The group has ended." and shows
+**Delete chat**. The notice goes privately, so it reaches them only when the two of you are
+contacts, and a phone still on v0.1.2 is not told. If someone invited has not joined yet, the
+group goes on without the person who left.
 
 **Group code.** Group details shows four pictures worked out from the member list. Compare
 them to look for different lists. They are a short check of the list, not proof that its

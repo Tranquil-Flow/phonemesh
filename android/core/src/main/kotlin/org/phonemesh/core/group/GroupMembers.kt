@@ -386,7 +386,11 @@ class GroupMember(
     /** The admin whose invitation this phone joined; null for the phone that made the group. */
     val inviter: ByteArray? = inviter?.copyOf()
 
-    enum class State { INVITED, ACTIVE, CONFLICT, REMOVED, LEFT }
+    /** [ENDED]: the only other person of a two-person group left, so nobody is left to write to (G4, review G9-14). */
+    enum class State { INVITED, ACTIVE, CONFLICT, REMOVED, LEFT, ENDED }
+
+    /** Whether this phone is out of the group for good: removed, left, or the group ended here. */
+    val gone: Boolean get() = state == State.REMOVED || state == State.LEFT || state == State.ENDED
 
     /**
      * Something read from the group: who sent it, its op ([GroupBody]) and body, whether it came in the epoch before,
@@ -545,7 +549,7 @@ class GroupMember(
      * that list; the first key only from the [inviter]. The same key again is accepted and changes nothing.
      */
     fun receiveKey(from: ByteArray, key: GroupKey, now: Long): Boolean {
-        if (!key.group.contentEquals(group) || state == State.REMOVED || state == State.LEFT) return false
+        if (!key.group.contentEquals(group) || gone) return false
         expire(now)
         if (key.epoch == epoch && key.digest.contentEquals(digest) && GroupKey.tag(group, epoch, key.secret).contentEquals(secretTag)) return true
         val current = roster
@@ -627,15 +631,34 @@ class GroupMember(
     /**
      * This phone leaves: it stops reading and sending at once, and returns the one admin to tell and the [GroupControl.Leave]
      * body (null when there is nobody to tell). The first admin on the list other than this phone that [canTell] (a
-     * contact: the notice goes privately) is told, so only one admin acts. The last admin promotes someone with [newEpoch] first (decision 72 d).
+     * contact: the notice goes privately) is told, so only one admin acts; in a group of two without another admin, the
+     * other person is told instead. The last admin promotes someone with [newEpoch] first (decision 72 d).
      */
     fun leave(canTell: (ByteArray) -> Boolean = { true }): Pair<ByteArray, ByteArray>? {
         val list = roster
-        val told = list?.members?.firstOrNull { it.admin && !it.identity.contentEquals(me) && canTell(it.identity) }
+        val others = list?.members.orEmpty().filter { !it.identity.contentEquals(me) }
+        // An admin first. In a group of two with no other admin, the one other person, so the group ends for them too
+        // instead of staying open with nobody to read it (G4, review G9-14).
+        val told = others.firstOrNull { it.admin && canTell(it.identity) }
+            ?: others.singleOrNull()?.takeIf { !it.admin && canTell(it.identity) }
         val out = if (list != null && told != null && epoch in 1 until 0xFFFF_FFFFL) told.identity.copyOf() to GroupControl.Leave(group, epoch).encode() else null
         removed(State.LEFT)
         return out
     }
+
+    /**
+     * Whether a [GroupControl.Leave] from [from] naming [epoch] ends the group on this phone: the list held has two
+     * people and [from] is the other, the notice names the epoch held (an older one may be from before they came back,
+     * review G9-14), and no newer key waits (G4).
+     */
+    fun endedBy(from: ByteArray, epoch: Long): Boolean {
+        val list = roster ?: return false
+        return (state == State.ACTIVE || state == State.CONFLICT) && list.members.size == 2 && !from.contentEquals(me) &&
+            list.member(from) != null && epoch == this.epoch && pendings.values.none { it.key.epoch > this.epoch }
+    }
+
+    /** The other person of a group of two left ([endedBy]): this phone stops reading and sending, as when leaving. */
+    fun end() = removed(State.ENDED)
 
     /**
      * On-air codes this phone can read next, and its own (review C6): what to listen and ask a hub for. [hub] adds the

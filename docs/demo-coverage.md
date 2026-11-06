@@ -91,7 +91,7 @@ through the hub's pinned key. This is the shipped behaviour, worth a design look
 | Show the guide again, Licences, For helpers | Settings | **Licences** and **For helpers** verified; the licence notices are in French only |
 | Share the app | Settings, **Share the app**: the share sheet offers the app and its voice files | Yes |
 | Help | **?** on Chats | Yes |
-| Notifications | New messages while the app is closed | Not in the app: there are no notifications for new messages, only for planned sends and the hub in the background |
+| Notifications | New messages while the app is closed | Not walked in the demo. Up to v0.1.2 the app has no notifications for new messages, only for planned sends and the hub in the background; the v0.1.3 branch adds opt-in alerts (Settings, Alerts, **Alert me to new messages**) that show no names or words, only while the app is open or listening |
 
 ## Not in the demo
 

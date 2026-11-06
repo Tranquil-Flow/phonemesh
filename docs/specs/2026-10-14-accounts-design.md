@@ -202,6 +202,18 @@ From handover 3 and the owner on 2026-10-14:
     `android/gradle.properties`, which is raised by that growth within the allowance; the first raise is arm64
     16,803,000 → 16,804,000 B for G4a. Until signed v0.1.2 exists, growth is measured on unsigned release builds over
     the prepared candidate. The signed APKs are still checked against their own ceilings when they exist.
+79. Relayed group keys (owner, 2026-11-06, answers D1a, D2a, D3a and D5a; design
+    `docs/specs/2026-11-06-relayed-group-control-design.md`):
+    - A promoted admin may give the new group key to a member it has not added. It trusts the list's binding of that
+      member to its signing key and the box key that member announced, signed, in the group.
+    - The key goes in an envelope sealed to the member's separate group-only box key and carried by the group. A
+      forwarding phone or a hub carries bytes and confers no authority; a new key is never protected by the old group
+      key alone.
+    - A member makes its box key when it joins or upgrades and a new one after an envelope has brought it a key, not
+      after each message. The previous private half is kept 72 hours for envelopes still on their way, then wiped.
+    - Envelopes go only to phones that announced a box key; older phones still need the admin as a contact. If any
+      member has no route, the change does not start; there is no weaker fallback.
+    - Still open: D4, whether a change hides how many envelopes it carries. G2/G3 code waits for it.
 
 ## What an outsider can and cannot learn
 

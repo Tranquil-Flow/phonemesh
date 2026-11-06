@@ -1,8 +1,9 @@
 # Relayed group control (v0.1.3 G1): design for review
 
-Status: **PROPOSED, not pinned.** Source-based design for the v0.1.3 G1 gate
-(`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). It chooses no trust change: the owner decisions D1-D5 at the
-end must be answered before any of it enters product code. No code, wire byte or default changes with this note.
+Status: **construction chosen, not built.** Source-based design for the v0.1.3 G1 gate
+(`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
+(accounts decision 79): R3 with K2 below, with the D1 trust change. D4 is open, so the wire bytes are not pinned and no
+G2/G3 code has started. No code, wire byte or default changes with this note.
 
 Source reviewed (identical in the prepared v0.1.2 candidate `10492845` and the v0.1.3 branch; `git diff --stat
 10492845 HEAD` over `core/group`, `core/mail` and `core/wire` is empty): `android/core/src/main/kotlin/org/phonemesh/core/
@@ -199,13 +200,17 @@ Removal notices still go privately to removed contacts; a removed non-contact fi
 
 ## What is still trusted or exposed
 
-- **The roster's signing-key binding (trust change, D1).** A promoted admin gives the key to a member it never added,
-  trusting the signing key the earlier admin bound to that member and the box key that member then signed. Today an
-  admin only trusts its own contacts for this; ordinary members already trust admins' lists for everyone (decision 66
-  trade-off). An admin that lied in the list could already speak as that member and is already given every secret.
-- **Metadata inside the group (D4).** Members of the old list, including one being removed, see how many envelopes an
-  admin sent in a change (not to whom: no recipient field), so roughly how many members that admin has not added.
-  Outsiders learn nothing new: a change already costs several packets of the same look.
+- **The roster's signing-key binding (trust change, D1a, accepted).** A promoted admin gives the key to a member it
+  never added, trusting the signing key the earlier admin bound to that member and the box key that member then signed.
+  Today an admin only trusts its own contacts for this; ordinary members already trust admins' lists for everyone
+  (decision 66 trade-off). An admin that lied in the list could already speak as that member and is already given
+  every secret.
+- **Metadata inside the group and on air (D4, open).** With envelopes only where needed, members of the old list,
+  including one being removed, see how many envelopes an admin sent in a change, so how many members it has not added.
+  There is no recipient field, but members of the new list see who announces a new box key after the change, which
+  names every member the envelopes reached (D3a), and a member who asks with op 10 is named to the old list. The new ops
+  have fixed sizes and group packets are not padded, so someone who can pick out one change's packets on air may count
+  them. See "D4 trade-offs" below.
 - **Forward secrecy.** A pairwise key is ratchet-protected; an envelope is protected by the recipient's box key until it
   is rotated after use and the old half wiped. A phone compromised before that wipe exposes the epochs sealed to it.
 - **Airtime.** One radio packet per box-key announcement (at join/upgrade and after each envelope-delivered epoch), one
@@ -236,7 +241,10 @@ Deterministic core tests in `GroupPostTest`/`GroupMembersTest` style, written fi
 
 ## Decisions for the owner
 
-These are batched; none blocks other v0.1.3 work. Recommended picks first.
+Answered 2026-11-06 (accounts decision 79): **D1a, D2a, D3a, D5a**. As answered, D3a rotates a box key after it has
+been used for an envelope-delivered epoch, not after each chat message, and keeps the previous private half 72 hours
+for envelopes still on their way; D5a lets no change start while any member lacks a valid route. **D4 is open.** The
+options as they were put, recommended picks first:
 
 - **D1, trust change.** (a) A promoted admin may give the new key to a member it has not added, trusting the list's
   signing-key binding and that member's signed box key. (b) Keep "admins know every member" (no relay; G is reduced to
@@ -249,6 +257,34 @@ These are batched; none blocks other v0.1.3 work. Recommended picks first.
   (b) Hide it: an envelope for every member in every change (one more radio packet per member per change).
 - **D5, mixed versions.** (a) Envelopes only to phones that announced a box key; others need a contact as today, with a
   clear note. (b) Relayed changes only when every member's phone announced one.
+
+### D4 trade-offs (2026-11-06, open; nothing chosen)
+
+From this note and a small protocol model outside the repository (one change, at most one member who misses it, no
+other traffic, no radio-layer metadata, no implementation); sizes from `GroupCipher` (9 + body + 64 + 16, no padding).
+
+- **What gives the recipients away besides the count.** With D3a, a new box key announced in the new epoch names each
+  member an envelope reached, to every member of the new list; the admin's retries are keyed on it. An op 10 Ask names
+  the asker to every member of the old list, a removed one included. Envelope (209 B), box key (124 B) and Ask (96 B)
+  sizes are fixed, so someone who can pick out one change on air may count announcements.
+- **Dummy envelopes for the other members** hide the envelope count from the old list, but the announcements still give
+  the count to anyone who can count them, and the names to the new list. They hide nothing from retained members.
+- **A real envelope for every member with a box key** (contacts too), with every member who misses the change asking by
+  op 10 and the admin re-airing all envelopes or none, is the only modelled way to hide who and how many from every
+  member: everyone then announces a new box key after every change. It puts each contact's new key under its box key,
+  which is weaker than the pairwise session until the key is rotated and wiped; and if contacts also still get the
+  private key, counting those private packets can give the number back. Envelope-only keys for contacts would change
+  "Which path an admin uses" rule 1, which is outside D1-D5 as answered.
+- **Slots, if envelopes are padded.** One per member of the list being replaced, other than the admin, tells its
+  holders nothing new. One per member staying tells a removed member how many stay. A fixed 19 hides the group's size
+  on air but sends 19 envelopes for a group of three. Slot order is shuffled.
+- **Cost of one change (arithmetic, not airtime).** 20 members, 2 without the admin as a contact: needed-only 32 packets,
+  5,504 B; dummies 49, 9,057 B; a real envelope for everyone 49, 8,700 B (contacts by envelope only, 19 new box keys)
+  or 66, 11,165 B (also privately). A member's worst re-airs: 24 packets needed-only, 60 when all envelopes are re-aired.
+  Every reader of the old epoch checks one signature per envelope; a member with a box key tries up to two key
+  agreements per envelope (4 versus 38 here). With 19 envelopes in a row, a reader that missed more than one earlier
+  packet of the admin's must open an earlier envelope first (the window is 20). Radio time, CPU time and battery are
+  not measured.
 
 ## Related G4 input (no trust change)
 

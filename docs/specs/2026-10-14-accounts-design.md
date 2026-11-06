@@ -213,7 +213,19 @@ From handover 3 and the owner on 2026-10-14:
       after each message. The previous private half is kept 72 hours for envelopes still on their way, then wiped.
     - Envelopes go only to phones that announced a box key; older phones still need the admin as a contact. If any
       member has no route, the change does not start; there is no weaker fallback.
-    - Still open: D4, whether a change hides how many envelopes it carries. G2/G3 code waits for it.
+    - D4, whether a change hides how many envelopes it carries, was answered the same day: decision 80.
+80. Envelope count (owner, 2026-11-06, answer D4a; same design note, "D4 trade-offs"): envelopes only where needed.
+    - Contacts keep getting a new group key over their private, ratcheted session. An envelope goes only to a member
+      who is not the admin's contact and has announced a box key. No dummy, count or full-cover padding, no
+      envelope-only keys for contacts and no re-sending every envelope to everyone.
+    - Box keys rotate as in decision 79: after an envelope has brought a key, not after each message.
+    - Accepted and to be told plainly: members of the new list can tell which members an envelope reached (they
+      announce new box keys); members of the old list, a removed member included, can count the envelopes and see who
+      asks again; someone who can pick out one change's packets on air may count them by size and timing. Nothing
+      claims recipient anonymity or resistance to traffic analysis.
+    - This accepts that metadata only. Authentication, removed-member exclusion, replay, state, persistence and nonce
+      rules, mixed-version refusal, the changed-protocol review (plan G5) and radio-budget and physical qualification
+      all still apply. The old group key alone never protects a new one.
 
 ## What an outsider can and cannot learn
 

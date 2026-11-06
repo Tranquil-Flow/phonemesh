@@ -2,8 +2,9 @@
 
 Status: **construction chosen, not built.** Source-based design for the v0.1.3 G1 gate
 (`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
-(accounts decision 79): R3 with K2 below, with the D1 trust change. D4 is open, so the wire bytes are not pinned and no
-G2/G3 code has started. No code, wire byte or default changes with this note.
+(accounts decision 79): R3 with K2 below, with the D1 trust change; and D4a the same day (decision 80): envelopes only
+where needed, no padding, the visible metadata told plainly. So the ops below are pinned as written. No code, wire byte
+or default changes with this note.
 
 Source reviewed (identical in the prepared v0.1.2 candidate `10492845` and the v0.1.3 branch; `git diff --stat
 10492845 HEAD` over `core/group`, `core/mail` and `core/wire` is empty): `android/core/src/main/kotlin/org/phonemesh/core/
@@ -205,12 +206,14 @@ Removal notices still go privately to removed contacts; a removed non-contact fi
   Today an admin only trusts its own contacts for this; ordinary members already trust admins' lists for everyone
   (decision 66 trade-off). An admin that lied in the list could already speak as that member and is already given
   every secret.
-- **Metadata inside the group and on air (D4, open).** With envelopes only where needed, members of the old list,
-  including one being removed, see how many envelopes an admin sent in a change, so how many members it has not added.
+- **Metadata inside the group and on air (D4a, accepted, decision 80).** Envelopes go only where needed, so members of
+  the old list, including one being removed, see how many envelopes an admin sent in a change, so how many members it
+  has not added.
   There is no recipient field, but members of the new list see who announces a new box key after the change, which
   names every member the envelopes reached (D3a), and a member who asks with op 10 is named to the old list. The new ops
   have fixed sizes and group packets are not padded, so someone who can pick out one change's packets on air may count
-  them. See "D4 trade-offs" below.
+  them. See "D4 trade-offs" below. No recipient anonymity or traffic-analysis resistance is claimed; these are
+  inferences from the design, not observations of built code.
 - **Forward secrecy.** A pairwise key is ratchet-protected; an envelope is protected by the recipient's box key until it
   is rotated after use and the old half wiped. A phone compromised before that wipe exposes the epochs sealed to it.
 - **Airtime.** One radio packet per box-key announcement (at join/upgrade and after each envelope-delivered epoch), one
@@ -243,8 +246,8 @@ Deterministic core tests in `GroupPostTest`/`GroupMembersTest` style, written fi
 
 Answered 2026-11-06 (accounts decision 79): **D1a, D2a, D3a, D5a**. As answered, D3a rotates a box key after it has
 been used for an envelope-delivered epoch, not after each chat message, and keeps the previous private half 72 hours
-for envelopes still on their way; D5a lets no change start while any member lacks a valid route. **D4 is open.** The
-options as they were put, recommended picks first:
+for envelopes still on their way; D5a lets no change start while any member lacks a valid route. **D4a** was answered
+the same day (accounts decision 80). The options as they were put, recommended picks first:
 
 - **D1, trust change.** (a) A promoted admin may give the new key to a member it has not added, trusting the list's
   signing-key binding and that member's signed box key. (b) Keep "admins know every member" (no relay; G is reduced to
@@ -258,7 +261,7 @@ options as they were put, recommended picks first:
 - **D5, mixed versions.** (a) Envelopes only to phones that announced a box key; others need a contact as today, with a
   clear note. (b) Relayed changes only when every member's phone announced one.
 
-### D4 trade-offs (2026-11-06, open; nothing chosen)
+### D4 trade-offs (2026-11-06; the owner then chose D4a, decision 80)
 
 From this note and a small protocol model outside the repository (one change, at most one member who misses it, no
 other traffic, no radio-layer metadata, no implementation); sizes from `GroupCipher` (9 + body + 64 + 16, no padding).

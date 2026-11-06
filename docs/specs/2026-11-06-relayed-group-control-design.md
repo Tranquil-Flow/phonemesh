@@ -1,6 +1,6 @@
 # Relayed group control (v0.1.3 G1): design for review
 
-Status: **construction chosen, not built.** Source-based design for the v0.1.3 G1 gate
+Status: **construction chosen; being built (only G3a, the envelope body, so far).** Source-based design for the v0.1.3 G1 gate
 (`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
 (accounts decision 79): R3 with K2 below, with the D1 trust change; and D4a the same day (decision 80): envelopes only
 where needed, no padding, the visible metadata told plainly. So the ops below are pinned as written. No code, wire byte
@@ -140,6 +140,14 @@ What this gives, against the rules above:
   bound to nobody outside the group.
 - Rule 6: envelopes use A's old chain positions, saved in the same transaction; the old writer is then gone, so no
   position is reused after a restart. Each envelope has its own ephemeral key, so each AES key and nonce is used once.
+
+Built as G3a (2026-11-06, host JVM tests only): `core/group/GroupEnvelope.kt` seals and opens one op 8 body exactly
+as above: a fresh ephemeral key per envelope, trial opening under the kept box keys newest first, the inner epoch
+compared with the bound one, and anything malformed opening to nothing rather than an exception. Its bytes match a
+second implementation written from this note on another crypto library (same author, so not an independent review).
+Nothing sends or reads op 8 yet. Box keys and their announcements, which path an admin uses, chain positions, retries,
+Ask and saved state are later slices, and the chain-origin, admin-on-the-list and `receiveKey` checks stay with the
+caller.
 
 ### Which path an admin uses
 

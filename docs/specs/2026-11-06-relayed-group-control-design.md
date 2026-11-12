@@ -145,9 +145,19 @@ Built as G3a (2026-11-06, host JVM tests only): `core/group/GroupEnvelope.kt` se
 as above: a fresh ephemeral key per envelope, trial opening under the kept box keys newest first, the inner epoch
 compared with the bound one, and anything malformed opening to nothing rather than an exception. Its bytes match a
 second implementation written from this note on another crypto library (same author, so not an independent review).
-Nothing sends or reads op 8 yet. Box keys and their announcements, which path an admin uses, chain positions, retries,
-Ask and saved state are later slices, and the chain-origin, admin-on-the-list and `receiveKey` checks stay with the
-caller.
+Nothing sends or reads op 8 yet. Box keys and their announcements (built as G3b below), which path an admin uses, chain
+positions, retries, Ask and saved state are later slices, and the chain-origin, admin-on-the-list and `receiveKey`
+checks stay with the caller.
+
+Built as G3b (2026-11-12, host JVM tests only): `core/group/GroupBoxKey.kt` builds and reads one op 9 body (35 bytes:
+op 9, version 1, the 33-byte compressed public key) and `core/group/GroupBoxKeys.kt` keeps, per member of the list
+held, the newest key that member announced on its own chain. The body names no owner, so op 9 carries no cryptography
+of its own: the announcing member is the chain the body travels on. A key belongs to one member, and the claim survives
+that member rotating the key or leaving the list, because a member that left still holds the private half. "Newest" is
+the chain position, not the order of arrival, because a reader may open a later position before an earlier one inside
+its reading window. Seventeen mutants are each caught by their own test; the first round's survivors found three missing
+tests and the arrival-order fault. Nothing sends or reads op 9 yet: the private half is not made or kept by the Vault,
+the keys are not saved, and the app's behaviour and wire traffic are unchanged.
 
 ### Which path an admin uses
 

@@ -1,0 +1,12 @@
+# Op 9 group box key announcement vectors (v0.1.3 G3b), from
+# v013/g3b-boxkey-vectors.py, written from the relayed group control
+# design note alone (same author: a cross-implementation check of the
+# body layout, not an independent review).  Op 9 has no cryptography of
+# its own: the announcing member is the radio chain the body travels on.
+public=0389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255cb
+body=09010389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255cb
+bodyWrongVersion=09020389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255cb
+bodyWrongOp=0a010389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255cb
+bodyShort=09010389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255
+bodyLong=09010389edb14d3f3657229388409aef33d6dad392c381e891bafe3e5ffd9ca7f255cb00
+bodyNotAPoint=0901000000000000000000000000000000000000000000000000000000000000000000

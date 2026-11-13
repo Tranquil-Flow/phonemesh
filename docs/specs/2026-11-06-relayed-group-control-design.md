@@ -156,8 +156,8 @@ of its own: the announcing member is the chain the body travels on. A key belong
 that member rotating the key or leaving the list, because a member that left still holds the private half. "Newest" is
 the chain position, not the order of arrival, because a reader may open a later position before an earlier one inside
 its reading window. Seventeen mutants are each caught by their own test; the first round's survivors found three missing
-tests and the arrival-order fault. Nothing sends or reads op 9 yet: the private half is not made or kept by the Vault,
-the keys are not saved, and the app's behaviour and wire traffic are unchanged.
+tests and the arrival-order fault. Nothing sent or read op 9 when this was built; G3d below reads it. The private half is
+not made or kept by the Vault yet, and the app's behaviour and wire traffic are unchanged.
 
 ### Which path an admin uses
 
@@ -193,6 +193,20 @@ wire traffic are unchanged.
   ignored.
 - Box keys, like signing keys and group state, are never in a chat backup (decision 75): a restored phone is not back in
   its groups.
+
+Built as G3d (2026-11-12, host JVM tests only): a member announces its box key on the radio chain it writes on, so the
+announcement is bound to that member by the group signature every packet carries, and another member reads it there and
+keeps it as that member's key. Op 9 is not something people say: it is shown to nobody and receipted by nobody, and it
+travels on the radio chain only. The key of a member that leaves the list is dropped, and the claim stays, so nobody else
+may take it. The keys are saved with the group state: the extension is version 2, a v0.1.2 save (version 1) loads with no
+keys, and a key of a member that is not on the list held is not loaded. Thirteen announcement tests were seen failing
+first against a stub that keeps no key (5 failed; the refusals that passed were those a refuse-everything stub passes)
+and then passing. Twenty mutants of the reading, the ownership rules and the saving are each caught by their own test;
+the first round's five survivors found three missing tests (a forged op 9 on the hub chain, an unknown extension
+version, and a claimed key after a restart) and one design fault, that the list check was written twice. The prepared
+v0.1.2 candidate core (its group core unchanged since `10492845`) reads a v0.1.3 announcement as it must: no event, no
+receipt, and the position consumed. Not yet wired into `GroupPost`: the private half is not made or kept by the Vault, no
+announcement is sent, the app's behaviour and wire traffic are unchanged.
 
 ### Asking again, retries and limits
 

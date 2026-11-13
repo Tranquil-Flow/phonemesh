@@ -653,7 +653,10 @@ class GroupMembersTest {
     @Test fun aSaveWithoutTheNewBlockStillLoadsAndTheNewOnesRoundTrip() {
         val (_, _, esi) = three()
         val bytes = esi.member.encode()
-        val block = 1 + 8 + 4 + 1 + 1 // version | epoch time | join epoch | shared taken | no Asks answered
+        // The v0.1.2 block: version | epoch time | join epoch | shared taken | no Asks answered. The v0.1.3 save
+        // carries the box keys after it, so the whole tail is cut to get a save from before the block.
+        val v012 = esi.member.encode(ext = 1)
+        val block = 1 + 8 + 4 + 1 + 1 + (bytes.size - v012.size)
         val legacy = GroupMember.decode(esi.id, esi.sk, { P256.sign(esi.signing.private, it) }, group, bytes.copyOf(bytes.size - block))
         assertNotNull("a save from before the block", legacy)
         assertArrayEquals("with the join epoch worked out from the lists", bytes, legacy!!.encode())

@@ -3,6 +3,7 @@ package org.phonemesh.core.group
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -247,5 +248,58 @@ class GroupBoxKeyTest {
         val taken = t.keyOf(ama)!!
         taken[0] = (taken[0] + 1).toByte()
         assertArrayEquals("the kept key is not changed from outside", public, t.keyOf(ama))
+    }
+
+    // ---- the saved keys (v0.1.3 G3d)
+
+    @Test fun theKeysSurviveASaveAndLoad() {
+        val t = keys(ama, kofi)
+        val kofis = box()
+        assertTrue(t.learn(ama, body, 7, 0))
+        assertTrue(t.learn(kofi, GroupBoxKey.encode(kofis), 8, 3))
+        val loaded = GroupBoxKeys.decode(t.encode())
+        assertNotNull("the saved keys load", loaded)
+        assertArrayEquals("ama's key", public, loaded!!.keyOf(ama))
+        assertArrayEquals("kofi's key", kofis, loaded.keyOf(kofi))
+        assertEquals(7L, loaded.epochOf(ama))
+        assertEquals(8L, loaded.epochOf(kofi))
+    }
+
+    @Test fun aKeyOfAMemberNotOnTheListHeldIsNotLoaded() {
+        val t = keys(ama, kofi)
+        assertTrue(t.learn(ama, body, 7,0))
+        assertTrue(t.learn(kofi, GroupBoxKey.encode(box()), 7, 0))
+        // The list held now has no Kofi: its key is not kept, but the claim stays so nobody may take it.
+        val loaded = GroupBoxKeys.decode(t.encode())
+        assertNotNull(loaded)
+        val here = keys(ama)
+        here.restore(loaded!!)
+        assertArrayEquals("ama's key", public, here.keyOf(ama))
+        assertNull("kofi is not on the list held", here.keyOf(kofi))
+        assertFalse("and nobody may take kofi's key", here.learn(esi, GroupBoxKey.encode(box()), 7, 0))
+    }
+
+    @Test fun aRotatedKeyStaysClaimedAcrossASaveAndLoad() {
+        val t = keys(ama, kofi)
+        val rotated = box()
+        assertTrue(t.learn(ama, body, 7, 0))
+        assertTrue("ama rotates", t.learn(ama, GroupBoxKey.encode(rotated), 7, 9))
+        val loaded = GroupBoxKeys.decode(t.encode())
+        assertNotNull(loaded)
+        val here = keys(ama, kofi)
+        here.restore(loaded!!)
+        assertArrayEquals("the newest key", rotated, here.keyOf(ama))
+        assertFalse("ama's old key is not kofi's to claim", here.learn(kofi, body, 7, 9))
+        assertNull(here.keyOf(kofi))
+    }
+
+    @Test fun whatIsNotASavedSetOfKeysIsRefused() {
+        val t = keys(ama)
+        assertTrue(t.learn(ama, body, 7, 0))
+        val bytes = t.encode()
+        assertNull("another version", GroupBoxKeys.decode(bytes.copyOf().also { it[0] = 2 }))
+        assertNull("cut short", GroupBoxKeys.decode(bytes.copyOf(bytes.size - 1)))
+        assertNull("trailing bytes", GroupBoxKeys.decode(bytes + byteArrayOf(0)))
+        assertNull("nothing at all", GroupBoxKeys.decode(ByteArray(0)))
     }
 }

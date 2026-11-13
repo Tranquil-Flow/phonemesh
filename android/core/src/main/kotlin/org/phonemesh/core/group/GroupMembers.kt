@@ -153,6 +153,8 @@ object GroupBody {
         MESSAGE, GROUP_PHOTO -> true
         PROFILE, RECEIPT -> !hub
         SHARED, MEMBER_PHOTO -> hub
+        // A box key announcement (op 9) travels on the radio chain only (v0.1.3 G3d).
+        GroupBoxKey.OP -> !hub
         else -> false
     }
 }
@@ -413,6 +415,19 @@ class GroupMember(
         private set
     var roster: GroupRoster? = null
         private set
+
+    /**
+     * The box keys the members of the list held announced (v0.1.3 G3d; relayed group control design, "Box keys"). A
+     * member announces its key on its own radio chain, so a reader takes the key as that chain owner's own. The key of a
+     * member that leaves the list is dropped.
+     */
+    private val boxKeys = GroupBoxKeys { id -> roster?.member(id) != null }
+
+    /**
+     * The newest box key [identity] announced on its own radio chain, or null when it announced none. Only a member of
+     * the list held has one.
+     */
+    fun boxKeyOf(identity: ByteArray): ByteArray? = boxKeys.keyOf(identity)
     var digest: ByteArray = ByteArray(GroupRoster.DIGEST)
         private set
     /** The list before the one held (null for the first): who joined in this epoch, and what old receipts name. */
@@ -700,6 +715,13 @@ class GroupMember(
     private fun message(id: List<Byte>, body: ByteArray, old: Boolean, hub: Boolean, ep: Long, seq: Long): List<Message> {
         if (body.isEmpty()) return emptyList()
         val op = body[0].toInt() and 0xFF
+        // A box key announcement (op 9) is not something people say: it is kept as the chain owner's key and shown to
+        // nobody. The chain it travels on is the owner, so a reader learns whose key it is from where it read it. An
+        // announcement on the chain of the epoch before counts too: the member may have announced it before the change.
+        if (op == GroupBoxKey.OP) {
+            if (GroupBody.allowed(op, hub)) boxKeys.learn(id.toByteArray(), body, ep, seq)
+            return emptyList()
+        }
         if (op == GroupBody.ROSTER || op !in GroupBody.MESSAGE..GroupBody.LAST) return emptyList()
         // An op on a chain it does not belong to is a modified client's, never read (review G9-12).
         if (!GroupBody.allowed(op, hub)) return emptyList()
@@ -729,6 +751,21 @@ class GroupMember(
         val w = if (hub) hubWriter!! else writer!!
         val seq = w.next
         return Sealed(w.seal(byteArrayOf(op.toByte()) + body), epoch, seq, hub)
+    }
+
+    /**
+     * A packet carrying [body] whole, with its op byte at the front, as the relayed ops are (v0.1.3 G3d): an op 8
+     * envelope and an op 9 box key announcement carry their own op byte, so they are not sealed through [seal]. The
+     * body must be one this version may send on that chain.
+     */
+    fun sealBody(body: ByteArray, hub: Boolean = false): Sealed {
+        check(canSend) { if (state == State.CONFLICT) "the group has two lists: an admin must start the next epoch" else "not able to send now" }
+        require(body.isNotEmpty() && body.size <= GroupCipher.MAX_BODY) { "a group body is 1..${GroupCipher.MAX_BODY} bytes" }
+        val op = body[0].toInt() and 0xFF
+        require(GroupBody.allowed(op, hub)) { "op $op does not travel on that chain" }
+        val w = if (hub) hubWriter!! else writer!!
+        val seq = w.next
+        return Sealed(w.seal(body), epoch, seq, hub)
     }
 
     /**
@@ -835,6 +872,8 @@ class GroupMember(
         conflictDigests.clear()
         unreceipted.clear()
         leaving.retainAll { next.member(it.toByteArray()) != null }
+        // A member that left the list holds no key: its key is dropped, and the claim stays so nobody else may take it.
+        for (m in previous?.members.orEmpty()) if (next.member(m.identity) == null) boxKeys.forget(m.identity)
         if (issued?.key?.epoch != nextEpoch) issued = null
         state = State.ACTIVE
         // Keys that came early: older ones are spent; the next epoch's are checked now like any key.
@@ -863,7 +902,13 @@ class GroupMember(
 
     // ---- saved state (review C8): everything above, so a phone resumes exactly where it was
 
-    fun encode(): ByteArray {
+    /**
+     * This member saved with [encode]; null when the bytes are not a saved member of [group].
+     *
+     * [ext] is the saved extension's version: v0.1.2 wrote version 1, v0.1.3 (G3d) writes version 2 with the box
+     * keys. Version 1 is what a v0.1.2 phone wrote, and it still loads, with no keys.
+     */
+    fun encode(ext: Int = EXT_VERSION): ByteArray {
         val o = ByteArrayOutputStream()
         fun u8(n: Int) = o.write(n)
         fun u32(n: Long) = o.write(GroupReader.u32(n))
@@ -888,10 +933,13 @@ class GroupMember(
         u8(early.size); for (e in early) { o.write(e.from); o.write(e.key.encode()); u64(e.at) }
         val i = issued
         if (i == null) u8(0) else { u8(1); o.write(i.key.encode()); u64(i.at); u8(i.packets.size); for (pk in i.packets) blob(pk) }
-        // Added in v0.1.2 (reviews G9-4, G9-9, G9-11); a save from before it ends here and still loads.
-        u8(EXT_VERSION); u64(committedAt); u32(joinedAt); u8(sharedTaken)
+        // Added in v0.1.2 (reviews G9-4, G9-9, G9-11); a save from before it ends here and still loads. v0.1.3 (G3d)
+        // added the box keys to this extension.
+        u8(ext); u64(committedAt); u32(joinedAt); u8(sharedTaken)
         val asked = i?.asked.orEmpty()
         u8(asked.size); for (id in asked) o.write(id.toByteArray())
+        // The box keys the members announced, in the version 2 extension only. Never in a chat backup (decision 75).
+        if (ext >= 2) blob(boxKeys.encode())
         return o.toByteArray()
     }
 
@@ -905,7 +953,8 @@ class GroupMember(
         /** How long after taking an epoch a rival key for it is still believed (review G9-4). */
         const val RIVAL_MS = 6 * 3_600_000L
         private const val STATE_VERSION = 2
-        private const val EXT_VERSION = 1
+        /** The saved extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the box keys. */
+        private const val EXT_VERSION = 2
 
         /** A member saved with [encode]; null when the bytes are not a saved member of [group]. */
         fun decode(me: ByteArray, mySigner: ByteArray, sign: (ByteArray) -> ByteArray, group: ByteArray, bytes: ByteArray): GroupMember? = try {
@@ -963,11 +1012,19 @@ class GroupMember(
                 m.issued = Issued(key, List(u8()) { blob() }, at)
             }
             if (b.hasRemaining()) {
-                require(u8() == EXT_VERSION)
+                // The extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the box keys. A save from
+                // before v0.1.2 ends above and still loads; a v0.1.2 save loads with no keys, as the design note says.
+                val ext = u8()
+                require(ext == 1 || ext == 2)
                 m.committedAt = b.long
                 m.joinedAt = u32()
                 m.sharedTaken = u8()
                 repeat(u8()) { m.issued!!.asked += raw(P256.POINT).toList() }
+                if (ext >= 2) {
+                    val bytes = blob()
+                    val keys = requireNotNull(GroupBoxKeys.decode(bytes))
+                    m.boxKeys.restore(keys)
+                }
             } else if (m.roster != null && m.previous?.member(me) == null) m.joinedAt = m.epoch
             require(!b.hasRemaining())
             m

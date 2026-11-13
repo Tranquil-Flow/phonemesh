@@ -170,6 +170,16 @@ For each other member of the next list:
 New joiners are always the inviting admin's contacts (invitations go privately), so their first key stays private.
 Removal notices still go privately to removed contacts; a removed non-contact finds out when keys stop coming (as today).
 
+Built as G3c (2026-11-12, host JVM tests only): `core/group/GroupReach.kt` decides that path for each other member of
+the next list: a contact over the private session as today, otherwise in an envelope sealed to the box key that member
+announced on the list held, otherwise not at all. One member that cannot be reached stops the whole change, because a
+change reaching some members and not others would leave the group half in one epoch and half in another. The admin's own
+key is not part of this: it holds it itself. Eleven tests were seen failing first against a stub that makes every member
+unreachable (5 failed) and then passing, and twelve mutants of the path rules are each caught by their own test; the one
+survivor found the last missing test, that the box key handed out must be a copy. The plan is computed but not acted on
+yet: no envelope is sent, the admin's old chain positions and the retries are not built, and the app's behaviour and
+wire traffic are unchanged.
+
 ### Box keys
 
 - A v0.1.3 member makes its box key when it joins, or at its first change after an upgrade for groups it already

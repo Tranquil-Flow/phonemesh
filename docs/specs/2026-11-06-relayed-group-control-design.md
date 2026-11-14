@@ -208,6 +208,23 @@ v0.1.2 candidate core (its group core unchanged since `10492845`) reads a v0.1.3
 receipt, and the position consumed. Not yet wired into `GroupPost`: the private half is not made or kept by the Vault, no
 announcement is sent, the app's behaviour and wire traffic are unchanged.
 
+Built as G3e (2026-11-13, host JVM tests only): a member reads an envelope on the admin's radio chain and takes the key.
+The packet opened on the admin's chain, so the group signature shows it is the admin's, and the admin is checked against
+the list held, not a name in the body (there is none). The body is opened with this phone's own box keys, newest first:
+the current one, then the one before it while it is kept, because an admin may have sealed to it before this phone
+changed it; a key that does not open is not this phone's and is dropped without a word. What opens becomes a key that
+goes through the unchanged `receiveKey` rules, so next epoch only, parent = the list held, one waiting key per admin,
+the 72-hour waiting limit, conflicts and the 6-hour rival window. An envelope is shown to nobody and receipted by
+nobody, like a box key announcement; the admin learns it arrived from the member's next box key, not from a receipt.
+Thirteen envelope tests were seen failing first against a stub that opens no envelope (4 failed; the refusals that
+passed were those a refuse-everything stub passes) and then passing. Twenty mutants of the reading, the ownership
+rules and the kept keys are each caught by their own test; the first round's four survivors found three missing tests (a
+member that is no longer an admin, the keep window's last moment, and the sender's own entry in the list) and one
+mutant that could not be told apart from the right code, because the group is bound by the AEAD itself. The prepared
+v0.1.2 candidate core (its group core unchanged since `10492845`) reads a v0.1.3 envelope as it must: no event, no
+receipt, and the position consumed. Not yet wired into `GroupPost`: the private half is not made or kept by the Vault,
+no envelope is sent, the app's behaviour and wire traffic are unchanged.
+
 ### Asking again, retries and limits
 
 - **Admin side.** The envelopes join the list packets in the admin's `Issued` copy of the epoch (already kept 72 hours,

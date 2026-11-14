@@ -153,8 +153,8 @@ object GroupBody {
         MESSAGE, GROUP_PHOTO -> true
         PROFILE, RECEIPT -> !hub
         SHARED, MEMBER_PHOTO -> hub
-        // A box key announcement (op 9) travels on the radio chain only (v0.1.3 G3d).
-        GroupBoxKey.OP -> !hub
+        // The relayed ops (v0.1.3) carry their own op byte and travel on the radio chain only.
+        GroupEnvelope.OP, GroupBoxKey.OP -> !hub
         else -> false
     }
 }
@@ -422,6 +422,36 @@ class GroupMember(
      * member that leaves the list is dropped.
      */
     private val boxKeys = GroupBoxKeys { id -> roster?.member(id) != null }
+
+    /**
+     * One of this phone's own box keys: the private half, and when this phone stops keeping it. The current one is
+     * kept until it is replaced; the one before it is kept while an admin may still have sealed an envelope to it.
+     */
+    private class OwnBox(val key: GroupEnvelope.BoxKey, var until: Long)
+
+    /** This phone's own box keys, newest first: the current one, then the one before it while it is kept. */
+    private val ownBoxes = ArrayList<OwnBox>()
+
+    /**
+     * This phone's own box key is [key] now (v0.1.3 G3e; relayed group control design, "Box keys"). The one it
+     * replaces is kept for [KEEP_MS], because an admin may have sealed an envelope to it before this phone changed
+     * it; after that it is dropped and the private half goes with it.
+     */
+    fun setOwnBoxKey(key: GroupEnvelope.BoxKey, now: Long) {
+        val old = ownBoxes.firstOrNull()
+        ownBoxes.clear()
+        ownBoxes.add(OwnBox(key, Long.MAX_VALUE))
+        if (old != null) ownBoxes.add(OwnBox(old.key, now + KEEP_MS))
+    }
+
+    /**
+     * This phone's own box keys, newest first: the current one, and the one before it while it is kept. An envelope
+     * names no recipient, so each is tried in turn and one that does not open is not this phone's.
+     */
+    fun ownBoxKeys(now: Long): List<GroupEnvelope.BoxKey> {
+        ownBoxes.removeAll { now > it.until }
+        return ownBoxes.map { it.key }
+    }
 
     /**
      * The newest box key [identity] announced on its own radio chain, or null when it announced none. Only a member of
@@ -706,13 +736,30 @@ class GroupMember(
             for ((id, reader) in chains) {
                 val body = reader.open(packet) ?: continue
                 took = true
-                return message(id, body, old, hub, if (old) oldEpoch else epoch, reader.lastOpened)
+                return message(id, body, old, hub, if (old) oldEpoch else epoch, reader.lastOpened, now)
             }
         }
         return emptyList()
     }
 
-    private fun message(id: List<Byte>, body: ByteArray, old: Boolean, hub: Boolean, ep: Long, seq: Long): List<Message> {
+    /**
+     * An envelope (op 8) read on [from]'s radio chain of epoch [ep]: the admin's key for the epoch after it, sealed to
+     * this phone's box key (v0.1.3 G3e; relayed group control design, "The envelope"). The packet's group signature is
+     * the admin's, so [from] is the admin and the check is that it is an admin of the list held, not a name in the body
+     * (there is none). The body is opened with this phone's own box keys, newest first, and one that does not open is
+     * not this phone's and is dropped without a word. What opens becomes a key that goes through the unchanged
+     * receiveKey rules, so next epoch only, parent = the list held, one waiting key per admin.
+     */
+    private fun openEnvelope(from: ByteArray, body: ByteArray, ep: Long, now: Long) {
+        val list = roster ?: return
+        val admin = list.member(from) ?: return
+        if (!admin.admin) return
+        // The key the admin is giving is for the epoch after the one this chain is of.
+        val key = GroupEnvelope.open(body, group, ep + 1, from, admin.signer, me, ownBoxKeys(now)) ?: return
+        receiveKey(from, key, now)
+    }
+
+    private fun message(id: List<Byte>, body: ByteArray, old: Boolean, hub: Boolean, ep: Long, seq: Long, now: Long): List<Message> {
         if (body.isEmpty()) return emptyList()
         val op = body[0].toInt() and 0xFF
         // A box key announcement (op 9) is not something people say: it is kept as the chain owner's key and shown to
@@ -720,6 +767,14 @@ class GroupMember(
         // announcement on the chain of the epoch before counts too: the member may have announced it before the change.
         if (op == GroupBoxKey.OP) {
             if (GroupBody.allowed(op, hub)) boxKeys.learn(id.toByteArray(), body, ep, seq)
+            return emptyList()
+        }
+        // An envelope (op 8) is the admin's key for the next epoch, sealed to this phone's box key (v0.1.3 G3e). The
+        // chain it travels on is the admin's, and the group signature in the packet shows it is the admin's, so the
+        // admin on the list held is what is checked, not the name inside the body (there is none). It is opened with
+        // this phone's own box keys and then goes through the unchanged receiveKey rules.
+        if (op == GroupEnvelope.OP) {
+            if (GroupBody.allowed(op, hub)) openEnvelope(id.toByteArray(), body, ep, now)
             return emptyList()
         }
         if (op == GroupBody.ROSTER || op !in GroupBody.MESSAGE..GroupBody.LAST) return emptyList()
@@ -831,7 +886,7 @@ class GroupMember(
             if (mine == null) { removed(State.REMOVED); return emptyList() }
             if (!mine.signer.contentEquals(mySigner)) return emptyList()
             commit(p.key.epoch, next, p.key.digest, p.key.secret.copyOf(), now, p)
-            return p.buffered.flatMap { (seq, b) -> message(p.from.toList(), b, false, false, epoch, seq) }
+            return p.buffered.flatMap { (seq, b) -> message(p.from.toList(), b, false, false, epoch, seq, now) }
         } finally {
             p.key.wipe()
         }

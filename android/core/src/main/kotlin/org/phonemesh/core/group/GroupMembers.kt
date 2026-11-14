@@ -406,8 +406,17 @@ class GroupMember(
     /** A sealed packet and where it sits: what this phone stores to match receipts against. */
     class Sealed(val packet: ByteArray, val epoch: Long, val seq: Long, val hub: Boolean)
 
-    /** What an admin sends to start (or resend) an epoch: keys pairwise, the list as group packets, removal notices. */
-    class Outgoing(val keys: Map<List<Byte>, ByteArray>, val rosterPackets: List<ByteArray>, val removed: Map<List<Byte>, ByteArray>)
+    /**
+     * What an admin sends to start (or resend) an epoch: keys pairwise, the list as group packets, removal notices,
+     * and the envelopes (v0.1.3 G3f) it sealed for the members it reaches that way.
+     */
+    class Outgoing(
+        val keys: Map<List<Byte>, ByteArray>,
+        val rosterPackets: List<ByteArray>,
+        val removed: Map<List<Byte>, ByteArray>,
+        /** The envelopes, on this phone's radio chain of the epoch held, one per member reached by an envelope. */
+        val envelopes: List<Sealed> = emptyList(),
+    )
 
     var state: State = State.INVITED
         private set
@@ -552,8 +561,15 @@ class GroupMember(
     /**
      * As an admin of the list held (or creating the group): a fresh secret, a [GroupKey] for every other member, the
      * list packets, and a removal notice for each person dropped. This phone takes the epoch at once.
+     *
+     * [envelopeFor] names the members of [next] that are reached by an envelope instead of a private session
+     * (v0.1.3 G3f; relayed group control design, "The envelope"): the new epoch's key is sealed to the box key each
+     * of them announced on the list held, and the envelopes ride this phone's radio chain of the epoch held, sealed
+     * before this phone takes the new epoch, because the member reads them on the chain it already reads. Those
+     * members get no private key: each is reached one way or the other.
      */
-    fun newEpoch(next: GroupRoster, now: Long, random: SecureRandom = SecureRandom(), leaving: Boolean = false): Outgoing {
+    fun newEpoch(next: GroupRoster, now: Long, random: SecureRandom = SecureRandom(), leaving: Boolean = false,
+                 envelopeFor: List<ByteArray> = emptyList()): Outgoing {
         val current = roster
         require(if (current == null) epoch == 0L && state == State.INVITED && inviter == null && !leaving else (state == State.ACTIVE || state == State.CONFLICT) && current.isAdmin(me)) {
             "only an admin of the list held starts an epoch"
@@ -569,9 +585,32 @@ class GroupMember(
         val key = GroupKey(group, nextEpoch, secret, nextDigest, digest, parts.size, mySigner)
         val before = current
         val others = next.members.filterNot { it.identity.contentEquals(me) }
-        val keys = others.associate { it.identity.toList() to key.encode() }
+        // A member reached by an envelope must be on the next list, must not be this phone, and must have announced a
+        // box key on the list held: that is the only key this phone may seal the new epoch's key to, because it read
+        // it on that member's own chain, bound to that member by the group signature every packet carries.
+        for (id in envelopeFor) {
+            require(next.member(id) != null) { "an envelope is only for a member of the next list" }
+            require(!id.contentEquals(me)) { "the admin holds its own key" }
+            require(boxKeyOf(id) != null) { "this member announced no box key on the list held" }
+        }
+        require(envelopeFor.map { it.toList() }.distinct().size == envelopeFor.size) { "one envelope per member" }
+        val byEnvelope = envelopeFor.map { it.toList() }.toSet()
+        val keys = others.filterNot { it.identity.toList() in byEnvelope }.associate { it.identity.toList() to key.encode() }
         val dropped = before?.members.orEmpty().filter { next.member(it.identity) == null && !it.identity.contentEquals(me) }
             .associate { it.identity.toList() to GroupControl.Removed(group, nextEpoch).encode() }
+        // The envelopes: sealed on this phone's radio chain of the epoch held, before the new epoch is taken, so the
+        // member that holds this epoch reads them on the chain it already reads. Each has its own ephemeral key, so
+        // each AES key and nonce is used once. The admin that hands the group over and leaves takes no epoch, so it
+        // seals no envelope.
+        require(!leaving || envelopeFor.isEmpty()) { "an admin that leaves reaches no member by an envelope" }
+        val envelopes = envelopeFor.map { id ->
+            val body = GroupEnvelope.seal(key, me, id, boxKeyOf(id)!!)
+            // On this phone's radio chain of the epoch held, never on the hub chain: op 8 travels on the radio chain
+            // only, and the member reads the envelope on the chain it already reads.
+            val w = writer!!
+            val seq = w.next
+            Sealed(w.seal(body), epoch, seq, false)
+        }
         val packets: List<ByteArray>
         if (leaving) {
             // The last admin hands the group over and leaves in one epoch (decision 72 d): its chain carries the list,
@@ -585,7 +624,7 @@ class GroupMember(
             issued = Issued(key, packets, now)
         }
         secret.fill(0)
-        return Outgoing(keys, packets, dropped)
+        return Outgoing(keys, packets, dropped, envelopes)
     }
 
     /**
@@ -794,6 +833,15 @@ class GroupMember(
 
     /** Tests only: a signing key kept as if [receiveControl] had taken it, to prove the engine survives one that should not be. */
     internal fun putSignerUnchecked(identity: ByteArray, key: ByteArray) { signers[identity.toList()] = key.copyOf() }
+
+    /**
+     * Tests only: a box key claimed for [owner], as if that member had announced one. A phone never reads its own
+     * chain, so it never holds a box key for itself; this seam is here to prove the rule that refuses an envelope
+     * to the admin itself is not masked by the box-key rule.
+     */
+    internal fun putBoxKeyUnchecked(owner: ByteArray, key: ByteArray) {
+        boxKeys.learn(owner, GroupBoxKey.encode(key), epoch, 0)
+    }
 
     /** A packet carrying [body] (an app message) to everyone in the group. Store [encode] before it leaves. */
     fun send(body: ByteArray): ByteArray = seal(GroupBody.MESSAGE, body).packet

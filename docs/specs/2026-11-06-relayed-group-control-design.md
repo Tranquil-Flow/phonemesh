@@ -225,6 +225,25 @@ v0.1.2 candidate core (its group core unchanged since `10492845`) reads a v0.1.3
 receipt, and the position consumed. Not yet wired into `GroupPost`: the private half is not made or kept by the Vault,
 no envelope is sent, the app's behaviour and wire traffic are unchanged.
 
+Built as G3f (2026-11-13, host JVM tests only): the admin seals the envelope. An admin that is not a member's
+contact seals the new epoch's key to the box key that member announced on the list held, and sends it as a group
+packet on its own radio chain of the epoch the member holds, before it takes the new epoch: the member reads it on the
+chain it already reads, and a message sealed after the epoch is taken rides the new chain, which the member cannot
+read yet. The key is sealed to the box key the admin read on that member's own chain, bound to that member by the
+group signature every packet carries; the admin cannot be told to seal it to any other key. A member reached by an
+envelope gets no private key: each is reached one way or the other. Each envelope has its own ephemeral key, so each
+AES key and nonce is used once. A member that announced no box key, a member that is not on the next list, the admin
+itself, a second envelope to the same member, and an admin that hands the group over and leaves are each refused.
+Twelve tests were seen failing first against a stub that seals no envelope (6 failed; the refusals that passed were
+those a refuse-everything stub passes) and then passing. Fourteen mutants of the sealing, the ownership rules and the
+kept keys are each caught by their own test; the first round's four survivors found one gap in the test (the envelope
+body is inside the chain packet, so the ephemeral key was never visible), two rules masked by a later check (a member
+with no box key, and the admin, which never holds a box key for itself), and one mutant that was a tautology. The
+prepared v0.1.2 candidate core (its group core unchanged since `10492845`) reads the envelope the v0.1.3 admin sealed
+through the real producer path as it must: no event, no receipt, and the position consumed. Not yet wired into
+`GroupPost`: the private half is not made or kept by the Vault, no envelope is sent, and the app's behaviour and wire
+traffic are unchanged.
+
 ### Asking again, retries and limits
 
 - **Admin side.** The envelopes join the list packets in the admin's `Issued` copy of the epoch (already kept 72 hours,

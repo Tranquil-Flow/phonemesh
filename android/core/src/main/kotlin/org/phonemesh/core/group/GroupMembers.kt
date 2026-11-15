@@ -8,6 +8,7 @@ import org.phonemesh.core.crypto.P256
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.SecureRandom
+import java.security.interfaces.ECPublicKey
 
 /** A group picture as the list and invitations carry it: kind (0 letter, 1 emoji, 2 photo) | length | bytes. */
 object GroupAvatar {
@@ -451,6 +452,27 @@ class GroupMember(
         ownBoxes.clear()
         ownBoxes.add(OwnBox(key, Long.MAX_VALUE))
         if (old != null) ownBoxes.add(OwnBox(old.key, now + KEEP_MS))
+    }
+
+    /**
+     * This phone makes its own box key now and announces it on its own radio chain (v0.1.3 G3g; relayed group control
+     * design, "Box keys"; accounts decision 79, D3a). The announcement is bound to this phone by the group signature
+     * every packet carries, so an admin that has not added it can still reach it: the admin seals the next epoch's
+     * key to the announced public half in an envelope.
+     *
+     * The private half stays on this phone and is never in a chat backup (decision 75); the caller keeps it (in the
+     * Vault) and gives it back with [setOwnBoxKey]. Returns the key it made and the announcement to send.
+     *
+     * The announcement travels on this phone's own radio chain of the epoch held, never on the hub chain: op 9 is a
+     * radio-chain body ([GroupBody.allowed]).
+     */
+    fun makeAndAnnounceBoxKey(now: Long, random: SecureRandom = SecureRandom()): Pair<GroupEnvelope.BoxKey, Sealed> {
+        check(canSend) { "this phone cannot send in this group now" }
+        val pair = P256.generate(random)
+        val key = GroupEnvelope.BoxKey(pair.private, P256.compress(pair.public as ECPublicKey))
+        setOwnBoxKey(key, now)
+        val body = GroupBoxKey.encode(key.public)
+        return key to sealBody(body)
     }
 
     /**

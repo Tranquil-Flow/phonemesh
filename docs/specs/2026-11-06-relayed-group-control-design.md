@@ -244,6 +244,28 @@ through the real producer path as it must: no event, no receipt, and the positio
 `GroupPost`: the private half is not made or kept by the Vault, no envelope is sent, and the app's behaviour and wire
 traffic are unchanged.
 
+Built as G3g (2026-11-14, host JVM tests only): the member makes and announces its own box key. Until this
+slice production could not do it at all: the only way to announce a box key was a helper in a test file, so no
+envelope could ever be addressed to a real member. This is the missing half that G3d (read and keep), G3e (read
+the envelope) and G3f (the admin seals it) all depended on. A member makes a P-256 key pair for one group, keeps
+the private half and announces the public half on its own radio chain; the announcement is bound to that member by
+the group signature every packet carries, so an admin that has not added it can still reach it. The key is made
+fresh each time, and the one it replaces is kept 72 hours, because an admin may have sealed an envelope to it
+before this phone changed it. The private half never leaves the phone and is never in a chat backup (decision 75);
+the caller keeps it and gives it back. The announcement travels on this phone's own radio chain of the epoch held,
+never on the hub chain, and a phone that cannot send announces nothing and keeps no key: a key it made but could
+not announce would be a key it can never be reached by. Nine tests were seen failing first against a stub that
+announces nothing (6 failed; the refusals that passed were those a refuse-everything stub passes) and then
+passing. Eleven mutants of the making, the announcement, the keeping and the refusals are each caught by their own
+test; the first round's three survivors found one equivalent mutant (it still kept the key, under another name), one
+rule masked by a second layer (the same refusal, so the side effect was the property that differed), and one mutant
+that was a no-op. The prepared v0.1.2 candidate core (its group core unchanged since `10492845`) reads the op 9
+announcement the v0.1.3 member made through the real producer path as it must: no event, no receipt, and the
+position consumed. The saved format is unchanged: the extension is still version 2, and a box key's private half is
+never in it. R8 strips the new method, since nothing in the app calls it yet, so this slice adds 0 B per ABI. Not
+yet wired into `GroupPost`: the private half is not made or kept by the Vault, no announcement is sent, and the
+app's behaviour and wire traffic are unchanged.
+
 ### Asking again, retries and limits
 
 - **Admin side.** The envelopes join the list packets in the admin's `Issued` copy of the epoch (already kept 72 hours,

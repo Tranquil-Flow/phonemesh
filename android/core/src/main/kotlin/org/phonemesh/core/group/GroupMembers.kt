@@ -436,11 +436,21 @@ class GroupMember(
     /**
      * One of this phone's own box keys: the private half, and when this phone stops keeping it. The current one is
      * kept until it is replaced; the one before it is kept while an admin may still have sealed an envelope to it.
+     *
+     * The private half is kept here so it survives a restart: an envelope sealed to it would otherwise never open.
+     * It is saved with the group state, which the Vault seals and which is never in a chat backup (decision 75), and
+     * its references are dropped when the group ends. Managed-memory or physical-storage erasure is not guaranteed.
      */
     private class OwnBox(val key: GroupEnvelope.BoxKey, var until: Long)
 
     /** This phone's own box keys, newest first: the current one, then the one before it while it is kept. */
     private val ownBoxes = ArrayList<OwnBox>()
+
+    /**
+     * Whether this phone reached the epoch it holds by an envelope rather than over a private session. Then it makes
+     * a new box key and announces it, which is the admin's sign that the envelope arrived (decision 79, D3a).
+     */
+    private var reachedByEnvelope = false
 
     /**
      * This phone's own box key is [key] now (v0.1.3 G3e; relayed group control design, "Box keys"). The one it
@@ -460,8 +470,8 @@ class GroupMember(
      * every packet carries, so an admin that has not added it can still reach it: the admin seals the next epoch's
      * key to the announced public half in an envelope.
      *
-     * The private half stays on this phone and is never in a chat backup (decision 75); the caller keeps it (in the
-     * Vault) and gives it back with [setOwnBoxKey]. Returns the key it made and the announcement to send.
+     * The private half stays in this phone's group state, sealed by the app's Vault and excluded from chat backups
+     * (decision 75). Returns the key it made and the announcement to save in the same transaction as that state.
      *
      * The announcement travels on this phone's own radio chain of the epoch held, never on the hub chain: op 9 is a
      * radio-chain body ([GroupBody.allowed]).
@@ -471,24 +481,50 @@ class GroupMember(
         val pair = P256.generate(random)
         val key = GroupEnvelope.BoxKey(pair.private, P256.compress(pair.public as ECPublicKey))
         setOwnBoxKey(key, now)
+        reachedByEnvelope = false
         val body = GroupBoxKey.encode(key.public)
         return key to sealBody(body)
     }
+
+    /**
+     * Whether this phone must make and announce a box key now (v0.1.3 G3h): it has none, so an admin that has not
+     * added it cannot reach it by an envelope; or it reached the epoch it holds by an envelope, so the admin is
+     * waiting to hear that the envelope arrived (decision 79, D3a).
+     */
+    val needsBoxKey: Boolean get() = ownBoxes.isEmpty() || reachedByEnvelope
 
     /**
      * This phone's own box keys, newest first: the current one, and the one before it while it is kept. An envelope
      * names no recipient, so each is tried in turn and one that does not open is not this phone's.
      */
     fun ownBoxKeys(now: Long): List<GroupEnvelope.BoxKey> {
-        ownBoxes.removeAll { now > it.until }
+        expireBoxKeys(now)
         return ownBoxes.map { it.key }
     }
+
+    /** Drops expired private halves; the caller must save the resulting state even without incoming traffic. */
+    fun expireBoxKeys(now: Long): Boolean = ownBoxes.removeAll { now > it.until }
+
+    /** First instant an old private half must disappear from the saved state. */
+    val boxKeyExpiry: Long? get() = ownBoxes.filter { it.until < Long.MAX_VALUE }.minOfOrNull { it.until + 1 }
 
     /**
      * The newest box key [identity] announced on its own radio chain, or null when it announced none. Only a member of
      * the list held has one.
      */
     fun boxKeyOf(identity: ByteArray): ByteArray? = boxKeys.keyOf(identity)
+
+    /**
+     * How this phone reaches each member of [next] with the new epoch's key (v0.1.3 G3h; relayed group control
+     * design, "Which path an admin uses"; accounts decisions 79 and 80): a contact over the private session as today,
+     * a member that announced a box key on the list held in an envelope, and anyone else not at all, in which case the
+     * change does not start.
+     *
+     * The box keys are this phone's own: an admin may seal an envelope only to a key it read on that member's own
+     * chain, and it cannot be told to seal it to any other.
+     */
+    fun reachPlan(next: GroupRoster, isContact: (ByteArray) -> Boolean): GroupReach.Plan =
+        GroupReach.plan(next, roster, me, isContact, boxKeys)
     var digest: ByteArray = ByteArray(GroupRoster.DIGEST)
         private set
     /** The list before the one held (null for the first): who joined in this epoch, and what old receipts name. */
@@ -518,6 +554,8 @@ class GroupMember(
     private val leaving = LinkedHashSet<List<Byte>>()
 
     private class Pending(val from: ByteArray, val key: GroupKey, val reader: GroupReader, val at: Long) {
+        /** An envelope supplied this pending key; no rotation is due until its list checks and commits. */
+        var byEnvelope = false
         val parts = sortedMapOf<Int, ByteArray>()
         val buffered = ArrayList<Pair<Long, ByteArray>>()
     }
@@ -817,7 +855,12 @@ class GroupMember(
         if (!admin.admin) return
         // The key the admin is giving is for the epoch after the one this chain is of.
         val key = GroupEnvelope.open(body, group, ep + 1, from, admin.signer, me, ownBoxKeys(now)) ?: return
-        receiveKey(from, key, now)
+        if (!receiveKey(from, key, now)) return
+        // An accepted key is not a taken epoch: the list may be absent, invalid or a rival. Attribute only the
+        // matching pending key; a late duplicate for an already-taken private epoch creates no rotation debt.
+        pendings[from.toList()]?.takeIf {
+            it.key.epoch > epoch && it.key.encode().contentEquals(key.encode())
+        }?.byEnvelope = true
     }
 
     private fun message(id: List<Byte>, body: ByteArray, old: Boolean, hub: Boolean, ep: Long, seq: Long, now: Long): List<Message> {
@@ -984,11 +1027,15 @@ class GroupMember(
         from?.let { if (next.member(it.from) != null) readers[it.from.toList()] = it.reader }
         // Waiting keys for older epochs are spent; rivals for this one stay until their lists check.
         pendings.values.removeAll { (it.key.epoch < nextEpoch).also { old -> if (old) it.key.wipe() } }
+        // A surviving key for this epoch is now only a rival: it may prove conflict, never another committed
+        // delivery. Do not serialize its former next-epoch attribution as a future rotation obligation.
+        for (p in pendings.values) if (p.key.epoch <= nextEpoch) p.byEnvelope = false
         secretTag = GroupKey.tag(group, nextEpoch, secret)
         // The secret itself is not kept: only the chains derived from it and a tag of it.
         secret.fill(0)
         if (roster?.member(me) == null) joinedAt = nextEpoch
         committedAt = now
+        reachedByEnvelope = reachedByEnvelope || from?.byEnvelope == true
         previous = roster
         previousDigest = digest
         epoch = nextEpoch
@@ -1015,10 +1062,12 @@ class GroupMember(
         pendings.values.forEach { it.key.wipe() }; pendings.clear()
         early.forEach { it.key.wipe() }; early.clear()
         writer = null; hubWriter = null; issued?.key?.wipe(); issued = null; unreceipted.clear(); leaving.clear()
+        ownBoxes.clear(); reachedByEnvelope = false
         state = to
     }
 
     private fun expire(now: Long) {
+        expireBoxKeys(now)
         if ((oldReaders.isNotEmpty() || oldHubReaders.isNotEmpty()) && now > oldUntil) { oldReaders.clear(); oldHubReaders.clear() }
         pendings.values.removeAll { (now - it.at > KEEP_MS).also { old -> if (old) it.key.wipe() } }
         early.removeAll { (now - it.at > KEEP_MS).also { old -> if (old) it.key.wipe() } }
@@ -1031,7 +1080,8 @@ class GroupMember(
      * This member saved with [encode]; null when the bytes are not a saved member of [group].
      *
      * [ext] is the saved extension's version: v0.1.2 wrote version 1, v0.1.3 (G3d) writes version 2 with the box
-     * keys. Version 1 is what a v0.1.2 phone wrote, and it still loads, with no keys.
+     * keys. Version 3 adds the own private halves and pending/committed envelope attribution. Older versions load
+     * without own keys and announce one at the next profile opportunity.
      */
     fun encode(ext: Int = EXT_VERSION): ByteArray {
         val o = ByteArrayOutputStream()
@@ -1063,14 +1113,32 @@ class GroupMember(
         u8(ext); u64(committedAt); u32(joinedAt); u8(sharedTaken)
         val asked = i?.asked.orEmpty()
         u8(asked.size); for (id in asked) o.write(id.toByteArray())
-        // The box keys the members announced, in the version 2 extension only. Never in a chat backup (decision 75).
+        // The box keys the members announced, from the version 2 extension onward. Never in a chat backup (decision 75).
         if (ext >= 2) blob(boxKeys.encode())
+        // This phone's own box keys (version 3): the private half, so an envelope sealed to them opens after a
+        // restart, and whether it reached the epoch by an envelope, so it still announces the new key.
+        if (ext >= 3) {
+            u8(ownBoxes.size)
+            for (b in ownBoxes) {
+                blob(b.key.public)
+                val scalar = scalarOf(b.key.private)
+                try { blob(scalar) } finally { scalar.fill(0) }
+                u64(b.until)
+            }
+            u8(if (reachedByEnvelope) 1 else 0)
+            val byEnvelope = pendings.values.filter { it.byEnvelope }
+            u8(byEnvelope.size); for (p in byEnvelope) o.write(p.from)
+        }
         return o.toByteArray()
     }
 
     companion object {
         /** How long a waiting key, old-epoch reading and a started epoch's resend copy last: the resend horizon. */
         const val KEEP_MS = 72 * 3_600_000L
+
+        /** The 32-byte scalar of a P-256 private key, so it can be saved and given back. */
+        private fun scalarOf(key: java.security.PrivateKey): ByteArray =
+            Bytes.fixed((key as java.security.interfaces.ECPrivateKey).s, 32)
         const val MAX_BUFFERED = 32
         /** Keys kept for epochs past the next (a later key overtaking an earlier list), and how far ahead. */
         const val MAX_EARLY = 4
@@ -1078,8 +1146,11 @@ class GroupMember(
         /** How long after taking an epoch a rival key for it is still believed (review G9-4). */
         const val RIVAL_MS = 6 * 3_600_000L
         private const val STATE_VERSION = 2
-        /** The saved extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the box keys. */
-        private const val EXT_VERSION = 2
+        /**
+         * The saved extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the members' box keys, and
+         * (G3h) version 3 with this phone's own box keys.
+         */
+        private const val EXT_VERSION = 3
 
         /** A member saved with [encode]; null when the bytes are not a saved member of [group]. */
         fun decode(me: ByteArray, mySigner: ByteArray, sign: (ByteArray) -> ByteArray, group: ByteArray, bytes: ByteArray): GroupMember? = try {
@@ -1140,7 +1211,7 @@ class GroupMember(
                 // The extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the box keys. A save from
                 // before v0.1.2 ends above and still loads; a v0.1.2 save loads with no keys, as the design note says.
                 val ext = u8()
-                require(ext == 1 || ext == 2)
+                require(ext == 1 || ext == 2 || ext == 3)
                 m.committedAt = b.long
                 m.joinedAt = u32()
                 m.sharedTaken = u8()
@@ -1149,6 +1220,29 @@ class GroupMember(
                     val bytes = blob()
                     val keys = requireNotNull(GroupBoxKeys.decode(bytes))
                     m.boxKeys.restore(keys)
+                }
+                if (ext >= 3) {
+                    val count = u8()
+                    require(count <= 2)
+                    repeat(count) { index ->
+                        val public = blob()
+                        val scalar = blob()
+                        val until = b.long
+                        val private = try { P256.privateKey(scalar) } finally { scalar.fill(0) }
+                        // BoxKey validates the compressed public point once.
+                        require(if (index == 0) until == Long.MAX_VALUE else until in 0 until Long.MAX_VALUE)
+                        m.ownBoxes.add(OwnBox(GroupEnvelope.BoxKey(private, public), until))
+                    }
+                    val reached = u8()
+                    require(reached in 0..1)
+                    m.reachedByEnvelope = reached == 1
+                    val pendingCount = u8()
+                    repeat(pendingCount) {
+                        val p = requireNotNull(m.pendings[raw(P256.POINT).toList()])
+                        require(!p.byEnvelope && p.key.epoch > m.epoch)
+                        p.byEnvelope = true
+                    }
+                    require(!m.gone || (m.ownBoxes.isEmpty() && !m.reachedByEnvelope))
                 }
             } else if (m.roster != null && m.previous?.member(me) == null) m.joinedAt = m.epoch
             require(!b.hasRemaining())

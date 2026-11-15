@@ -52,6 +52,7 @@ interface GroupStore {
     fun sign(group: ByteArray, data: ByteArray): ByteArray
     /** A contact's identity key, or null when [account] is not a contact. */
     fun identityOf(account: AccountId): ByteArray?
+
     /** This phone's profile, if it has one. */
     fun myProfile(): Profile?
     /** This phone's photo as pieces sized for a group packet (head first), when its picture is a photo. */
@@ -336,7 +337,7 @@ class GroupPost(
             taken += r; next = candidate
         }
         if (next == null) return true
-        val unreachable = unreachable(next)
+        val unreachable = unreachable(o, next)
         if (unreachable.isNotEmpty()) {
             o.events += Event.CannotReach(o.group, unreachable)
             return true
@@ -352,23 +353,29 @@ class GroupPost(
             list.isAdmin(me) && (o.member.state == GroupMember.State.ACTIVE || o.member.state == GroupMember.State.CONFLICT)
     }
 
-    /** As an admin: a new epoch with [next], sent as keys, the list and removal notices, then what new people need. */
     /**
-     * Whether this phone can give every other member of [next] the new key: keys go privately, so each must be a
-     * contact. An admin who is missing one cannot start the epoch (the screens ask to add them first).
+     * Whether this phone can give every other member of [next] the new key: over the private session when it is a
+     * contact, and in an envelope when that member announced a box key on the list held. A member with neither cannot
+     * be reached, so the change does not start (the screens ask to add them first).
      */
-    private fun canReach(next: GroupRoster): Boolean = unreachable(next).isEmpty()
+    private fun canReach(o: Open, next: GroupRoster): Boolean = unreachable(o, next).isEmpty()
 
-    /** The members of [next] this phone has no private session for (it cannot give them a key). */
-    private fun unreachable(next: GroupRoster): List<AccountId> = unreachableIn(next.members.map { it.identity })
+    /** The members of [next] this phone cannot reach at all: neither a contact nor a box key on the list held. */
+    private fun unreachable(o: Open, next: GroupRoster): List<AccountId> =
+        o.member.reachPlan(next) { store.identityOf(account(it)) != null }.unreachable.map { account(it) }
 
-    private fun unreachableIn(identities: List<ByteArray>): List<AccountId> =
-        identities.filter { !it.contentEquals(me) && store.identityOf(account(it)) == null }.map { account(it) }
-
+    /** As an admin: a new epoch, sent as keys/envelopes, the list and removal notices, then what new people need. */
     private fun startEpoch(o: Open, next: GroupRoster, now: Long) {
         val before = o.member.roster
-        val out = o.member.newEpoch(next, now, random)
+        // The plan decides how each member of the next list is reached: a contact over the private session, a member
+        // that announced a box key in an envelope. A member with neither stops the change before this is called.
+        val plan = o.member.reachPlan(next) { store.identityOf(account(it)) != null }
+        val byEnvelope = plan.choices.filter { plan.pathOf(it) == GroupReach.Path.ENVELOPE }
+        val out = o.member.newEpoch(next, now, random, envelopeFor = byEnvelope)
         for ((id, k) in out.keys) o.private += account(id.toByteArray()) to Body.Group(GroupControl.KEY, k)
+        // The envelopes ride this phone's own radio chain of the epoch held, before the new epoch: the member reads
+        // them on the chain it already reads. They are group packets, like the list packets.
+        for (e in out.envelopes) o.packets += Packet(o.group, e, false, op = GroupEnvelope.OP)
         // A removed person this phone does not know gets no notice: they find out when keys stop coming.
         for ((id, r) in out.removed) if (store.identityOf(account(id.toByteArray())) != null) o.private += account(id.toByteArray()) to Body.Group(GroupControl.REMOVED, r)
         for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, o.member.epoch, -1, false), false, op = GroupBody.ROSTER)
@@ -450,7 +457,7 @@ class GroupPost(
             o.events += Event.ListChanged(o.group, m.epoch, list, joined, left)
             o.draft = null
             // New people need everyone's name and picture again; a phone new on the list sends its own (decision 72 b).
-            if ((joined.isNotEmpty() || m.joinedThisEpoch) && o.profileDue == null) o.profileDue = now + profileDelay()
+            if ((joined.isNotEmpty() || m.joinedThisEpoch || m.needsBoxKey) && o.profileDue == null) o.profileDue = now + profileDelay()
             // Invited people already on the list are no longer waiting.
             o.invited.removeAll { inv -> list.member(inv.second) != null }
             // A phone that just became an admin acts on joins and leavings that reached it before.
@@ -491,7 +498,7 @@ class GroupPost(
         for (g in store.groups()) {
             val o = open(g) ?: continue
             val m = o.member
-            var work = false
+            var work = m.expireBoxKeys(now)
             val due = o.adminDue
             if (due != null && due <= now && isAdmin(o) && m.waitingOn() == null && (m.roster == null || m.canSend)) {
                 // Whatever an admin's epoch runs into, the batch is done afterwards: a bad joiner must not make this repeat
@@ -505,7 +512,7 @@ class GroupPost(
                         // making one would throw before anyone invited is added below (G4).
                         if (stay.size >= 2) {
                             val next = GroupRoster(list.name, list.colour, stay, list.avatar, list.recentForNew)
-                            val unreachable = unreachable(next)
+                            val unreachable = unreachable(o, next)
                             if (unreachable.isEmpty()) startEpoch(o, next, now) else o.events += Event.CannotReach(o.group, unreachable)
                         }
                     }
@@ -530,8 +537,15 @@ class GroupPost(
                 m.receipt()?.let { o.send(GroupBody.RECEIPT, it, hubOnly = false) }
                 o.receiptDue = null; work = true
             }
+            // A member announces its own box key once it is in a group: that is what lets an admin that has not added
+            // it reach it by an envelope. After an epoch it reached by envelope it makes a new one, which is the
+            // admin's sign that the envelope arrived (decision 79, D3a).
             val p = o.profileDue
             if (p != null && p <= now && m.canSend) {
+                if (m.needsBoxKey) {
+                    val (_, sealed) = m.makeAndAnnounceBoxKey(now, random)
+                    o.packets += Packet(o.group, sealed, false, op = GroupBoxKey.OP)
+                }
                 store.myProfile()?.let { profile ->
                     o.send(GroupBody.PROFILE, profile.encode(), hubOnly = false)
                     // A photo goes only through a hub (decision 64).
@@ -544,18 +558,32 @@ class GroupPost(
         return ok
     }
 
-    /** Whether someone invited has sent a signing key and every key the next list needs has a way (a contact for each member). */
+    /**
+     * Whether every member of [next] is a contact of this phone: the rule for a path that seals no envelope (a
+     * leaving admin), so a member it has no private session for is not reachable there.
+     */
+    private fun allContacts(next: GroupRoster): Boolean =
+        next.members.none { !it.identity.contentEquals(me) && store.identityOf(account(it.identity)) == null }
+
+    /** Whether a joiner sent a signing key and everyone has a route: contacts for joiners, either path for members. */
     private fun joinersReachable(o: Open): Boolean {
         val list = o.member.roster
         val joiners = o.invited.filter { (_, id) -> o.member.signerOf(id) != null && list?.member(id) == null }
         if (joiners.isEmpty()) return false
-        return unreachableIn(list?.members.orEmpty().map { it.identity } + joiners.map { it.second }).isEmpty()
+        // The joiners need a contact (they are not on the list held); the members of the list held are reached by
+        // contact or by a box key they announced there.
+        val joinersOk = joiners.all { (_, id) -> store.identityOf(account(id)) != null }
+        val membersOk = list?.members.orEmpty().none { member ->
+            !member.identity.contentEquals(me) && store.identityOf(account(member.identity)) == null &&
+                o.member.boxKeyOf(member.identity) == null
+        }
+        return joinersOk && membersOk
     }
 
     /** When [tick] has work next; null when nothing waits. */
     fun nextDue(): Long? = store.groups().mapNotNull { g ->
-        val s = store.saved(g) ?: return@mapNotNull null
-        listOfNotNull(s.receiptDue, s.profileDue, s.adminDue).minOrNull()
+        val o = open(g) ?: return@mapNotNull null
+        listOfNotNull(o.receiptDue, o.profileDue, o.adminDue, o.member.boxKeyExpiry).minOrNull()
     }.minOrNull()
 
     /** This phone's name or picture changed: every group gets the new profile soon. */
@@ -573,7 +601,7 @@ class GroupPost(
         val list = o.member.roster ?: return false
         if (!isAdmin(o) || o.member.waitingOn() != null) return false
         val n = try { next(list) } catch (_: IllegalArgumentException) { null } ?: return false
-        if (!canReach(n)) return false
+        if (!canReach(o, n)) return false
         // A list the engine itself refuses (review G9-13) is a refusal, never an exception out of the admin's call.
         try { startEpoch(o, n, now) } catch (_: IllegalArgumentException) { return false }
         return finish(o, now)
@@ -630,7 +658,8 @@ class GroupPost(
             val next = GroupRoster(list.name, list.colour, rest.map { if (it === chosen) GroupRoster.Member(it.identity, true, it.signer) else it },
                 list.avatar, list.recentForNew)
             // The keys go privately: a member this phone has no way to reach would never get one (review G9-7).
-            if (!canReach(next)) return false
+            // A leaving admin seals no envelope (G3f), so here a contact is the only way to reach a member.
+            if (!allContacts(next)) return false
             val out = try { o.member.newEpoch(next, now, random, leaving = true) } catch (_: IllegalArgumentException) { return false }
             for ((id, k) in out.keys) o.private += account(id.toByteArray()) to Body.Group(GroupControl.KEY, k)
             for (p in out.rosterPackets) o.packets += Packet(o.group, GroupMember.Sealed(p, list.let { o.epochBefore + 1 }, -1, false), false, op = GroupBody.ROSTER)

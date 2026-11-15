@@ -388,13 +388,14 @@ class GroupPostTest {
         assertEquals(listOf(ama.id, yaw.id).map { it.toList() }, list.members.map { it.identity.toList() })
     }
 
-    @Test fun anAdminChangesTheGroupOnlyWhenEveryMemberIsAContact() {
+    @Test fun anAdminChangesTheGroupOnlyWhenEveryMemberCanBeReached() {
         val (ps, g) = group("Ama", "Kofi", "Esi", "Yaw")
         val (ama, kofi, esi, yaw) = ps
         assertTrue(ama.post.makeAdmin(g, kofi.account, now)); settle(); tickAll()
-        // Keys go privately: Kofi knows neither Esi nor Yaw, so he cannot start an epoch for them.
-        assertFalse(kofi.post.remove(g, esi.account, now))
-        kofi.know(yaw); yaw.know(kofi)
+        // Kofi knows neither Esi nor Yaw, but they announced box keys on the list held, so he can reach them in an
+        // envelope (decision 79, D1a): he can start the epoch without adding them as contacts.
+        assertNotNull("Kofi holds Esi's box key", kofi.post.member(g)!!.boxKeyOf(esi.id))
+        assertNotNull("Kofi holds Yaw's box key", kofi.post.member(g)!!.boxKeyOf(yaw.id))
         assertTrue(kofi.post.remove(g, esi.account, now))
         settle()
         assertNull(yaw.post.member(g)!!.roster!!.member(esi.id))
@@ -670,29 +671,25 @@ class GroupPostTest {
         assertEquals(0, kofi.store.savedCalls)
     }
 
-    /** G9-7: keys go to contacts only, so an epoch that would need a stranger's key does not start, and the admin is told. */
-    @Test fun anEpochForSomeoneWhoIsNoContactDoesNotStartAndIsReported() {
+    /**
+     * G9-7 and decision 79 (D1a): a member the admin has no private session for is still reached when it announced a
+     * box key on the list held, in an envelope; a member with neither stops the change, and the admin is told.
+     */
+    @Test fun anEpochForANonContactWithABoxKeyStarts() {
         val (ps, g) = group("Ama", "Kofi", "Esi")
         val (ama, kofi, esi) = ps
         val zed = Phone("Zed"); phones += zed; ama.know(zed); zed.know(ama)
+        // Esi announced a box key, so the admin can reach it without a contact: the change goes.
+        assertNotNull("the admin holds Esi's box key", ama.post.member(g)!!.boxKeyOf(esi.id))
         ama.contacts.remove(esi.account)
         val epoch = ama.post.member(g)!!.epoch
         assertTrue(ama.post.invite(g, listOf(zed.account), now)); settle()
         assertTrue(zed.post.join(zed.store.invitations().single(), now)); settle()
-        ama.store.private.clear(); ama.store.events.clear()
-        now += 61_000
-        assertTrue(ama.post.tick(now))
-        assertEquals("no epoch without a key for Esi", epoch, ama.post.member(g)!!.epoch)
-        assertTrue(ama.store.private.none { it.second.kind == GroupControl.KEY })
-        assertEquals(listOf(esi.account), ama.store.events.filterIsInstance<GroupPost.Event.CannotReach>().single().people)
-        // The contact comes back: the next tick starts the epoch with Zed in it.
-        ama.know(esi)
         now += 61_000
         assertTrue(ama.post.tick(now)); settle()
-        now += 61_000
-        assertTrue(ama.post.tick(now)); settle()
-        assertEquals(epoch + 1, ama.post.member(g)!!.epoch)
+        assertEquals("the epoch went with Esi in it", epoch + 1, ama.post.member(g)!!.epoch)
         assertNotNull(ama.post.member(g)!!.roster!!.member(zed.id))
+        assertNotNull(ama.post.member(g)!!.roster!!.member(esi.id))
     }
 
     @Test fun theLastAdminCannotLeaveWhileAKeyWouldHaveNoWay() {

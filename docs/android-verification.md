@@ -1,5 +1,27 @@
 # Android qualification record
 
+## v0.1.3 G3h envelope/outbox and box-key lifecycle, 2026-11-15
+
+**Development software qualification only; no signed upgrade, physical radio or release claim.** The actual
+GroupPost-to-AppGroupStore path now dispatches envelopes and durably keeps own box keys. The release plan's G3h
+entry records the implementation, concurrent-admin repair, exact counts and remaining protocol work.
+
+- Focused core: 29/29; full core: 903/903. Mutation coverage: 26 distinct controls, composite 25 full-run catches plus
+  one repaired-input count-guard recheck; original survivor and interrupted runs are retained.
+- Android 15/API 35 arm64 silent emulator, real Vault and SQLite, fake radio/speech: 53 unique terminal passes,
+  no failures/errors/skips. Exact whole-class selectors: `GroupEnvelopeStorageTest` (3), `GroupStorageTest` (12),
+  `ChatBackupTest` (21), `ArchiveImportTest` (17). New checks cover late transaction rollback, reopened outbox routing
+  and a real decrypted chat-copy boundary with an exported-message positive control. Final crash buffer is empty.
+- Actual old-core compatibility: ops 8/9 consumed without events/new receipts, replay refused, then private epoch and
+  ordinary message delivery succeed. This does not qualify the unbuilt ops 10/11.
+- Canonical `scripts/check.sh`: CHECK_OK; 337 Python passes, 1,637 retained JUnit variant records across 206 reports,
+  zero failures/errors/skips. Unchanged cached tasks are not claimed as fresh executions.
+- Forced release measurement and final gate APKs agree byte-for-byte: unsigned arm64 16,808,588 B; armeabi-v7a
+  14,798,886 B. Growth is 3,208 B per ABI for G3h, 12,088 B over the unchanged prepared baseline.
+- Source/artifact pins and raw receipts are retained outside Git under `g3h-final-qualification-final/`,
+  `g3h-android-final/`, `g3h-final-build/` and `g3h-mutation-admission.json`. Qualification source stayed unchanged;
+  this entry and the two linked design/plan records are documentation-only closeout edits.
+
 ## v0.1.2 broad emulator run and test fixes, 2026-11-05
 
 **Development software qualification, not a signed release.** Application, core, radio and protocol code are unchanged

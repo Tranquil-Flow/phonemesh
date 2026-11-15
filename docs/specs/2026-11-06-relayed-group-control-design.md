@@ -1,18 +1,19 @@
 # Relayed group control (v0.1.3 G1): design for review
 
-Status: **construction chosen; being built (only G3a, the envelope body, so far).** Source-based design for the v0.1.3 G1 gate
+Status: **construction chosen; G3a–G3h built and locally verified.** Initial envelope delivery and durable box-key
+lifecycle are integrated; bounded retries and relayed Ask/Leave remain. Source-based design for the v0.1.3 G1 gate
 (`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
 (accounts decision 79): R3 with K2 below, with the D1 trust change; and D4a the same day (decision 80): envelopes only
-where needed, no padding, the visible metadata told plainly. So the ops below are pinned as written. No code, wire byte
-or default changes with this note.
+where needed, no padding, the visible metadata told plainly. The approval pinned the construction; the implementation
+records below describe the subsequent code, traffic and saved-format changes.
 
-Source reviewed (identical in the prepared v0.1.2 candidate `10492845` and the v0.1.3 branch; `git diff --stat
-10492845 HEAD` over `core/group`, `core/mail` and `core/wire` is empty): `android/core/src/main/kotlin/org/phonemesh/core/
+Initial design-review baseline (before G3 implementation): these paths matched the prepared v0.1.2 candidate
+`10492845`. Later implementation deltas are recorded below. Source reviewed: `android/core/src/main/kotlin/org/phonemesh/core/
 group/{GroupPost,GroupMembers,GroupCipher,GroupChains}.kt`, `core/mail/Postman.kt`, `core/wire/{Bodies,WireV2}.kt`,
 `core/crypto/P256.kt`, `android/app/.../AppGroupStore.kt`, the key draft `2026-10-27-private-group-keys-draft.md` (GK4 and
 review G9) and accounts decisions 47, 66, 72, 74, 75 and 77.
 
-## The problem, from the source
+## The original problem, from the v0.1.2 source
 
 - An epoch key (`GroupKey`, private body kind 10, 119 bytes) goes only over the admin's pairwise session with each
   member (`GroupPost.startEpoch` → `Change.private`). `GroupPost.unreachable` refuses an epoch when any other member is
@@ -21,7 +22,7 @@ review G9) and accounts decisions 47, 66, 72, 74, 75 and 77.
 - So a promoted admin who has not added every member cannot remove anyone, add anyone, restyle the group, promote
   someone or hand over as the last admin (`edit`, `addJoined`, the leaving batch in `tick` and the last admin's
   `leave` all refuse an unreachable member). The test
-  `GroupPostTest#anAdminChangesTheGroupOnlyWhenEveryMemberIsAContact` pins today's refusal. Decision 77 kept this rule
+  `GroupPostTest#anAdminChangesTheGroupOnlyWhenEveryMemberIsAContact` pinned that refusal. Decision 77 kept this rule
   for v0.1.2 and named relayed delivery as later work.
 - The same dependence holds for the other private bodies: a resend request (`Ask`, kind 13) goes to the waiting key's
   admin, a leaving notice (`Leave`, kind 15) to the first admin the leaver has as a contact (none: nothing is sent), a
@@ -63,7 +64,7 @@ a member M who has the recipient X as a contact; M forwards it over M-X's sessio
 
 **R2, the new secret inside the group under the old epoch.** Rejected outright: the removed member reads it (rule 2).
 
-**R3, a sealed envelope for one member, carried by the group (proposed).** The admin encrypts the new epoch's key to a
+**R3, a sealed envelope for one member, carried by the group (chosen).** The admin encrypts the new epoch's key to a
 group-only public key of the recipient, and sends the result as an ordinary group packet on its own radio chain of the
 epoch the recipient holds. The radio mesh and hubs carry it like any group packet; the old epoch only hides it from
 outsiders, while the envelope keeps it from other members. Details below.
@@ -77,7 +78,7 @@ Recipient key for R3:
   (`AppGroupStore.newSigner`), so it would work technically, and every roster already lists it. Rejected: it uses one
   key for both signing and key agreement, which would need its own analysis, and it gives no signal of which phones can
   open an envelope (a v0.1.2 member would just never get the key).
-- **K2, a separate group box key per member (proposed).** Each v0.1.3 member makes a P-256 key pair per group, kept like
+- **K2, a separate group box key per member (chosen).** Each v0.1.3 member makes a P-256 key pair per group, kept like
   the signing key (sealed by the Vault, never in a backup), and announces the public half in the group. The
   announcement is signed with the member's group signing key inside the packet, so it is bound to that member's list
   entry and to nobody outside. It also tells admins that this phone can open envelopes.
@@ -186,7 +187,8 @@ wire traffic are unchanged.
   holds, and announces it with its next profile (`profileDue`), i.e. one radio packet.
 - After an epoch reached it by envelope, the member makes a new box key and announces it in the new epoch: this is also
   the admin's sign that the envelope arrived. The previous private half is kept 72 hours (an admin may have sealed to
-  it), then wiped.
+  it), then omitted from subsequent saved state and its references dropped. This is not guaranteed physical erasure
+  of managed memory or storage.
 - Every v0.1.3 member (any member may be promoted later) keeps, per member of the list held, the newest box key read from
   that member's own chain; it reads members' chains of the epoch held and, for 72 hours, of the one before. The key is
   dropped when its member leaves the list. A box key from anyone else's chain, or a duplicate of another member's, is
@@ -266,7 +268,25 @@ never in it. R8 strips the new method, since nothing in the app calls it yet, so
 yet wired into `GroupPost`: the private half is not made or kept by the Vault, no announcement is sent, and the
 app's behaviour and wire traffic are unchanged.
 
-### Asking again, retries and limits
+Built as G3h (2026-11-15, host JVM and Android emulator evidence): `GroupPost` now uses the reach plan in the
+actual epoch change. Contacts get the private key only; an existing member with an authenticated box key gets an
+op 8 envelope only. Envelopes precede the new roster in the durable outbox, on the admin's held-epoch radio chain,
+never hub-only. Joiners still need a contact; a leaving admin still seals no envelope and requires contacts.
+
+The saved extension is now version 3. This phone's own public/private halves, pending-envelope origin and committed
+rotation obligation survive a restart in the app's Vault-sealed live group row, never in a chat copy. Versions 1 and
+2 still load without own keys. Announcements use the scheduled profile opportunity. An accepted pending key is not
+an acknowledgement: only a checked, committed envelope-delivered epoch earns rotation, once in the new epoch.
+Idle maintenance schedules and persists previous-half expiry after the inclusive 72-hour retention boundary;
+terminal states drop own-key references. Neither managed-memory nor physical-storage erasure is guaranteed.
+
+The source review found a reachable two-admin failure: an envelope-attributed rival survived another admin's win,
+so encode produced state decode refused. Two real `GroupPost` regressions failed first using decode-before-save
+storage. Commit now retires that past attribution while preserving the rival for conflict detection; both a private
+winner and an envelope winner restore and still detect the rival. Verification and size evidence are recorded in
+the release plan's G3h entry and `docs/android-verification.md`. Bounded envelope retries and ops 10/11 remain unbuilt.
+
+### Asking again, retries and limits (remaining implementation)
 
 - **Admin side.** The envelopes join the list packets in the admin's `Issued` copy of the epoch (already kept 72 hours,
   `KEEP_MS`). For a recipient whose new box key has not appeared, the admin airs that recipient's envelope and the list
@@ -293,9 +313,10 @@ app's behaviour and wire traffic are unchanged.
   cannot open it, and nothing weaker replaces it.
 - **v0.1.2 member, envelopes for others.** It reads the admin's chain, consumes the envelope position and drops it. Its
   own key comes privately (it must be the admin's contact) or the change does not start.
-- **Saved state.** `GroupMember.encode` gains an appended extension (box keys of members, own box key labels, envelopes
-  in `Issued`), the same way v0.1.2 appended `EXT_VERSION` 1; a v0.1.2 save loads with no box keys. The list (version 3)
-  and `GroupKey` (version 2) bytes do not change. Downgrading the app is not supported (same signer, no data clear).
+- **Saved state.** The appended extension is version 3: members' public box keys, this phone's own public/private halves,
+  rotation obligation and pending-envelope attribution. Versions 1/2 load without own halves. Envelope retention in
+  `Issued` awaits the retry slice; it is not in extension 3. The list (version 3) and `GroupKey` (version 2) bytes do not
+  change. Downgrading the app is not supported (same signer, no data clear).
 - **Incompatibility shown truthfully.** The screens say who cannot be reached and why (not a contact; no newer app
   seen), never that a key was delivered when only an envelope was sent (G4 decides the wording).
 
@@ -303,7 +324,7 @@ app's behaviour and wire traffic are unchanged.
 
 - **The roster's signing-key binding (trust change, D1a, accepted).** A promoted admin gives the key to a member it
   never added, trusting the signing key the earlier admin bound to that member and the box key that member then signed.
-  Today an admin only trusts its own contacts for this; ordinary members already trust admins' lists for everyone
+  In v0.1.2 an admin only trusts its own contacts for this; ordinary members already trust admins' lists for everyone
   (decision 66 trade-off). An admin that lied in the list could already speak as that member and is already given
   every secret.
 - **Metadata inside the group and on air (D4a, accepted, decision 80).** Envelopes go only where needed, so members of
@@ -314,8 +335,9 @@ app's behaviour and wire traffic are unchanged.
   have fixed sizes and group packets are not padded, so someone who can pick out one change's packets on air may count
   them. See "D4 trade-offs" below. No recipient anonymity or traffic-analysis resistance is claimed; these are
   inferences from the design, not observations of built code.
-- **Forward secrecy.** A pairwise key is ratchet-protected; an envelope is protected by the recipient's box key until it
-  is rotated after use and the old half wiped. A phone compromised before that wipe exposes the epochs sealed to it.
+- **Forward secrecy.** A pairwise key is ratchet-protected; an envelope is protected by the recipient's box key. Rotation
+  after use and dropping the old half after the retention window limit the intended exposure, but managed-memory and
+  physical-storage erasure are not guaranteed. A recovered private half can expose the epochs sealed to it.
 - **Airtime.** One radio packet per box-key announcement (at join/upgrade and after each envelope-delivered epoch), one
   per envelope instead of a private key packet, at most two re-airs per envelope recipient, small Ask/Leave packets.
   No numeric radio budget is claimed until measured.

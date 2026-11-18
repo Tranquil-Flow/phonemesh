@@ -1,5 +1,48 @@
 # Android qualification record
 
+## v0.1.3 G3i bounded envelope retries, 2026-11-18 — locally qualified
+
+**Host/emulator development qualification complete; not a signed upgrade or physical release.**
+The revised runner-admission queue was followed. Sandbox admission passed 59 cases plus 2 independent parent controls
+before the live source swap; genuine designated core assertion RED preceded GREEN. Failed/INVALID attempts remain.
+
+- Focused core **67/67** (Retry 25, PostEnvelope 14, BoxState 15, Announce 13); fresh full core **928/928**.
+- Core mutation evidence is **22 distinct controls as composite 21+1**, not a rewritten clean hunt: the full hunt
+  rejected the byte mutant's JUnit ArrayComparisonFailure type, despite intended assertion failures. javap confirmed its
+  AssertionError superclass; a fresh one-mutant recheck caught it with 39/39 GREEN before/restored. Three independent
+  app chain/packet/cap mutants each failed their intended selector; the string-state ComparisonFailure classifier
+  rejection is also preserved. No compiler/setup failure counts as a catch. Independent source review found no blocker.
+- Fresh Android API 35 arm64 silent emulator: **88 unique terminal passes**, no failures/errors/skips; selectors
+  `GroupEnvelopeStorageTest` (14), `GroupStorageTest` (12), `ChatBackupTest` (21), `ArchiveImportTest` (17), `HubPathsTest` (24). Exact built and
+  installed APK bytes/source inputs matched. Latest unique-row guard is included. Covers real Vault/SQLite rollback,
+  reopen and export exclusion; SENT/HUB/WAITING/in-flight/late acceptance; shared receipt-repair cap; colliding radio/hub
+  position; distinct multipart lists; raw FakeRadio byte equality and joined-hub custody, not physical RF emission.
+- A real 19-recipient retention row measured **21,539 B encoded / 21,567 B Vault-sealed**; appended retention **5,454 B**.
+  SQLite/core reopen preserved the bytes and emitted usable retries. A decrypted chat-copy check includes a selected
+  message positive control and excludes own private half, live state/id and retained envelope bytes.
+- The actual prepared-v0.1.2 core consumes/drops new ops 8/9 without events/new receipts, rejects both real repeat rounds
+  after original consumption, consumes a first-seen retry when the original was missed, rejects the following replay,
+  then continues private epoch and ordinary message delivery. These are not op 10/11 or arbitrary missed-epoch proofs.
+- **Actual maintained scripts/check.sh returned CHECK_OK**, including checkApkSize: Python 337, standalone hub-network
+  guard 6, Linux bridge 24; build/lint/network/demo/hub distribution; **1,662 JUnit variant records in 207 reports**,
+  **1,398 unique class/method IDs**, zero failures/errors/skips. Raw task provenance retains fresh/cached distinctions;
+  these are not 1,662 newly executed distinct methods. Source and size-policy pins matched before/after the gate,
+  with no surviving owned descendants. Final sealed APKs then passed the full Android88 selection with matching installed
+  bytes and an empty crash buffer. The three final documentation edits followed qualification; product/test/build inputs
+  stayed frozen. The earlier non-size-only gate and all rejected attempts remain separate historical receipts.
+- Forced unsigned release APKs: **16,811,384 B arm64 / 14,801,682 B armeabi-v7a**, +2,796 B per ABI over G3h,
+  cumulative **14,884 B** over unchanged prepared-v0.1.2 baselines, within the 262,144-B per-ABI whole-release allowance.
+  Under decision B, arm64 ceiling rose **16,809,000 → 16,811,384 B (+2,384 B)**; v7 stays **14,821,000 B**. Signed ceilings
+  and baselines were not changed. The owner-provided historical visual checker is preserved; an explicit v0.1.3 mode
+  verifies the retained prepared-v0.1.2 APK hashes, unchanged whole-release allowance for both ABIs and synchronized
+  Gradle ceilings. Seven inert policy controls pass; the real checker refused unsynchronized properties, then passed
+  before/after the canonical gate. No historical visual budget was silently replenished. No push, signed build, owner
+  phone/radio, microphone, Doze or physical delivery qualification is claimed.
+- Raw evidence remains outside Git: g3i-parent-runner-admission.md, g3i-core-mutation-admission.json,
+  g3i-composition-tail-v2/, g3i-compatibility-final/, g3i-release-measure-v1/, g3i-size-policy-admission.md,
+  g3i-final-qualification-v1/, g3i-android-final/ and g3i-app-build-final/. The earlier g3i-android-green-v2/ and
+  g3i-pending-policy-check-v1/ receipts remain. Owned resources are retired after qualification.
+
 ## v0.1.3 G3h envelope/outbox and box-key lifecycle, 2026-11-15
 
 **Development software qualification only; no signed upgrade, physical radio or release claim.** The actual

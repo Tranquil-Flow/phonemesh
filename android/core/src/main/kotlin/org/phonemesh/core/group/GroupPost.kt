@@ -84,7 +84,9 @@ class GroupPost(
      */
     class Packet(val group: ByteArray, val sealed: GroupMember.Sealed, val hubOnly: Boolean, val messageId: Long? = null, val audience: Int = 0,
                  /** The [GroupBody] op it carries (a list part for [GroupBody.ROSTER]). */
-                 val op: Int = GroupBody.MESSAGE)
+                 val op: Int = GroupBody.MESSAGE,
+                 /** An identical retained radio envelope: rearm its existing outbox row, never insert a new one. */
+                 val retryEnvelope: Boolean = false)
 
     /** Something the app shows or records, in the same transaction as the state that read it. */
     sealed class Event {
@@ -178,9 +180,12 @@ class GroupPost(
     }
 
     /** Saves [o]'s change; when the store keeps it, the codes this group reads are worked out again from the member in hand. */
-    private fun commit(o: Open, now: Long, change: Change = o.change()): Boolean {
-        if (!store.commit(change)) return false
-        if (change.deleted) unindex(o.group) else index(o.group, o.member, now)
+    private fun commit(o: Open, now: Long, change: Change? = null): Boolean {
+        // Indexing also expires state: persist the whole-Issued cleanup before building the save.
+        o.member.expireIssued(now)
+        val savedChange = change ?: o.change()
+        if (!store.commit(savedChange)) return false
+        if (savedChange.deleted) unindex(o.group) else index(o.group, o.member, now)
         return true
     }
 
@@ -398,7 +403,11 @@ class GroupPost(
         codeOwner.clear(); codesOf.clear()
         val out = LinkedHashSet<String>()
         for (g in store.groups()) {
-            val m = open(g)?.member ?: continue
+            val o = open(g) ?: continue
+            val m = o.member
+            // A code-index refresh can be the first work after the horizon. Commit the cleanup
+            // before expectedCodes prunes this transient instance; refusal leaves maintenance owed.
+            if (m.expireIssued(now)) commit(o, now)
             index(g, m, now)
             m.expectedCodes(now).mapTo(out) { c -> c.joinToString("") { "%02x".format(it) } }
         }
@@ -498,7 +507,8 @@ class GroupPost(
         for (g in store.groups()) {
             val o = open(g) ?: continue
             val m = o.member
-            var work = m.expireBoxKeys(now)
+            var work = m.expireIssued(now)
+            if (m.expireBoxKeys(now)) work = true
             val due = o.adminDue
             if (due != null && due <= now && isAdmin(o) && m.waitingOn() == null && (m.roster == null || m.canSend)) {
                 // Whatever an admin's epoch runs into, the batch is done afterwards: a bad joiner must not make this repeat
@@ -553,6 +563,15 @@ class GroupPost(
                 }
                 o.profileDue = null; work = true
             }
+            // The admin airs an envelope again for a member that has not taken the epoch (v0.1.3 G3i): the same
+            // bytes as before, so the chain position and the nonce are not used twice.
+            if (m.canSend) {
+                val retries = m.dueRetries(now)
+                if (retries.isNotEmpty()) {
+                    for (r in retries) o.packets += Packet(o.group, r.sealed, false, op = r.op, retryEnvelope = r.op == GroupEnvelope.OP)
+                    work = true
+                }
+            }
             if (work || m.epoch != o.epochBefore) ok = finish(o, now) && ok
         }
         return ok
@@ -583,7 +602,7 @@ class GroupPost(
     /** When [tick] has work next; null when nothing waits. */
     fun nextDue(): Long? = store.groups().mapNotNull { g ->
         val o = open(g) ?: return@mapNotNull null
-        listOfNotNull(o.receiptDue, o.profileDue, o.adminDue, o.member.boxKeyExpiry).minOrNull()
+        listOfNotNull(o.receiptDue, o.profileDue, o.adminDue, o.member.boxKeyExpiry, o.member.issuedExpiry, o.member.envelopeRetryDue).minOrNull()
     }.minOrNull()
 
     /** This phone's name or picture changed: every group gets the new profile soon. */

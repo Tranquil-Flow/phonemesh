@@ -1,7 +1,8 @@
 # Relayed group control (v0.1.3 G1): design for review
 
-Status: **construction chosen; G3a–G3h built and locally verified.** Initial envelope delivery and durable box-key
-lifecycle are integrated; bounded retries and relayed Ask/Leave remain. Source-based design for the v0.1.3 G1 gate
+Status: **construction chosen; G3a–G3i implemented with host/emulator evidence.** Bounded retries and durable
+box-key lifecycle are integrated. G3i passed the canonical size-gated check and sealed Android selection; relayed
+Ask/Leave remain unbuilt. Source-based design for the v0.1.3 G1 gate
 (`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
 (accounts decision 79): R3 with K2 below, with the D1 trust change; and D4a the same day (decision 80): envelopes only
 where needed, no padding, the visible metadata told plainly. The approval pinned the construction; the implementation
@@ -273,7 +274,7 @@ actual epoch change. Contacts get the private key only; an existing member with 
 op 8 envelope only. Envelopes precede the new roster in the durable outbox, on the admin's held-epoch radio chain,
 never hub-only. Joiners still need a contact; a leaving admin still seals no envelope and requires contacts.
 
-The saved extension is now version 3. This phone's own public/private halves, pending-envelope origin and committed
+At the G3h boundary the saved extension became version 3 (G3i below appends version 4). This phone's own public/private halves, pending-envelope origin and committed
 rotation obligation survive a restart in the app's Vault-sealed live group row, never in a chat copy. Versions 1 and
 2 still load without own keys. Announcements use the scheduled profile opportunity. An accepted pending key is not
 an acknowledgement: only a checked, committed envelope-delivered epoch earns rotation, once in the new epoch.
@@ -284,22 +285,35 @@ The source review found a reachable two-admin failure: an envelope-attributed ri
 so encode produced state decode refused. Two real `GroupPost` regressions failed first using decode-before-save
 storage. Commit now retires that past attribution while preserving the rival for conflict detection; both a private
 winner and an envelope winner restore and still detect the rival. Verification and size evidence are recorded in
-the release plan's G3h entry and `docs/android-verification.md`. Bounded envelope retries and ops 10/11 remain unbuilt.
+the release plan's G3h entry and `docs/android-verification.md`. G3i below implements bounded envelope retries; ops 10/11 remain unbuilt.
 
-### Asking again, retries and limits (remaining implementation)
+### Asking again, retries and limits (G3i admin retries built; ops 10/11 remain)
 
-- **Admin side.** The envelopes join the list packets in the admin's `Issued` copy of the epoch (already kept 72 hours,
-  `KEEP_MS`). For a recipient whose new box key has not appeared, the admin airs that recipient's envelope and the list
-  again at most twice (after 10 and 60 minutes), then stops. Hubs keep the packets by code for their mail period, so a
-  member that reaches a hub catches up without a resend.
-- **Member side.** A member that holds an envelope key but no list after 10 minutes (`ASK_AFTER_MS`) and does not have
+- **Admin side (G3i).** Original sealed envelopes join the key and list in one `Issued` holder. An announcement
+  acknowledges that holder only when authenticated in its issued epoch or later; a changed key announced in the
+  preceding epoch cannot cancel the retry. Up to two retry rounds are due at +10/+60 minutes, each with every still
+  waiting recipient's original envelope and one complete list. A first late wake after both deadlines gives one useful
+  catch-up round and spends the remaining intent budget, not adjacent scheduler bursts. Repeating identical ciphertext
+  is not a fresh encryption: bytes, old epoch, radio-chain position and nonce stay unchanged, with no resealing.
+- **Lifetime/scheduling.** One whole-holder expiry authority preserves the inclusive `at + KEEP_MS` boundary and
+  drops the key/list/envelope references just after it. Cleanup remains scheduled after acknowledgement/exhaustion and
+  persists before transient code indexing, including refusal/reopen. Disabled sends expose no unproductive retry
+  deadline, but maintenance stays reachable. These timers run a live process; they do not wake a killed/Dozing phone.
+- **App acceptance is not core intent or RF delivery.** A transient marker identifies a radio-envelope retry. The
+  Vault/SQLite transaction rearms exactly one radio row matching group/epoch/seq and identical bytes; mismatching,
+  missing or ambiguous identity refuses the transaction. Row id, metadata and the shared three-acceptance budget stay.
+  WAITING/in-flight work coalesces; repair shares that budget. Distinct roster `seq=-1` parts stay distinct, including
+  bounded already-queued list copies. At the cap a pending-key member may still need the list, so it is not dropped.
+  Joined hubs receive the same radio-chain packets, not a second hub-chain list. Custody is not measured RF emission;
+  hub duplicate demand remains bounded by its persisted cooldown and first-storage horizon.
+- **Member-side relayed Ask (unbuilt).** A member that holds an envelope key but no list after 10 minutes (`ASK_AFTER_MS`) and does not have
   that admin as a contact sends op 10 on its own chain of the epoch it holds (sealing it is allowed while app sends are
   paused). The admin answers each member once per epoch (review G9-11) by airing that member's envelope and the list
   again, only while it keeps the epoch's copy.
 - **Reading window.** A reader looks 20 positions ahead (`GroupReader.WINDOW`). An admin that sends many envelopes in one
   change may push a lagging member's envelope past that window until the member reads the earlier packets (a hub
   serves them). The admin seals envelopes first in the change and at most 19 exist (20 members).
-- **Leaving.** A leaving member with no admin as a contact sends op 11 naming one admin (the first admin on the list that
+- **Relayed leaving (op 11 unbuilt).** A leaving member with no admin as a contact sends op 11 naming one admin (the first admin on the list that
   announced a box key), then stops. Only the named admin acts, read from the leaver's old chain while the 72-hour old
   reading lasts; the Leave epoch rules (review G9-14) apply. A leaver that has an admin as a contact still sends the
   private `Leave`, so a v0.1.2 admin hears it.
@@ -313,10 +327,13 @@ the release plan's G3h entry and `docs/android-verification.md`. Bounded envelop
   cannot open it, and nothing weaker replaces it.
 - **v0.1.2 member, envelopes for others.** It reads the admin's chain, consumes the envelope position and drops it. Its
   own key comes privately (it must be the admin's contact) or the change does not start.
-- **Saved state.** The appended extension is version 3: members' public box keys, this phone's own public/private halves,
-  rotation obligation and pending-envelope attribution. Versions 1/2 load without own halves. Envelope retention in
-  `Issued` awaits the retry slice; it is not in extension 3. The list (version 3) and `GroupKey` (version 2) bytes do not
-  change. Downgrading the app is not supported (same signer, no data clear).
+- **Saved state.** The appended extension is now version 4. It retains the earlier public/own box-key and attribution
+  fields, then adds recipient, sealed-to public key, original envelope packet/epoch/seq/radio-chain flag and retry-intent
+  count. Versions 1–3 load without this retention block; the fixed part, roster wire version 3 and GroupKey wire version 2
+  are unchanged. Structural guards check holder consistency, bounded framing/points/counts, old/issued epoch relation,
+  distinct nonself recipients on both lists and distinct nonexhausted positions. Framing does not prove encrypted opcode.
+  State stays Vault-sealed and excluded from decrypted chat copies/exports; reference retirement is not physical erasure.
+  Downgrading the app is not supported (same signer, no data clear).
 - **Incompatibility shown truthfully.** The screens say who cannot be reached and why (not a contact; no newer app
   seen), never that a key was delivered when only an envelope was sent (G4 decides the wording).
 
@@ -334,7 +351,8 @@ the release plan's G3h entry and `docs/android-verification.md`. Bounded envelop
   names every member the envelopes reached (D3a), and a member who asks with op 10 is named to the old list. The new ops
   have fixed sizes and group packets are not padded, so someone who can pick out one change's packets on air may count
   them. See "D4 trade-offs" below. No recipient anonymity or traffic-analysis resistance is claimed; these are
-  inferences from the design, not observations of built code.
+  traffic-analysis inferences, not measured RF observations. G3i repeats byte-identical codes/ciphertext and therefore
+  links retries; it introduces no traffic-analysis resistance.
 - **Forward secrecy.** A pairwise key is ratchet-protected; an envelope is protected by the recipient's box key. Rotation
   after use and dropping the old half after the retention window limit the intended exposure, but managed-memory and
   physical-storage erasure are not guaranteed. A recovered private half can expose the epochs sealed to it.

@@ -8,6 +8,7 @@ import org.phonemesh.core.account.Profile
 import org.phonemesh.core.crypto.P256
 import org.phonemesh.core.group.GroupAvatar
 import org.phonemesh.core.group.GroupControl
+import org.phonemesh.core.group.GroupEnvelope
 import org.phonemesh.core.group.GroupMember
 import org.phonemesh.core.group.GroupPost
 import org.phonemesh.core.group.GroupRoster
@@ -126,7 +127,11 @@ class AppGroupStore(
         for ((to, body) in change.private) rows.addPrivate(to.toString(), body.kind, vault.seal(body.bytes, privateLabel(to.toString(), body.kind)), now())
         var named = false
         for (p in change.packets) {
-            val id = rows.addOut(g, p.sealed.packet, p.hubOnly, p.messageId, p.sealed.epoch, p.sealed.seq, p.audience, now())
+            val id = if (p.retryEnvelope) {
+                check(p.op == GroupEnvelope.OP && !p.hubOnly && !p.sealed.hub && p.messageId == null && p.sealed.seq >= 0)
+                check(p.group.contentEquals(change.group))
+                rows.rearmEnvelope(g, p.sealed.packet, p.sealed.epoch, p.sealed.seq)
+            } else rows.addOut(g, p.sealed.packet, p.hubOnly, p.messageId, p.sealed.epoch, p.sealed.seq, p.audience, now())
             check(id > 0)
             // The radio head names the bubble: replies and reactions to it point at its reference.
             val messageId = p.messageId

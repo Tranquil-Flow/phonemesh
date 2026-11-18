@@ -158,7 +158,7 @@ class GroupBoxStateTest {
     @Test fun pendingEnvelopeClaimsAreUniqueAndForFutureKeys() {
         val (a, b) = two(); val out = envelopeEpoch(a, b)
         b.member.receive(out.envelopes.single().packet, 1000)
-        val bytes = b.member.encode()
+        val bytes = b.member.encode(ext = 3)
         val id = bytes.copyOfRange(bytes.size - P256.POINT, bytes.size)
         val twice = bytes.copyOfRange(0, bytes.size - P256.POINT - 1) + byteArrayOf(2) + id + id
         assertNull("one claim per pending sender", b.load(twice))
@@ -168,7 +168,7 @@ class GroupBoxStateTest {
 
     @Test fun malformedOwnKeyCountPublicPointAndDeadlineAreRefused() {
         val (_, b) = two()
-        val bytes = b.member.encode()
+        val bytes = b.member.encode(ext = 3)
         val start = b.member.encode(2).size
         val entrySize = 2 + P256.POINT + 2 + 32 + 8
         val entry = bytes.copyOfRange(start + 1, start + 1 + entrySize)
@@ -186,7 +186,7 @@ class GroupBoxStateTest {
     }
 
     @Test fun everyTruncationOfTheNewExtensionAndTrailingDataIsRefused() {
-        val (_, b) = two(); val bytes = b.member.encode()
+        val (_, b) = two(); val bytes = b.member.encode(ext = 3)
         // The older complete extension is valid; every partial version-3 tail is not.
         val start = b.member.encode(2).size
         for (n in start until bytes.size) assertNull("truncated at $n", b.load(bytes.copyOf(n)))

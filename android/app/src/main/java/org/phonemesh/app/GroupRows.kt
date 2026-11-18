@@ -135,6 +135,22 @@ class GroupRows(private val history: History) {
             put("epoch", epoch); put("seq", seq); put("audience", audience); put("created", at)
         })
 
+    /** Only an explicitly identified retained radio-envelope retry; called inside the group change transaction. */
+    fun rearmEnvelope(groupId: String, packet: ByteArray, epoch: Long, seq: Long): Long {
+        val matching = db.query("group_outbox", null, "group_id = ? AND epoch = ? AND seq = ? AND hub_only = 0",
+            arrayOf(groupId, epoch.toString(), seq.toString()), null, null, null).use { c ->
+            buildList { while (c.moveToNext()) add(c.out()) }
+        }
+        check(matching.size == 1) // Missing or ambiguous identity refuses the whole transaction.
+        val row = matching.single()
+        check(row.messageId == null && row.packet.contentEquals(packet))
+        check(row.state in listOf(AppGroupStore.STATE_WAITING, AppGroupStore.STATE_SENT, AppGroupStore.STATE_HUB))
+        if (row.airings < AppGroupStore.MAX_AIRINGS && row.state != AppGroupStore.STATE_WAITING) {
+            setOutState(row.id, AppGroupStore.STATE_WAITING)
+        }
+        return row.id // Waiting/in-flight work coalesces; id, metadata and the shared acceptance budget stay.
+    }
+
     fun out(id: Long): OutRow? = db.query("group_outbox", null, "id = ?", arrayOf(id.toString()), null, null, null).use { if (it.moveToFirst()) it.out() else null }
 
     fun outWaiting(): List<OutRow> = db.query("group_outbox", null, "state = 'WAITING'", null, null, null, "id").use { c -> buildList { while (c.moveToNext()) add(c.out()) } }

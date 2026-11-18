@@ -197,7 +197,7 @@ class GroupAnnounceTest {
         kofi.box = box
         ama.member.receive(kofi.announce(box), 1000)
         // An extension this version does not know: its shape is unknown, so the save is refused rather than guessed at.
-        val future = ama.member.encode(ext = 4)
+        val future = ama.member.encode(ext = 5)
         assertNull("an unknown extension is not a save", GroupMember.decode(ama.id, ama.sk, { P256.sign(ama.signing.private, it) }, group, future))
     }
 

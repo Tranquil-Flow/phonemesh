@@ -3,8 +3,10 @@ package org.phonemesh.core.group
 import org.phonemesh.core.account.Avatar
 import org.phonemesh.core.account.EmojiAvatars
 import org.phonemesh.core.account.Profile
+import org.phonemesh.core.crypto.Aead
 import org.phonemesh.core.crypto.Bytes
 import org.phonemesh.core.crypto.P256
+import org.phonemesh.core.wire.WireV2
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.SecureRandom
@@ -419,6 +421,17 @@ class GroupMember(
         val envelopes: List<Sealed> = emptyList(),
     )
 
+    /**
+     * An envelope this admin sealed for one member, kept so it can be aired again if that member does not take
+     * the epoch (v0.1.3 G3i; relayed group control design, "Asking again, retries and limits"). The bytes are
+     * kept as they were made: an airing again sends exactly the same packet, so no chain position and no nonce
+     * is ever used twice.
+     */
+    class KeptEnvelope(val recipient: ByteArray, val boxKey: ByteArray, val sealed: Sealed, var airings: Int = 0)
+
+    /** One packet the admin airs again, and the op it carries (v0.1.3 G3i). */
+    class Retry(val sealed: Sealed, val op: Int)
+
     var state: State = State.INVITED
         private set
     var epoch: Long = 0
@@ -509,6 +522,69 @@ class GroupMember(
     val boxKeyExpiry: Long? get() = ownBoxes.filter { it.until < Long.MAX_VALUE }.minOfOrNull { it.until + 1 }
 
     /**
+     * The packets this admin must air again now (v0.1.3 G3i; relayed group control design, "Asking again,
+     * retries and limits"): the envelope of every member that has not taken the epoch yet, and the list with it.
+     *
+     * The bytes are the ones made before: the same packet, the same chain position, the same nonce. A member
+     * that took the epoch announced a new box key, and that is the sign it needs nothing more.
+     *
+     * Each envelope is aired again at most [MAX_RETRIES] times, the first [RETRY_FIRST_MS] after the change and
+     * the last [RETRY_LAST_MS] after it.
+     *
+     * The counters move, so the caller must save the state with the packets it queues.
+     */
+    fun dueRetries(now: Long): List<Retry> {
+        expireIssued(now)
+        if (!canSend) return emptyList()
+        val i = issued ?: return emptyList()
+        val out = ArrayList<Retry>()
+        for (k in i.envelopes) {
+            if (k.airings >= MAX_RETRIES || !stillWaiting(k, i)) continue
+            val due = i.at + if (k.airings == 0) RETRY_FIRST_MS else RETRY_LAST_MS
+            if (now < due) continue
+            // A late wake collapses missed slots to one useful catch-up, never adjacent duplicate lists.
+            k.airings = if (now >= i.at + RETRY_LAST_MS) MAX_RETRIES else k.airings + 1
+            out += Retry(k.sealed, GroupEnvelope.OP)
+        }
+        if (out.isEmpty()) return out
+        // The list goes once per round: key acceptance alone leaves a member waiting for this list.
+        for (p in i.packets) out += Retry(Sealed(p, i.key.epoch, -1, false), GroupBody.ROSTER)
+        return out
+    }
+
+    /** Next productive retry; maintenance is independently scheduled by [issuedExpiry]. */
+    val envelopeRetryDue: Long? get() {
+        if (!canSend) return null
+        val i = issued ?: return null
+        var due: Long? = null
+        for (k in i.envelopes) {
+            if (k.airings >= MAX_RETRIES || !stillWaiting(k, i)) continue
+            val at = i.at + if (k.airings == 0) RETRY_FIRST_MS else RETRY_LAST_MS
+            if (due == null || at < due) due = at
+        }
+        return due
+    }
+
+    /** Only a key authenticated in the issued epoch or later proves that member took it. */
+    private fun stillWaiting(k: KeptEnvelope, i: Issued): Boolean =
+        boxKeyOf(k.recipient) != null && boxKeys.epochOf(k.recipient) < i.key.epoch
+
+    /** First instant the whole saved epoch copy must go, even after acknowledgement/exhaustion. */
+    val issuedExpiry: Long? get() = issued?.let { it.at + KEEP_MS + 1 }
+
+    /**
+     * Single lifetime authority for the whole Issued (key, list and envelopes). The horizon is inclusive.
+     * True when mutated; transaction owners must persist this before indexing or any subsequent idle wait.
+     */
+    fun expireIssued(now: Long): Boolean {
+        val i = issued ?: return false
+        if (now - i.at <= KEEP_MS) return false
+        i.key.wipe()
+        issued = null
+        return true
+    }
+
+    /**
      * The newest box key [identity] announced on its own radio chain, or null when it announced none. Only a member of
      * the list held has one.
      */
@@ -574,6 +650,11 @@ class GroupMember(
     private class Issued(val key: GroupKey, val packets: List<ByteArray>, val at: Long) {
         /** Members already answered for this epoch: each is answered once (review G9-11). */
         val asked = LinkedHashSet<List<Byte>>()
+        /**
+         * The envelopes this admin sealed for the members it reaches by envelope (v0.1.3 G3i), kept so they can
+         * be aired again while the member has not taken the epoch.
+         */
+        val envelopes = ArrayList<KeptEnvelope>()
     }
     private var issued: Issued? = null
 
@@ -663,13 +744,17 @@ class GroupMember(
         // each AES key and nonce is used once. The admin that hands the group over and leaves takes no epoch, so it
         // seals no envelope.
         require(!leaving || envelopeFor.isEmpty()) { "an admin that leaves reaches no member by an envelope" }
-        val envelopes = envelopeFor.map { id ->
-            val body = GroupEnvelope.seal(key, me, id, boxKeyOf(id)!!)
+        val envelopes = ArrayList<Sealed>()
+        val envelopeBoxes = ArrayList<ByteArray>()
+        for (id in envelopeFor) {
+            val box = boxKeyOf(id)!!
+            val body = GroupEnvelope.seal(key, me, id, box)
             // On this phone's radio chain of the epoch held, never on the hub chain: op 8 travels on the radio chain
             // only, and the member reads the envelope on the chain it already reads.
             val w = writer!!
             val seq = w.next
-            Sealed(w.seal(body), epoch, seq, false)
+            envelopes += Sealed(w.seal(body), epoch, seq, false)
+            envelopeBoxes += box
         }
         val packets: List<ByteArray>
         if (leaving) {
@@ -681,7 +766,13 @@ class GroupMember(
         } else {
             commit(nextEpoch, next, nextDigest, secret.copyOf(), now, null)
             packets = parts.map { writer!!.seal(it) }
-            issued = Issued(key, packets, now)
+            val kept = Issued(key, packets, now)
+            // The envelopes this admin sealed are kept with the epoch's copy: a member that does not take the epoch
+            // is reached again by airing the very same packets (v0.1.3 G3i).
+            for (i in envelopeFor.indices) {
+                kept.envelopes += KeptEnvelope(envelopeFor[i].copyOf(), envelopeBoxes[i].copyOf(), envelopes[i])
+            }
+            issued = kept
         }
         secret.fill(0)
         return Outgoing(keys, packets, dropped, envelopes)
@@ -1071,7 +1162,7 @@ class GroupMember(
         if ((oldReaders.isNotEmpty() || oldHubReaders.isNotEmpty()) && now > oldUntil) { oldReaders.clear(); oldHubReaders.clear() }
         pendings.values.removeAll { (now - it.at > KEEP_MS).also { old -> if (old) it.key.wipe() } }
         early.removeAll { (now - it.at > KEEP_MS).also { old -> if (old) it.key.wipe() } }
-        issued?.let { if (now - it.at > KEEP_MS) { it.key.wipe(); issued = null } }
+        expireIssued(now)
     }
 
     // ---- saved state (review C8): everything above, so a phone resumes exactly where it was
@@ -1129,12 +1220,36 @@ class GroupMember(
             val byEnvelope = pendings.values.filter { it.byEnvelope }
             u8(byEnvelope.size); for (p in byEnvelope) o.write(p.from)
         }
+        // The envelopes this admin keeps to air again (version 4): the member, the box key it was sealed to, the
+        // packet as it was made, and how many times it has been aired again.
+        if (ext >= 4) {
+            val kept = i?.envelopes.orEmpty()
+            u8(kept.size)
+            for (k in kept) {
+                o.write(k.recipient)
+                o.write(k.boxKey)
+                blob(k.sealed.packet)
+                u32(k.sealed.epoch)
+                u32(k.sealed.seq)
+                u8(if (k.sealed.hub) 1 else 0)
+                u8(k.airings)
+            }
+        }
         return o.toByteArray()
     }
 
     companion object {
         /** How long a waiting key, old-epoch reading and a started epoch's resend copy last: the resend horizon. */
         const val KEEP_MS = 72 * 3_600_000L
+
+        /**
+         * How many times an envelope is aired again, and when (v0.1.3 G3i; relayed group control design, "Asking
+         * again, retries and limits"). The first airing again is ten minutes after the change, the last an hour
+         * after it; after that the epoch's copy is let go.
+         */
+        const val MAX_RETRIES = 2
+        const val RETRY_FIRST_MS = 10 * 60_000L
+        const val RETRY_LAST_MS = 60 * 60_000L
 
         /** The 32-byte scalar of a P-256 private key, so it can be saved and given back. */
         private fun scalarOf(key: java.security.PrivateKey): ByteArray =
@@ -1147,10 +1262,11 @@ class GroupMember(
         const val RIVAL_MS = 6 * 3_600_000L
         private const val STATE_VERSION = 2
         /**
-         * The saved extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the members' box keys, and
-         * (G3h) version 3 with this phone's own box keys.
+         * The saved extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the members' box keys,
+         * (G3h) version 3 with this phone's own box keys, and (G3i) version 4 with the envelopes this admin keeps
+         * to air again.
          */
-        private const val EXT_VERSION = 3
+        private const val EXT_VERSION = 4
 
         /** A member saved with [encode]; null when the bytes are not a saved member of [group]. */
         fun decode(me: ByteArray, mySigner: ByteArray, sign: (ByteArray) -> ByteArray, group: ByteArray, bytes: ByteArray): GroupMember? = try {
@@ -1158,7 +1274,11 @@ class GroupMember(
             fun raw(n: Int) = ByteArray(n).also { b.get(it) }
             fun u8() = b.get().toInt() and 0xFF
             fun u32() = b.int.toLong() and 0xFFFF_FFFFL
-            fun blob(): ByteArray = raw(b.short.toInt() and 0xFFFF)
+            fun blob(max: Int = 0xFFFF): ByteArray {
+                val size = b.short.toInt() and 0xFFFF
+                require(size <= max)
+                return raw(size)
+            }
             fun writer(w: ByteArray, epoch: Long): GroupWriter {
                 require(w.size == 36)
                 return GroupWriter(group, epoch, me, w.copyOfRange(0, 32), ByteBuffer.wrap(w, 32, 4).int.toLong() and 0xFFFF_FFFFL, sign)
@@ -1211,7 +1331,7 @@ class GroupMember(
                 // The extension: v0.1.2 added version 1, v0.1.3 (G3d) added version 2 with the box keys. A save from
                 // before v0.1.2 ends above and still loads; a v0.1.2 save loads with no keys, as the design note says.
                 val ext = u8()
-                require(ext == 1 || ext == 2 || ext == 3)
+                require(ext == 1 || ext == 2 || ext == 3 || ext == 4)
                 m.committedAt = b.long
                 m.joinedAt = u32()
                 m.sharedTaken = u8()
@@ -1243,6 +1363,44 @@ class GroupMember(
                         p.byEnvelope = true
                     }
                     require(!m.gone || (m.ownBoxes.isEmpty() && !m.reachedByEnvelope))
+                }
+                if (ext >= 4) {
+                    val kept = u8()
+                    val holder = m.issued
+                    val list = m.roster
+                    require(kept <= (list?.members?.size?.minus(1) ?: 0))
+                    if (kept > 0) require(holder != null)
+                    if (holder != null) {
+                        require((m.state == State.ACTIVE || m.state == State.CONFLICT) && list?.isAdmin(me) == true)
+                        require(holder.key.epoch == m.epoch && holder.key.group.contentEquals(group))
+                        require(holder.key.digest.contentEquals(m.digest) && holder.key.parent.contentEquals(m.previousDigest))
+                        require(holder.key.signer.contentEquals(mySigner))
+                        require(GroupKey.tag(group, m.epoch, holder.key.secret).contentEquals(m.secretTag))
+                        require(holder.packets.size == holder.key.parts && holder.packets.all { GroupCipher.codeOf(it) != null })
+                    }
+                    val recipients = HashSet<List<Byte>>()
+                    val positions = HashSet<Long>()
+                    repeat(kept) {
+                        val recipient = raw(P256.POINT)
+                        val boxKey = raw(P256.POINT)
+                        val packet = blob(WireV2.MAX_PACKET)
+                        val ep = u32()
+                        val seq = u32()
+                        val hub = u8()
+                        val airings = u8()
+                        require(hub == 0)
+                        require(airings <= MAX_RETRIES)
+                        // Structural framing/size only: ciphertext does not prove the inner opcode here.
+                        require(packet.size == WireV2.PLAIN_HEADER + GroupEnvelope.SIZE + GroupCipher.SIGNATURE + Aead.TAG)
+                        require(GroupCipher.codeOf(packet) != null)
+                        require(P256.decompress(recipient) != null)
+                        require(P256.decompress(boxKey) != null)
+                        require(!recipient.contentEquals(me) && list?.member(recipient) != null && m.previous?.member(recipient) != null)
+                        require(recipients.add(recipient.toList()) && positions.add(seq))
+                        require(ep >= 1 && ep == m.oldEpoch && ep + 1 == holder!!.key.epoch)
+                        require(seq < 0xFFFF_FFFFL)
+                        holder!!.envelopes += KeptEnvelope(recipient, boxKey, Sealed(packet, ep, seq, false), airings)
+                    }
                 }
             } else if (m.roster != null && m.previous?.member(me) == null) m.joinedAt = m.epoch
             require(!b.hasRemaining())

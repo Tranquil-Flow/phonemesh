@@ -1,0 +1,5 @@
+# Python struct !BBBI; G3j; cross-implementation, not independent review
+ask=0a010100000002
+leave=0b010200000003
+askLast=0a0113fffffffe
+leaveHigh=0b011080000000

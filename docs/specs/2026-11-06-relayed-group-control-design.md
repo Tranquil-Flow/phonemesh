@@ -1,8 +1,8 @@
 # Relayed group control (v0.1.3 G1): design for review
 
-Status: **construction chosen; G3a–G3i implemented with host/emulator evidence.** Bounded retries and durable
-box-key lifecycle are integrated. G3i passed the canonical size-gated check and sealed Android selection; relayed
-Ask/Leave remain unbuilt. Source-based design for the v0.1.3 G1 gate
+Status: **construction chosen; G3a–G3i implemented with host/emulator evidence; G3j body codec host-qualified.**
+Bounded retries and durable box-key lifecycle are integrated. G3i passed the canonical size-gated check and sealed
+Android selection. G3j implements strict ops 10/11 bodies only; live relayed Ask/Leave remain unbuilt. Source-based design for the v0.1.3 G1 gate
 (`docs/specs/2026-11-04-v0.1.3-release-plan.md`, section G). The owner answered D1a, D2a, D3a and D5a on 2026-11-06
 (accounts decision 79): R3 with K2 below, with the D1 trust change; and D4a the same day (decision 80): envelopes only
 where needed, no padding, the visible metadata told plainly. The approval pinned the construction; the implementation
@@ -285,9 +285,27 @@ The source review found a reachable two-admin failure: an envelope-attributed ri
 so encode produced state decode refused. Two real `GroupPost` regressions failed first using decode-before-save
 storage. Commit now retires that past attribution while preserving the rival for conflict detection; both a private
 winner and an envelope winner restore and still detect the rival. Verification and size evidence are recorded in
-the release plan's G3h entry and `docs/android-verification.md`. G3i below implements bounded envelope retries; ops 10/11 remain unbuilt.
+the release plan's G3h entry and `docs/android-verification.md`. G3i below implements bounded envelope retries;
+G3j adds the ops 10/11 body codec only, while their live behavior remains unbuilt.
 
-### Asking again, retries and limits (G3i admin retries built; ops 10/11 remain)
+### Relayed Ask/Leave bodies (G3j codec built; live behavior unbuilt)
+
+`GroupRelayedControl` encodes/decodes the table's exact seven-byte op10/op11 bodies. It refuses other sizes,
+versions, ops, indices outside `0 until GroupRoster.MAX_MEMBERS`, and epochs outside the existing private
+Ask/Leave range `1 until 0xFFFFFFFF`; high-bit u32 epochs remain positive. Values contain no group or sender field.
+A decoded index is only representable, not authorized: the future caller must bind it to the authenticated carrying
+chain's actual roster and check membership, named target/admin, operation-specific epoch/lifetime and response limits.
+No existing production path, `GroupBody.allowed`, saved format or UI changed in this leaf.
+
+Observed same-API no-op assertion RED, focused68/68 GREEN,14/14 isolated mutation catches with restored GREEN16,
+and actual prepared-v0.1.2 reader consumption/replay refusal/continued text passed. Compatibility is codec + real
+GroupWriter through a raw-op test seam, not GroupPost-produced live requests. Python struct vectors are a same-author
+cross-implementation check; parent source review is not independent crypto sign-off. The maintained size-gated
+scripts/check.sh returned CHECK_OK (full core944); both unsigned release APKs are byte-identical to G3i with no policy
+change. See the G3j release-plan entry and docs/android-verification.md for exact scope/receipts. No fresh emulator
+run is claimed. Automatic/manual Ask, original-envelope/list response and non-contact Leave integration remain next.
+
+### Asking again, retries and limits (G3i admin retries built; ops 10/11 live integration remains)
 
 - **Admin side (G3i).** Original sealed envelopes join the key and list in one `Issued` holder. An announcement
   acknowledges that holder only when authenticated in its issued epoch or later; a changed key announced in the

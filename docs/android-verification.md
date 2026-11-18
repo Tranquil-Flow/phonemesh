@@ -1,5 +1,44 @@
 # Android qualification record
 
+## v0.1.3 G3j relayed Ask/Leave body codec, 2026-11-18 — locally qualified, not live integration
+
+**Codec only.** `GroupRelayedControl` implements the approved seven-byte ops 10/11 bodies. No existing production
+source, `GroupBody.allowed`, sending/receiving path, UI, persistence or crypto algorithm changed. The codec checks
+exact size/version/op, representable roster index and the same nonzero/nonexhausted unsigned epoch range as private
+Ask/Leave. Authentication, actual roster/admin/target binding, epoch relation, once-per-epoch response, expiry and
+app outbox effects remain caller obligations for the next live-integration slice.
+
+- Observed compile-valid same-API no-op RED: **15 assertion failures / 1 pass** in the new 16-test class, all own-frame
+  assertions; **52/52 existing sibling controls passed**. This is not a sealed-predecessor API claim. No live source
+  swap/restoration runner was used; the original exit-1 receipt remains preserved.
+- Focused **68/68 GREEN**: new codec 16, BoxKey 27, EnvelopeRetry 25. Exact Python `struct` vectors are a second
+  implementation by the same author, not independent review. Coverage includes all truncations/trailing bytes,
+  every other opcode/version, invalid indices/epochs, unsigned high-bit epochs, array isolation, private-control
+  separation and deterministic malformed-input/canonical round trips.
+- **14/14 isolated copied-source mutation controls caught**, each by its intended own-frame behavioral assertion,
+  with GREEN16 before/restored and unchanged live sources. These cover length/version/op, both index/epoch bounds,
+  unsigned conversion, endian/kind confusion and version/target/epoch encoding corruption. No compiler/setup failure
+  counts as a catch. Parent source review found no blocker for this codec scope; no independent crypto sign-off.
+- Actual hash-matched prepared-v0.1.2 `GroupMember` consumed current codec + real `GroupWriter` ops 10/11 (**96 B each**)
+  without events/new receipts, rejected replays, then accepted ordinary text and its receipt on the same sender chain.
+  The producer uses the existing test-only raw-op seam: **not GroupPost-produced live Ask/Leave**, routing or state-transition proof.
+- Actual maintained **scripts/check.sh returned CHECK_OK**, including `checkApkSize`: Python **337**, full core
+  **944/944**, standalone hub-network guard **6**, Linux bridge **24**, build/lint/network/demo/hub distribution;
+  **1,678 JUnit variant records / 208 reports / 1,414 unique class/method IDs**, no failures/errors/skips. Raw task
+  provenance preserves executed/up-to-date distinctions; these are not 1,678 newly executed distinct methods.
+  Source/policy pins matched before/after; no owned descendants survived. Final documentation edits alone follow this gate.
+- Unsigned release APKs remain **16,811,384 B arm64 / 14,801,682 B v7**, **byte-identical to G3i**, cumulative
+  **14,884 B per ABI** over unchanged prepared-v0.1.2. No ceiling, baseline, signed policy or whole-release allowance
+  changed. Five freshly sealed APKs are retained; the minified-debug app APKs changed, while the test APK did not.
+  No fresh emulator/instrumentation run is claimed for G3j; the previous G3i Android88 evidence remains historical.
+- External receipts: `g3j-red-admission.json`, `g3i-core-g3j-green-v1-20261118T094842.378725Z/`,
+  `g3j-isolated-hunt-v1/`, `g3j-compatibility-v1/`, `g3j-parent-source-review.md`,
+  `g3j-final-qualification-v1/`, `g3j-app-build-final/`. No push, signing, phone/radio, microphone or physical qualification.
+
+Next: wire actual automatic/manual relayed Ask, bounded original-envelope/list response and non-contact Leave through
+core/app persistence/outbox, preserving private-contact fallbacks and the approved authority/epoch/lifetime rules.
+The codec does not close that feature, G2–G5 or v0.1.3 release qualification.
+
 ## v0.1.3 G3i bounded envelope retries, 2026-11-18 — locally qualified
 
 **Host/emulator development qualification complete; not a signed upgrade or physical release.**
